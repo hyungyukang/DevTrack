@@ -982,7 +982,12 @@ async function viewTask({ rest }) {
         <span>업데이트 ${ago(t.updated_at)}</span>
       </div>
       ${links.length ? html`<div class="th-links">${icon('link')} 관련 작업 ${links.map((l) => html`<a class="link-chip" href="#/task/${l.id}"><span class="sdot tone-${pick(STATUS, l.status, 'queued').tone}"></span>${l.id} · ${pick(TYPES, l.type).label} · ${l.title}</a>`)}</div>` : ''}
+    </div>
+    <div class="th-actions">
+      ${ACTIVE.includes(t.status) ? html`<button class="btn btn-sm" data-action="task-cancel" data-task="${t.id}">${icon('x-circle')} 작업 취소</button>` : ''}
+      <button class="btn btn-sm btn-ghost btn-danger-ghost" data-action="task-delete" data-task="${t.id}">${icon('trash')} 삭제</button>
     </div></div>
+    ${t.status === 'cancelled' && t.cancelled ? html`<div class="alert alert-gray">${icon('slash')}<div class="alert-body"><b>취소된 작업입니다</b> · ${authorName(t.cancelled.by)} · ${ago(t.cancelled.at)}${t.cancelled.reason ? html`<p>사유: ${t.cancelled.reason}</p>` : ''}</div></div>` : ''}
     ${pend.length && tab !== 'approvals' ? html`<div class="alert alert-amber">${icon('bell')}<div class="alert-body"><b>승인이 필요한 항목 ${pend.length}건</b><p>${pend.map((a) => a.title).join(' · ')}</p></div><a class="btn btn-sm" href="#/task/${t.id}/approvals">확인하기</a></div>` : ''}
     ${nowCard(t)}
     <nav class="tabs">${tabs.map(([k, label, n, hot]) => html`<a class="${tab === k ? 'active' : ''}" href="#/task/${t.id}${k === 'overview' ? '' : '/' + k}">${label}${n != null ? html`<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`)}</nav>
@@ -1588,6 +1593,98 @@ async function actDecide(btn) {
   }
 }
 
+// ---------------------------------------------------------------------- 작업 취소 · 삭제 (확인 창을 거친다)
+function openCancelTask(id) {
+  const t = state.tasks.get(id);
+  if (!t) return;
+  const pend = t.approvals.filter((a) => a.status === 'pending').length;
+  openModal({
+    title: `작업 취소 — ${t.id}`,
+    body: html`<p><b>${t.id} · ${t.title}</b> 을(를) 취소할까요?</p>
+      <ul class="m-list">
+        <li>작업 상태가 <b>취소</b>로 바뀌고, 진행 중 목록에서 빠집니다. 기록과 결과물은 그대로 남습니다.</li>
+        ${pend ? html`<li>결정을 기다리던 승인 요청 <b>${pend}건</b>은 철회되어 알림에서 사라집니다.</li>` : ''}
+        <li>Claude 에게 이 작업을 중단하라는 알림이 갑니다.</li>
+      </ul>
+      <label class="field"><span>취소 사유 (선택)</span><textarea id="cancel-reason" placeholder="예: 다른 작업(T-0002)으로 대체"></textarea></label>
+      <div class="m-actions"><button class="btn btn-reject" data-action="task-cancel-go" data-task="${t.id}">${icon('x-circle')} 작업 취소하기</button>
+        <span class="hint">${state.mode === 'live' ? '' : '정적 모드: Claude 에게 보낼 메시지가 만들어집니다'}</span></div>`,
+  });
+  setTimeout(() => $('#cancel-reason')?.focus(), 0);
+}
+
+async function actCancelTask(btn) {
+  const id = btn.dataset.task;
+  const t = state.tasks.get(id);
+  const reason = $('#cancel-reason')?.value.trim() || '';
+  if (state.mode !== 'live') {
+    const cmd = `devtrack cancel ${id}${reason ? ' -m ' + shellQuote(reason) : ''}`;
+    const msg = `[DevTrack 작업 취소] ${id} "${t?.title || ''}"${reason ? `\n사유: ${reason}` : ''}\n\n이 작업을 취소로 기록하고(${cmd}) 진행을 멈춰 주세요.`;
+    openModal({ title: `작업 취소 — Claude에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}` });
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`api/tasks/${id}/cancel`, { reason });
+    closeModal();
+    state.tasks.delete(id);
+    toast({ title: `${id} 작업을 취소했습니다`, meta: 'Claude 에게 중단 알림이 전달됩니다', tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: '취소하지 못했습니다', meta: e.message, tone: 'red' });
+    btn.disabled = false;
+  }
+}
+
+function openDeleteTask(id) {
+  const t = state.tasks.get(id);
+  if (!t) return;
+  const pend = t.approvals.filter((a) => a.status === 'pending').length;
+  const links = linksOf(t.id);
+  openModal({
+    title: `작업 삭제 — ${t.id}`,
+    body: html`<div class="alert alert-red">${icon('alert')}<div class="alert-body"><b>삭제하면 되돌릴 수 없습니다.</b>
+        <p>기록을 남기고 멈추기만 하려면 삭제 대신 <b>작업 취소</b>를 쓰세요.</p></div></div>
+      <p><b>${t.id} · ${t.title}</b> 의 다음 내용이 모두 지워집니다.</p>
+      <ul class="m-list">
+        <li>진행 기록 ${t.log.length}건, 문제 ${t.issues.length}건</li>
+        <li>결과물 ${t.artifacts.length}개 (파일 포함)</li>
+        <li>승인 요청 ${t.approvals.length}건${pend ? ` (결정 대기 ${pend}건)` : ''}</li>
+        ${links.length ? html`<li>관련 작업 연결 ${links.map((l) => l.id).join(', ')} 해제</li>` : ''}
+      </ul>
+      <label class="field"><span>확인을 위해 작업 ID <b class="mono">${t.id}</b> 를 입력하세요</span>
+        <input type="text" id="del-confirm" autocomplete="off" spellcheck="false" placeholder="${t.id}"></label>
+      <div class="m-actions"><button class="btn btn-danger" id="del-go" data-action="task-delete-go" data-task="${t.id}" disabled>${icon('trash')} 영구 삭제</button>
+        <span class="hint">${state.mode === 'live' ? '' : '정적 모드: Claude 에게 보낼 메시지가 만들어집니다'}</span></div>`,
+  });
+  setTimeout(() => $('#del-confirm')?.focus(), 0);
+}
+
+async function actDeleteTask(btn) {
+  const id = btn.dataset.task;
+  const typed = $('#del-confirm')?.value.trim().toUpperCase();
+  if (typed !== id) { toast({ title: '작업 ID 를 정확히 입력해주세요', tone: 'orange' }); return; }
+  const t = state.tasks.get(id);
+  if (state.mode !== 'live') {
+    const cmd = `devtrack delete ${id} --yes`;
+    const msg = `[DevTrack 작업 삭제] ${id} "${t?.title || ''}"\n사용자가 삭제를 확인했습니다 (되돌릴 수 없음).\n\n이 작업을 삭제하고(${cmd}) 진행 중이었다면 멈춰 주세요.`;
+    openModal({ title: `작업 삭제 — Claude에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 삭제할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 실행', cmd)}` });
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`api/tasks/${id}/delete`, { confirm: typed });
+    closeModal();
+    state.tasks.delete(id);
+    toast({ title: `${id} 작업을 삭제했습니다`, tone: 'green' });
+    if (parseRoute().rest[0] === id) location.hash = '#/tasks';
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: '삭제하지 못했습니다', meta: e.message, tone: 'red' });
+    btn.disabled = false;
+  }
+}
+
 async function actComment(btn) {
   const task = btn.dataset.task;
   const ta = document.getElementById(`fb-${task}`);
@@ -1626,6 +1723,10 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'task-cancel': return openCancelTask(el.dataset.task);
+    case 'task-cancel-go': return actCancelTask(el);
+    case 'task-delete': return openDeleteTask(el.dataset.task);
+    case 'task-delete-go': return actDeleteTask(el);
     case 'choices': {
       const box = el.closest('.choice-box');
       $$('input[type="checkbox"]', box).forEach((i) => { i.checked = el.dataset.mode === 'all'; });
@@ -1689,6 +1790,11 @@ function bindEvents() {
     if (ev.target.closest('.sidebar a')) document.body.classList.remove('nav-open');
     const row = ev.target.closest('tr[data-href]');
     if (row && !ev.target.closest('a')) location.hash = row.dataset.href;
+  });
+  document.addEventListener('input', (ev) => {
+    if (ev.target.id !== 'del-confirm') return;
+    const go = $('#del-go');
+    if (go) go.disabled = ev.target.value.trim().toUpperCase() !== go.dataset.task;
   });
   document.addEventListener('change', (ev) => {
     const el = ev.target.closest('[data-change]');

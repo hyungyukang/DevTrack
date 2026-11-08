@@ -55,6 +55,10 @@ devtrack apply $TID $AID
 
 # 7. 완료
 devtrack done $TID -m "HIP 포팅 완료, 커밋 abc1234"
+
+# (참고) 취소 · 삭제 — 사용자가 요청할 때만
+devtrack cancel $TID -m "사유"        # 기록은 남기고 취소 (대기 중인 승인 요청은 철회)
+devtrack delete $TID                  # 완전히 삭제 — 작업 ID 를 다시 입력해 확인 (사용자가 이미 확인했으면 --yes)
 ```
 
 ## 작업 유형별 요령
@@ -149,6 +153,9 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
   (선택 항목이 있는 요청이면 메시지에 `선택: R1, R3` 이 있고, 명령에 `--select R1 R3` 가 붙어 있음)
 - `[DevTrack 메시지]` → `devtrack comment <TID> "..."` 로 기록 후 반영
 - `[DevTrack 새 작업 지시]` → `devtrack new ...` 로 등록 후 진행
+- `[DevTrack 작업 취소]` → `devtrack cancel <TID> -m "사유"` 후 그 작업 중단
+- `[DevTrack 작업 삭제]` → 사용자가 웹에서 작업 ID 를 입력해 확인한 것이므로 `devtrack delete <TID> --yes` 후 그 작업 중단
+- 웹(로컬 서버)에서 취소 · 삭제하면 `devtrack inbox` 에 `[취소]` · `[삭제]` 로 표시된다 → 그 작업을 바로 멈춘다
 
 ## CLAUDE.md 에 넣을 내용
 
@@ -165,6 +172,7 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
 - 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.
 - DevTrack 작업의 결과를 저장소에 반영할 때는 git commit/push 를 직접 하지 않고 `devtrack request <TID> "..." --commit -m "..."` 로
   승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
-- 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` 메시지를 보내면
-  각각 `devtrack decide` / `devtrack comment` / `devtrack new` 로 먼저 기록한 뒤 진행한다.
+- 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
+  각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
 ```

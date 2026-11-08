@@ -951,3 +951,20 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
   .guide-toc[open] summary::before { content: '▾ '; }
   .guide-body { padding: 4px 18px 20px; }
 }
+
+/* ---------------------------------------------------------------- 작업 취소 · 삭제 */
+.th-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.btn-danger-ghost { color: var(--red); }
+.btn-danger-ghost:hover { background: var(--red-soft); color: var(--red); }
+.btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 88%, #000); }
+.btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+.alert-gray { background: var(--gray-soft); color: var(--text-2); }
+.modal .m-list { margin: 0 0 14px; padding-left: 1.2em; color: var(--text-2); font-size: 13.5px; }
+.modal .m-list li { margin: 4px 0; }
+.modal .field { display: block; margin-bottom: 12px; }
+.modal .field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.modal .field input, .modal .field textarea { width: 100%; }
+.modal .m-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.modal .m-actions .hint { font-size: 12px; color: var(--text-3); }
+@media (max-width: 700px) { .th-actions { order: -1; width: 100%; justify-content: flex-end; } }

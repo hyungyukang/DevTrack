@@ -289,6 +289,12 @@ def _print_inbox(items):
             print(_indent("→ devtrack start {task_id}".format(**it)))
         elif it["type"] == "comment":
             print("[메시지] {task_id} {id}: {message}".format(**it))
+        elif it["type"] == "cancelled":
+            print("[취소] {task_id} {title} — 사용자가 작업을 취소했습니다. 이 작업은 중단하세요.".format(**it))
+            if it.get("reason"):
+                print(_indent("사유: " + it["reason"]))
+        elif it["type"] == "deleted":
+            print("[삭제] {task_id} {title} — 사용자가 작업을 삭제했습니다. 이 작업은 중단하고 더 기록하지 마세요.".format(**it))
         else:
             print("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
             if it.get("selected"):
@@ -341,6 +347,35 @@ def cmd_inbox(store, args):
         print("처리할 사용자 입력이 없습니다.")
         return 0
     _print_inbox(items)
+    return 0
+
+
+def cmd_cancel(store, args):
+    t = store.cancel_task(args.task, reason=args.message or "", author=args.author)
+    n = len((t["log"][-1].get("meta") or {}).get("withdrawn") or [])
+    _out(args, t, "{} 취소됨{}".format(t["id"], " (승인 요청 {}건 철회)".format(n) if n else ""))
+
+
+def cmd_delete(store, args):
+    t = store.load(args.task)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise DevTrackError("삭제는 확인이 필요합니다. 터미널에서 직접 실행하거나, "
+                                "사용자가 삭제를 확인한 경우에만 --yes 를 붙이세요")
+        pend = sum(1 for a in t.get("approvals", []) if a["status"] == "pending")
+        _info("삭제할 작업: {} {} ({}, {})".format(t["id"], t["title"], TASK_TYPES.get(t["type"]),
+                                                STATUSES.get(t["status"])))
+        _info("  기록 {}건 · 결과물 {}개 · 승인 요청 {}건 (대기 {}) — 결과물 파일까지 모두 지워지며 되돌릴 수 없습니다".format(
+            len(t.get("log", [])), len(t.get("artifacts", [])), len(t.get("approvals", [])), pend))
+        _info("  기록을 남기려면 삭제 대신 `devtrack cancel {}` 을 쓰세요.".format(t["id"]))
+        sys.stderr.write("정말 삭제하려면 작업 ID({})를 그대로 입력하세요: ".format(t["id"]))
+        sys.stderr.flush()
+        answer = sys.stdin.readline().strip().upper()
+        if answer != t["id"]:
+            _info("삭제하지 않았습니다 (입력한 ID 가 다름)")
+            return 1
+    r = store.delete_task(t["id"], author=args.author)
+    _out(args, r, "{} 삭제됨{}".format(r["id"], " (연결 해제: {})".format(", ".join(r["unlinked"])) if r["unlinked"] else ""))
     return 0
 
 
@@ -614,6 +649,14 @@ def build_parser():
                     help="아직 보지 않은 입력이 생길 때까지 기다렸다가 출력 (에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응)")
     sp.add_argument("--timeout", type=int, default=0, help="--wait 최대 대기 초 (0 = 무제한, 시간 초과 시 exit 3)")
     sp.add_argument("--interval", type=int, default=3, help="--wait 확인 간격 초")
+
+    sp = add("cancel", cmd_cancel, "작업 취소 (기록은 남김, 대기 중인 승인 요청은 철회)")
+    sp.add_argument("task")
+    sp.add_argument("-m", "--message", help="취소 사유")
+
+    sp = add("delete", cmd_delete, "작업 삭제 — 기록과 결과물 파일을 완전히 지움 (되돌릴 수 없음, 작업 ID 를 다시 입력해 확인)")
+    sp.add_argument("task")
+    sp.add_argument("--yes", action="store_true", help="확인 질문 없이 삭제 (사용자가 이미 확인한 경우에만)")
 
     sp = add("done", cmd_done, "작업 완료")
     sp.add_argument("task")

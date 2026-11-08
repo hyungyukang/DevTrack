@@ -385,8 +385,9 @@ class Store:
             repo_info["url"] = repo_url
         self.ensure()
         with self.locked():
-            ids = self.task_ids()
-            tid = "T-{:04d}".format((int(ids[-1][2:]) if ids else 0) + 1)
+            used = [int(i[2:]) for i in self.task_ids()]
+            used += [int(d["id"][2:]) for d in self.deleted_tasks() if re.match(r"^T-\d+$", d.get("id", ""))]
+            tid = "T-{:04d}".format(max(used, default=0) + 1)
             related = self._check_related(related, tid)
             ts = now()
             task = {
@@ -475,7 +476,10 @@ class Store:
                 if status not in STATUSES:
                     raise DevTrackError("알 수 없는 상태: {} ({})".format(status, ", ".join(STATUSES)))
                 old = t["status"]
-                if old != status:
+                if old != status and status == "cancelled":
+                    self._apply_cancel(t, message or "", author)
+                    message = None
+                elif old != status:
                     t["status"] = status
                     if status == "done":
                         t["progress"] = 100
@@ -492,6 +496,70 @@ class Store:
             if message:
                 self._log(t, message, kind=kind, author=author)
             return t
+
+    # ------------------------------------------------------------------ 취소 / 삭제
+    @property
+    def deleted_path(self):
+        # 점(.)으로 시작하므로 publish / 웹 서버에서 제외된다
+        return os.path.join(self.root, ".deleted.json")
+
+    def deleted_tasks(self):
+        try:
+            with open(self.deleted_path, encoding="utf-8") as fh:
+                return json.load(fh).get("deleted", [])
+        except (OSError, ValueError):
+            return []
+
+    def _apply_cancel(self, t, reason, author):
+        old = t["status"]
+        withdrawn = []
+        for ap in t.get("approvals", []):
+            if ap["status"] == "pending":
+                ap.update({"status": "withdrawn", "decided_at": now(), "decided_by": author,
+                           "comment": "작업 취소로 철회", "agent_ack": True})
+                withdrawn.append(ap["id"])
+        t["status"] = "cancelled"
+        t["cancelled"] = {"at": now(), "by": author, "reason": reason,
+                          "agent_ack": author != USER}  # 사용자가 취소하면 에이전트에게 알린다
+        msg = "작업 취소" + (": " + reason if reason else "")
+        if withdrawn:
+            msg += " (승인 요청 {} 철회)".format(", ".join(withdrawn))
+        self._log(t, msg, kind="status", author=author,
+                  meta={"from": old, "to": "cancelled", "withdrawn": withdrawn})
+
+    def cancel_task(self, tid, reason="", author=None):
+        with self.edit(tid) as t:
+            if t["status"] == "cancelled":
+                raise DevTrackError("이미 취소된 작업입니다: {}".format(t["id"]))
+            self._apply_cancel(t, (reason or "").strip(), author)
+            return t
+
+    def delete_task(self, tid, author=None):
+        """작업과 결과물 파일을 완전히 지운다 (되돌릴 수 없음). 다른 작업의 연결도 정리한다."""
+        tid = normalize_task_id(tid)
+        touched = []
+        with self.locked():
+            t = self.load(tid)
+            for other in self.all_tasks():
+                if other["id"] != tid and tid in (other.get("related") or []):
+                    other["related"] = [r for r in other["related"] if r != tid]
+                    self._log(other, "관련 작업 {} 이(가) 삭제되어 연결을 해제했습니다".format(tid), kind="info",
+                              author=author)
+                    other["updated_at"] = now()
+                    self._write_json(os.path.join(self.tasks_dir, other["id"], "task.json"), other)
+                    touched.append(other["id"])
+            shutil.rmtree(self.task_dir(tid))
+            items = [d for d in self.deleted_tasks() if d.get("id") != tid]
+            items.append({"id": tid, "title": t["title"], "type": t["type"], "at": now(), "by": author,
+                          "ack": author != USER})
+            self._write_json(self.deleted_path, {"deleted": items})
+            self.rebuild_index()
+        if self.publish_dir:
+            shutil.rmtree(os.path.join(self.publish_dir, "data", "tasks", tid), ignore_errors=True)
+            for oid in touched:
+                self._sync_publish(oid)
+            self._sync_publish()
+        return {"id": tid, "title": t["title"], "artifacts": len(t.get("artifacts", [])), "unlinked": touched}
 
     def add_log(self, tid, message, kind="info", detail=None, author=None):
         with self.edit(tid) as t:
@@ -913,6 +981,11 @@ class Store:
         items = []
         to_ack = {}
         for t in self.all_tasks():
+            c = t.get("cancelled") or {}
+            if t["status"] == "cancelled" and c.get("agent_ack") is False:
+                items.append({"type": "cancelled", "task_id": t["id"], "title": t["title"],
+                              "reason": c.get("reason", ""), "ts": c.get("at")})
+                to_ack.setdefault(t["id"], []).append(("C", t["id"]))
             if t["status"] == "queued":
                 items.append({"type": "new_task", "task_id": t["id"], "title": t["title"],
                               "instruction": t.get("instruction", ""), "task_type": t["type"],
@@ -929,14 +1002,25 @@ class Store:
                                   "comment": ap.get("comment", ""), "has_action": bool(ap.get("action")),
                                   "selected": ap.get("selected"), "ts": ap.get("decided_at")})
                     to_ack.setdefault(t["id"], []).append(("A", ap["id"]))
+        deleted = [d for d in self.deleted_tasks() if d.get("ack") is False]
+        for d in deleted:
+            items.append({"type": "deleted", "task_id": d["id"], "title": d.get("title", ""), "ts": d.get("at")})
         if ack:
             for tid, refs in to_ack.items():
                 with self.edit(tid) as t:
                     for typ, rid in refs:
                         if typ == "L":
                             self._find(t["log"], rid, "기록")["ack"] = True
+                        elif typ == "C":
+                            t["cancelled"]["agent_ack"] = True
                         else:
                             self._find(t["approvals"], rid, "승인 요청")["agent_ack"] = True
+            if deleted:
+                with self.locked():
+                    rest = self.deleted_tasks()
+                    for d in rest:
+                        d["ack"] = True
+                    self._write_json(self.deleted_path, {"deleted": rest})
         items.sort(key=lambda x: x.get("ts") or "")
         return items
 
@@ -947,6 +1031,8 @@ class Store:
             return "task:" + it["task_id"]
         if it["type"] == "comment":
             return "comment:{}:{}".format(it["task_id"], it["id"])
+        if it["type"] in ("cancelled", "deleted"):
+            return "{}:{}:{}".format(it["type"], it["task_id"], it.get("ts") or "")
         return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
 
     def _seen_path(self, agent):

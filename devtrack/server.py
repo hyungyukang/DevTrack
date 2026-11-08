@@ -8,6 +8,8 @@ API
   POST /api/tasks                               {title, instruction, type, agent, repo, branch, priority}
   POST /api/tasks/<T>/comments                  {message}
   POST /api/tasks/<T>/approvals/<A>/decision    {decision: approve|changes|reject, comment, selected?: [ID]}
+  POST /api/tasks/<T>/cancel                     {reason}
+  POST /api/tasks/<T>/delete                     {confirm: "<작업 ID>"}  (ID 가 일치해야 삭제)
 """
 
 import http.server
@@ -120,6 +122,16 @@ def make_handler(store, web_root, verbose=False):
                     if m:
                         e = store.add_user_comment(m.group(1), body.get("message") or "")
                         return self._json({"ok": True, "entry": e}, 201)
+                    m = re.match(r"^/api/tasks/(T-\d+)/cancel$", path)
+                    if m:
+                        t = store.cancel_task(m.group(1), reason=body.get("reason") or "", author=USER)
+                        return self._json({"ok": True, "task": {"id": t["id"], "status": t["status"]}})
+                    m = re.match(r"^/api/tasks/(T-\d+)/delete$", path)
+                    if m:
+                        if str(body.get("confirm") or "").strip().upper() != m.group(1):
+                            raise DevTrackError("확인용 작업 ID 가 일치하지 않아 삭제하지 않았습니다")
+                        r = store.delete_task(m.group(1), author=USER)
+                        return self._json({"ok": True, "deleted": r})
                     m = re.match(r"^/api/tasks/(T-\d+)/approvals/(A-\d+)/decision$", path)
                     if m:
                         selected = body.get("selected")
