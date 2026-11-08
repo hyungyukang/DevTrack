@@ -12,9 +12,11 @@ Produces a reviewer's report on another developer's pull request: what the PR do
 This is the reviewer-side counterpart of `pr-review-report` (which handles comments on the user's own PRs). It reuses that skill's email script and config.
 
 Language:
-- The report is written in Korean.
+- **The whole report is written in Korean** — every heading, table, finding title, and the developer sections too (변경 사항, 상세: 문제 · 왜 중요한가 · 제안 · 확신도, 테스트 · 검증 제안, 종합 의견). The developer parts are technical, but still Korean sentences.
+- The findings JSON is Korean as well: `title`, `plain`, `summary`, `verdict_reason`.
+- Keep in their original form only: code, identifiers, file paths, commands, config keys, numbers with units, and text you quote from code, docs or comments (a quoted English sentence stays English, followed by a short Korean explanation). Technical terms may be written as 한국어(원어) at first use, e.g. "부분 셀(partial cell)".
 - Instructions may come in Korean or English. Reply in the language of the user's latest message.
-- Review comments for GitHub are drafted in English unless the PR conversation is in another language.
+- Only the GitHub review comments (Phase 4–5) are drafted in English, unless the PR conversation is in another language.
 
 Arguments: $ARGUMENTS
 - **Required: a GitHub PR URL** `https://github.com/<owner>/<repo>/pull/<number>` (trailing `/files`, `/commits`, `#...` are fine). Parse owner, repo and number.
@@ -108,7 +110,7 @@ State / findings JSON:
   "verdict": "request_changes",
   "summary": "<한 줄 결론 + 꼭 고칠 것을 쉬운 말 2~3문장으로>",
   "findings": [
-    {"id": "R1", "severity": "blocker", "title": "<기술적 한 줄 요약>",
+    {"id": "R1", "severity": "blocker", "title": "<한국어 한 줄 요약 (기술적이어도 한국어로)>",
      "plain": "<쉽게 말하면: 비전문가용 1~2문장>", "file": "src/boundary.cpp", "line": 88,
      "category": "정확성", "confidence": "high", "status": "open", "head_sha": "<sha>"}
   ]
@@ -129,6 +131,7 @@ The report is read by the PR's developers **and by people who do not read this c
 - Severity is always shown in Korean with the English term: 🔴 반드시 수정 (Blocker), 🟠 수정 권장 (Major), 🟡 개선 제안 (Minor), ⚪ 사소함 (Nit), 🔵 질문 (Question). Confidence: 높음 / 중간 / 낮음.
 - Do not overstate: medium/low-confidence findings say "~일 수 있습니다", and questions are written as questions.
 - Keep the developer part precise: code, file:line, exact conditions, evidence. Plain language is added on top, never instead of it.
+- Precise does not mean English: write the developer part in Korean too (see "Language"), keeping identifiers and quoted text as they are.
 
 ## Phase 3: Report
 
@@ -143,7 +146,7 @@ Title: `PR #<n> 코드 리뷰 – <owner>/<repo> – <date>`.
    - The severity legend table `중요도 | 뜻` (the five levels above, each with a one-line meaning).
 2. **검토 결과 요약**: table `# | 중요도 | 쉬운 설명 | 위치 | 분류 | 확신도` (쉬운 설명 = the `plain` idea in one short line).
 3. **변경 사항** (개발자용): 3–6 sentences on what the PR does and why (from the description, commits and code) and whether the implementation matches the stated intent; then changes grouped by component or purpose, not file by file — a table `영역 | 파일 | +/− | 변경 내용` — and a few sentences on the key design decisions.
-4. **상세 (개발자용)**: one section per finding, headed `### R1. <제목> — 🔴 반드시 수정`, with bullets:
+4. **상세 (개발자용)**: one section per finding, headed `### R1. <한국어 제목> — 🔴 반드시 수정`, with bullets (all in Korean):
    - **쉽게 말하면:** 1–2 plain sentences (the `plain` text).
    - **위치:** file:line on the head side, with a link.
    - **문제:** what is wrong, with the code evidence.
@@ -171,16 +174,19 @@ Write the report Markdown the way GitHub renders it (CommonMark + tables): pipe 
 - **Cloud**: publish as a document artifact; no email.
 - **DevTrack** (in addition to the above, local or remote):
   1. Always write `~/.pr-review/<owner>-<repo>/review-PR-<n>.md` (also locally) and the findings JSON.
-  2. Register both: `devtrack review <TID> review-PR-<n>.md [review-PR-<n>.pdf] -n "PR #<n> 리뷰 리포트" --findings review-PR-<n>.json` (full paths; add the PDF only if it exists). It prints the report's artifact ID(s), first one = the Markdown report. Then `devtrack check <TID> 3`.
-  3. Ask which findings to turn into PR comments:
+  2. Before registering, check the language: every heading and finding title in the report and the JSON must be Korean (see "Language"); fix anything that is not.
+  3. Register the report, its PDF and the findings in one command:
+     `devtrack review <TID> ~/.pr-review/<owner>-<repo>/review-PR-<n>.md --pdf -n "PR #<n> 리뷰 리포트" --findings ~/.pr-review/<owner>-<repo>/review-PR-<n>.json`
+     `--pdf` renders `review-PR-<n>.pdf` next to the Markdown (A4, Korean fonts, same look as the web) with a headless Chrome/Chromium and attaches both. It prints the artifact IDs, first one = the Markdown report. If it warns that no browser was found, the Markdown is still registered; tell the user the PDF was skipped and why. Then `devtrack check <TID> 3`.
+  4. Ask which findings to turn into PR comments:
      ```
      AID=$(devtrack request <TID> "PR #<n>: 코멘트를 작성할 항목을 골라주세요" -k review \
            --choices --choices-label "PR 코멘트를 작성할 항목" -a <report F-ID> \
            -d "<한 줄 결론> 제안: R1, R2. 고른 항목만 코멘트 초안을 만들어 다시 확인받습니다 — 아직 PR 에는 아무것도 게시하지 않았습니다.")
      ```
      `--choices` without IDs offers every open finding as a checkbox; Blocker and Major start checked. Then `devtrack step <TID> "사용자가 코멘트할 항목을 고르기를 기다리는 중" -p 70`.
-  4. End the chat message with: "DevTrack 웹의 **코드 리뷰** 화면에서 항목을 골라 진행하거나, 여기서 'R1, R3 코멘트 초안 써줘' 라고 하셔도 됩니다."
-  5. If the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web — unless a `devtrack inbox --wait` is already running in the background (web-instruction waiting mode), which also wakes on decisions.
+  5. End the chat message with: "DevTrack 웹의 **코드 리뷰** 화면에서 항목을 골라 진행하거나, 여기서 'R1, R3 코멘트 초안 써줘' 라고 하셔도 됩니다."
+  6. If the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web — unless a `devtrack inbox --wait` is already running in the background (web-instruction waiting mode), which also wakes on decisions.
 
 Then stop and wait.
 

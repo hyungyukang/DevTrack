@@ -78,7 +78,7 @@ TID=$(devtrack new "PR #42 코드 리뷰: <제목>" -t review --url https://gith
       --plan "PR 정보 · 변경사항 수집" "코드 검토" "리뷰 리포트 작성" "코멘트할 항목 선택 (사용자)" "코멘트 초안 작성 · 게시 승인" "PR 에 게시")
 
 # 1. 리포트 + 검토 항목 등록 → 웹의 '리뷰 결과 한눈에 보기'
-devtrack review $TID review-PR-42.md review-PR-42.pdf -n "PR #42 리뷰 리포트" --findings review-PR-42.json
+devtrack review $TID review-PR-42.md --pdf -n "PR #42 리뷰 리포트" --findings review-PR-42.json   # --pdf: PDF 도 만들어 첨부
 
 # 2. 코멘트할 항목을 사용자가 체크해서 고름 (값 없는 --choices = 열린 항목 전체, 반드시 수정 · 수정 권장은 미리 체크)
 AID=$(devtrack request $TID "PR #42: 코멘트를 작성할 항목을 골라주세요" -k review --choices \
@@ -113,6 +113,7 @@ devtrack done $TID -m "PR #42 리뷰 게시"
 - `severity`: `blocker`(반드시 수정) · `major`(수정 권장) · `minor`(개선 제안) · `nit`(사소함) · `question`(질문)
 - `status`: `open` · `fixed` · `commented`(PR 에 게시) · `dismissed`(제외) · `na`(해당 없음)
 - `verdict`: `approve` · `comment` · `request_changes`
+- **리포트 · 검토 항목은 모두 한국어로** 쓴다 (항목 제목, 개발자용 상세 포함). 코드 · 식별자 · 경로 · 인용문만 원문 그대로. GitHub 코멘트만 영어.
 - **리포트는 일반 사용자도 이해할 수 있게** 쓴다: 맨 앞에 한 줄 결론, 비개발자용 "한눈에 보기", 항목마다 `plain`(어떤 상황에서
   무엇이 잘못되는지), 전문 용어는 풀어서. 개발자용 상세(코드 · 위치 · 근거)는 그 뒤에 그대로 둔다.
 

@@ -160,8 +160,24 @@ def cmd_review(store, args):
             _out(args, rv, " ".join(x["id"] for x in f))
             return 0
     desc = _text(args.desc, args.desc_file)
+    paths = list(args.paths)
+    if args.pdf:
+        from . import pdf as pdfmod
+        have = {os.path.splitext(os.path.abspath(p))[0] for p in paths if p.lower().endswith(".pdf")}
+        for p in list(paths):
+            if os.path.splitext(p)[1].lower() not in (".md", ".markdown"):
+                continue
+            if os.path.splitext(os.path.abspath(p))[0] in have:
+                continue
+            try:
+                out = pdfmod.markdown_to_pdf(p)
+                _info("PDF 변환: {}".format(out))
+                paths.insert(paths.index(p) + 1, out)
+            except DevTrackError as e:
+                _info("경고: {}".format(e))
+                store.add_log(args.task, "리뷰 리포트 PDF 변환 실패", kind="warning", detail=str(e), author=args.author)
     arts = []
-    for i, path in enumerate(args.paths):
+    for i, path in enumerate(paths):
         title = args.title
         if title and i:
             title = "{} ({})".format(title, os.path.splitext(path)[1].lstrip(".").upper() or i + 1)
@@ -170,6 +186,13 @@ def cmd_review(store, args):
         _info("리뷰 리포트 등록: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
         arts.append(art)
     _out(args, arts, "\n".join(a["id"] for a in arts))
+    return 0
+
+
+def cmd_pdf(store, args):
+    from . import pdf as pdfmod
+    out = pdfmod.markdown_to_pdf(args.markdown, args.output, timeout=args.timeout)
+    _out(args, {"pdf": out}, out)
     return 0
 
 
@@ -519,6 +542,8 @@ def build_parser():
     sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록")
     sp.add_argument("task")
     sp.add_argument("paths", nargs="*", metavar="FILE", help="리뷰 리포트 파일 (md, pdf — 여러 개 가능)")
+    sp.add_argument("--pdf", action="store_true",
+                    help="Markdown 리포트를 PDF 로도 만들어 함께 등록 (같은 폴더에 .pdf 생성, 헤드리스 Chrome 필요)")
     sp.add_argument("--findings", metavar="JSON",
                     help="검토 결과 JSON: {pr, verdict, summary, findings:[{id, severity, title, plain, file, line, "
                          "category, confidence, status}]} (- 는 stdin). 다시 실행하면 상태만 갱신")
@@ -526,6 +551,11 @@ def build_parser():
     sp.add_argument("-k", "--kind")
     sp.add_argument("-d", "--desc")
     sp.add_argument("--desc-file", metavar="FILE")
+
+    sp = add("pdf", cmd_pdf, "Markdown 문서를 PDF 로 변환 (헤드리스 Chrome/Chromium, 한글 글꼴 포함)")
+    sp.add_argument("markdown", help="변환할 .md 파일")
+    sp.add_argument("-o", "--output", help="PDF 경로 (기본: 같은 폴더, 같은 이름 .pdf)")
+    sp.add_argument("--timeout", type=int, default=120)
 
     sp = add("latex", cmd_latex, "LaTeX 컴파일 → PDF 를 결과물로 기록 (실패하면 오류·로그 기록, exit 1)")
     sp.add_argument("task")

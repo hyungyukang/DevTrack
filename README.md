@@ -98,7 +98,8 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
 | `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `issue` / `resolve` | 문제 기록 / 해결 |
-| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록 |
+| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록, `--pdf` 로 PDF 도 만들어 첨부 |
+| `pdf` | Markdown 문서를 PDF 로 변환 (A4, 한글 글꼴, 웹과 같은 모양 — 헤드리스 Chrome/Chromium 사용, `DEVTRACK_CHROME` 으로 경로 지정) |
 | `latex` | LaTeX 컴파일 → 성공하면 PDF 를 빌드로 기록(쪽수, 정의 안 된 인용/참조, overfull 경고), 실패하면 오류 위치와 로그 기록. `--pdf` 로 다른 곳에서 만든 PDF 기록 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
 | `decide` / `comment` | 사용자 결정(`--select R1 R3`) · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
@@ -148,5 +149,5 @@ data/
 ## 개발
 
 - 프런트엔드: `web/js/app.js`(화면 · 라우팅 · 폴링), `web/js/viewers.js`(결과물 뷰어), `web/js/util.js`, `web/css/app.css`
-- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`
+- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py`(Markdown → PDF)
 - 외부 라이브러리는 `web/vendor/` 에 고정 버전으로 포함 (marked 12.0.2, DOMPurify 3.1.6, highlight.js 11.9.0)
