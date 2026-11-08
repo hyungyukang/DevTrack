@@ -726,9 +726,53 @@ class Store:
                           ref=bid, detail=detail or None, meta={"build": bid})
             return build
 
-    def add_artifact(self, tid, **kw):
+    def add_artifact(self, tid, replace_same_name=False, **kw):
+        """replace_same_name: 같은 작업 · 같은 분류에 같은 파일 이름의 결과물이 있으면 새 결과물을 만들지 않고
+        그 결과물의 새 버전으로 교체한다 (이전 파일은 versions 에 남김). 내용이 같으면 그대로 둔다."""
         with self.edit(tid) as t:
+            path = kw.get("path")
+            if replace_same_name and path and kw.get("copy", True):
+                name = kw.get("filename") or os.path.basename(path.rstrip("/"))
+                old = next((a for a in reversed(t.get("artifacts", []))
+                            if a.get("path") and a.get("filename") == name
+                            and a.get("category") == kw.get("category", "result")), None)
+                if old:
+                    return self._new_version(t, old, path, title=kw.get("title"),
+                                             description=kw.get("description"), author=kw.get("author"))
             return self._add_artifact(t, **kw)
+
+    def _new_version(self, t, art, path, title=None, description=None, author=None):
+        src = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(src):
+            raise DevTrackError("파일을 찾을 수 없습니다: {}".format(path))
+        cur = os.path.join(self.tasks_dir, t["id"], art["path"])
+        try:
+            with open(src, "rb") as a, open(cur, "rb") as b:
+                if a.read() == b.read():
+                    return dict(art, unchanged=True)
+        except OSError:
+            pass
+        n = art.get("version", 1)
+        stem = os.path.basename(art["path"])
+        old_rel = "artifacts/{}_v{}_{}".format(art["id"], n, stem[len(art["id"]) + 1:] if stem.startswith(art["id"] + "_") else stem)
+        if os.path.exists(cur):
+            os.replace(cur, os.path.join(self.tasks_dir, t["id"], old_rel))
+            art.setdefault("versions", []).append({
+                "version": n, "path": old_rel, "size": art.get("size"),
+                "created_at": art.get("updated_at") or art.get("created_at"),
+                "author": art.get("updated_by") or art.get("author")})
+        shutil.copyfile(src, cur)
+        _chmod(cur, 0o644)
+        art.update({"version": n + 1, "size": os.path.getsize(cur), "updated_at": now(),
+                    "updated_by": author or t.get("agent")})
+        if title:
+            art["title"] = title
+        if description:
+            art["description"] = description
+        label = "리뷰 리포트 갱신" if art.get("category") == "review" else "결과물 갱신"
+        self._log(t, "{} (v{}): {}".format(label, n + 1, art["title"]), kind="artifact", author=author,
+                  ref=art["id"], meta={"category": art.get("category"), "kind": art.get("kind"), "version": n + 1})
+        return art
 
     # ------------------------------------------------------------------ 코드 리뷰 검토 항목
     def set_review(self, tid, data, author=None):
@@ -1101,7 +1145,8 @@ class Store:
             for a in t.get("artifacts", []):
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
-                                                   "created_at", "author", "size", "description", "lang", "build")})
+                                                   "created_at", "author", "size", "description", "lang", "build",
+                                                   "version", "updated_at")})
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)

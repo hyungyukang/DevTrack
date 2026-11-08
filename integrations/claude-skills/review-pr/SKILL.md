@@ -178,6 +178,7 @@ Write the report Markdown the way GitHub renders it (CommonMark + tables): pipe 
   3. Register the report, its PDF and the findings in one command:
      `devtrack review <TID> ~/.pr-review/<owner>-<repo>/review-PR-<n>.md --pdf -n "PR #<n> 리뷰 리포트" --findings ~/.pr-review/<owner>-<repo>/review-PR-<n>.json`
      `--pdf` renders `review-PR-<n>.pdf` next to the Markdown (A4, Korean fonts, same look as the web) with a headless Chrome/Chromium and attaches both. It prints the artifact IDs, first one = the Markdown report. If it warns that no browser was found, the Markdown is still registered; tell the user the PDF was skipped and why. Then `devtrack check <TID> 3`.
+     Register once, after the language check. If you must revise the report afterwards (or on a rerun), edit the same file and run the same command again: a file with the same name becomes a new version of the same artifacts (F-IDs unchanged, old version kept), so no duplicates appear. Always use exactly `review-PR-<n>.md` — never add suffixes such as `-T-0002` or `-v2`.
   4. Ask which findings to turn into PR comments:
      ```
      AID=$(devtrack request <TID> "PR #<n>: 코멘트를 작성할 항목을 골라주세요" -k review \

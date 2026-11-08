@@ -132,10 +132,16 @@ def cmd_artifact(store, args, category=None):
         art = store.add_artifact(args.task, url=args.url, kind=args.kind or "link", **common)
     elif args.path:
         art = store.add_artifact(args.task, path=args.path, kind=args.kind,
-                                 copy=not getattr(args, "no_copy", False), **common)
+                                 copy=not getattr(args, "no_copy", False),
+                                 replace_same_name=getattr(args, "replace", False), **common)
     else:
         raise DevTrackError("파일 경로, --url, --git-diff 중 하나를 지정하세요")
-    _info("결과물 추가: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
+    if art.get("unchanged"):
+        _info("변경 없음: {} — {} (같은 내용이 이미 등록됨)".format(art["id"], art["title"]))
+    elif art.get("version", 1) > 1 and getattr(args, "replace", False):
+        _info("결과물 갱신: {} — {} (v{})".format(art["id"], art["title"], art["version"]))
+    else:
+        _info("결과물 추가: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
     _out(args, art, art["id"])
 
 
@@ -160,31 +166,40 @@ def cmd_review(store, args):
             _out(args, rv, " ".join(x["id"] for x in f))
             return 0
     desc = _text(args.desc, args.desc_file)
-    paths = list(args.paths)
-    if args.pdf:
-        from . import pdf as pdfmod
-        have = {os.path.splitext(os.path.abspath(p))[0] for p in paths if p.lower().endswith(".pdf")}
-        for p in list(paths):
-            if os.path.splitext(p)[1].lower() not in (".md", ".markdown"):
-                continue
-            if os.path.splitext(os.path.abspath(p))[0] in have:
-                continue
-            try:
-                out = pdfmod.markdown_to_pdf(p)
-                _info("PDF 변환: {}".format(out))
-                paths.insert(paths.index(p) + 1, out)
-            except DevTrackError as e:
-                _info("경고: {}".format(e))
-                store.add_log(args.task, "리뷰 리포트 PDF 변환 실패", kind="warning", detail=str(e), author=args.author)
+    is_md = lambda p: os.path.splitext(p)[1].lower() in (".md", ".markdown")  # noqa: E731
+    stem = lambda p: os.path.splitext(os.path.abspath(os.path.expanduser(p)))[0]  # noqa: E731
+    given_pdf = {stem(p) for p in args.paths if p.lower().endswith(".pdf")}
     arts = []
-    for i, path in enumerate(paths):
+
+    def register(path, title, description):
+        before = {a["id"] for a in store.load(args.task).get("artifacts", [])}
+        art = store.add_artifact(args.task, path=path, kind=args.kind, title=title, description=description,
+                                 category="review", author=args.author, replace_same_name=True)
+        if art.get("unchanged"):
+            _info("변경 없음: {} — {} (같은 내용이 이미 등록됨)".format(art["id"], art["title"]))
+        elif art["id"] in before:
+            _info("리뷰 리포트 갱신: {} — {} (v{})".format(art["id"], art["title"], art["version"]))
+        else:
+            _info("리뷰 리포트 등록: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
+        arts.append(art)
+        return art
+
+    for i, path in enumerate(args.paths):
         title = args.title
         if title and i:
             title = "{} ({})".format(title, os.path.splitext(path)[1].lstrip(".").upper() or i + 1)
-        art = store.add_artifact(args.task, path=path, kind=args.kind, title=title,
-                                 description=desc if i == 0 else None, category="review", author=args.author)
-        _info("리뷰 리포트 등록: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
-        arts.append(art)
+        art = register(path, title, desc if i == 0 else None)
+        # --pdf: Markdown 이 새로 올라오거나 바뀌었을 때만 PDF 를 만든다 (같은 내용이면 PDF 도 그대로)
+        if args.pdf and is_md(path) and stem(path) not in given_pdf and not art.get("unchanged"):
+            from . import pdf as pdfmod
+            try:
+                out = pdfmod.markdown_to_pdf(path)
+                _info("PDF 변환: {}".format(out))
+                register(out, "{} (PDF)".format(args.title) if args.title else None, None)
+            except DevTrackError as e:
+                _info("경고: {}".format(e))
+                store.add_log(args.task, "리뷰 리포트 PDF 변환 실패", kind="warning", detail=str(e),
+                              author=args.author)
     _out(args, arts, "\n".join(a["id"] for a in arts))
     return 0
 
@@ -573,8 +588,11 @@ def build_parser():
     sp.add_argument("--desc-file", metavar="FILE")
     sp.add_argument("--review", action="store_true", help="리뷰 섹션에 표시")
     sp.add_argument("--no-copy", action="store_true", help="복사하지 않고 경로만 기록 (웹에서는 볼 수 없음)")
+    sp.add_argument("--replace", action="store_true",
+                    help="같은 이름의 결과물이 있으면 새로 추가하지 않고 새 버전으로 교체 (이전 버전 보관)")
 
-    sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록")
+    sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록 "
+                                   "(같은 이름의 리포트를 다시 등록하면 새 버전으로 교체)")
     sp.add_argument("task")
     sp.add_argument("paths", nargs="*", metavar="FILE", help="리뷰 리포트 파일 (md, pdf — 여러 개 가능)")
     sp.add_argument("--pdf", action="store_true",

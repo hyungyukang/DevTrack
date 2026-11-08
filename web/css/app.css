@@ -968,3 +968,5 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .modal .m-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .modal .m-actions .hint { font-size: 12px; color: var(--text-3); }
 @media (max-width: 700px) { .th-actions { order: -1; width: 100%; justify-content: flex-end; } }
+.viewer-head .versions { font-size: 12px; color: var(--text-3); margin-top: 6px; display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; }
+.viewer-head .versions .icon { width: 13px; height: 13px; }

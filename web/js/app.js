@@ -461,7 +461,7 @@ function artRow(tid, a, { showTask = false } = {}) {
   const k = pick(ART_KIND, a.kind, 'file');
   return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
     <span class="ic">${icon(k.icon)}</span>
-    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ' · 리뷰' : ''} · ${ago(a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ' · 리뷰' : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
     ${icon('chev')}
   </a>`;
 }
@@ -473,7 +473,7 @@ function artCard(a) {
     <div class="thumb">${a.kind === 'image' && url ? html`<img src="${url}" alt="" loading="lazy">` : icon(k.icon)}</div>
     <div class="info">
       <div class="title" title="${a.title}">${a.title}</div>
-      <div class="meta"><span class="badge">${k.label}</span>${a.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}<span>${a.task_id}</span>${ago(a.created_at)}</div>
+      <div class="meta"><span class="badge">${k.label}</span>${a.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}${a.version > 1 ? html`<span class="badge tone-accent" title="이전 버전 ${a.version - 1}개 보관">v${a.version}</span>` : ''}<span>${a.task_id}</span>${ago(a.updated_at || a.created_at)}</div>
     </div>
   </a>`;
 }
@@ -1094,7 +1094,8 @@ function viewerHead(t, art) {
   const url = artifactUrl(t.id, art);
   return html`<div class="viewer-head">
     <div style="min-width:0"><h2>${art.title}</h2>
-      <div class="meta"><span class="badge">${icon(k.icon)}${k.label}</span>${art.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}<a href="#/task/${t.id}">${t.id} · ${t.title}</a><span>${authorName(art.author)} · ${ago(art.created_at)}</span>${art.size ? html`<span>${fmtBytes(art.size)}</span>` : ''}</div>
+      <div class="meta"><span class="badge">${icon(k.icon)}${k.label}</span>${art.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}${art.version > 1 ? html`<span class="badge tone-accent">v${art.version}</span>` : ''}<a href="#/task/${t.id}">${t.id} · ${t.title}</a><span>${authorName(art.updated_by || art.author)} · ${ago(art.updated_at || art.created_at)}</span>${art.size ? html`<span>${fmtBytes(art.size)}</span>` : ''}</div>
+      ${art.versions?.length ? html`<div class="versions">${icon('clock')} 이전 버전 ${[...art.versions].reverse().map((v) => html`<a href="${artifactUrl(t.id, v)}" target="_blank" rel="noopener" title="${fmtAbs(v.created_at)}">v${v.version} · ${fmtRel(v.created_at)}</a>`)}</div>` : ''}
     </div>
     <div class="actions">${url ? html`<a class="btn btn-sm" href="${url}" target="_blank" rel="noopener">${icon('external')} 새 탭</a>${art.path ? html`<a class="btn btn-sm" href="${url}" download>${icon('download')} 다운로드</a>` : ''}` : ''}</div>
   </div>`;
@@ -1120,7 +1121,7 @@ async function viewReviews({ rest }) {
         return html`
         <a class="review-item ${r === sel ? 'active' : ''}" href="#/reviews/${r.task_id}/${r.id}">
           <div class="title">${r.title}</div>
-          <div class="meta"><span class="badge">${pick(ART_KIND, r.kind, 'file').label}</span><span>${r.task_id}</span>${ago(r.created_at)}</div>
+          <div class="meta"><span class="badge">${pick(ART_KIND, r.kind, 'file').label}</span>${r.version > 1 ? html`<span class="badge tone-accent">v${r.version}</span>` : ''}<span>${r.task_id}</span>${ago(r.updated_at || r.created_at)}</div>
           <div class="meta">${r.task_title}</div>
           ${rs?.total ? html`<div class="meta">${rs.open ? sevChips(rs.by_severity) : html`<span class="badge tone-green">모두 처리됨</span>`}</div>` : ''}
         </a>`;

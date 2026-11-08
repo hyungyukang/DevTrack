@@ -83,6 +83,7 @@ TID=$(devtrack new "PR #42 코드 리뷰: <제목>" -t review --url https://gith
 
 # 1. 리포트 + 검토 항목 등록 → 웹의 '리뷰 결과 한눈에 보기'
 devtrack review $TID review-PR-42.md --pdf -n "PR #42 리뷰 리포트" --findings review-PR-42.json   # --pdf: PDF 도 만들어 첨부
+#    리포트를 고친 뒤 같은 명령을 다시 실행하면 같은 결과물(F-1, F-2)의 새 버전이 됨 — 파일 이름을 바꾸지 말 것
 
 # 2. 코멘트할 항목을 사용자가 체크해서 고름 (값 없는 --choices = 열린 항목 전체, 반드시 수정 · 수정 권장은 미리 체크)
 AID=$(devtrack request $TID "PR #42: 코멘트를 작성할 항목을 골라주세요" -k review --choices \
