@@ -1,0 +1,1212 @@
+// DevTrack 웹 앱 — 정적 호스팅(읽기 전용)과 로컬 서버(쓰기 가능) 모두에서 동작
+import {
+  html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
+  pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
+} from './util.js';
+import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
+
+const POLL_MS = 10000;
+const ACTIVE = ['in_progress', 'awaiting_approval', 'changes_requested', 'blocked', 'queued'];
+const DECISION = {
+  approve: { label: '승인', tone: 'green' },
+  changes: { label: '수정 요청', tone: 'orange' },
+  reject: { label: '거절', tone: 'red' },
+};
+
+const state = {
+  mode: 'static',
+  index: null,
+  loadError: null,
+  tasks: new Map(),
+  knownPending: null,
+  lastEventTs: 0,
+  details: new Map(),
+  taskSearch: '',
+};
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+// ====================================================================== 데이터
+async function getJSON(path) {
+  const r = await fetch(`${path}${path.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText || ''} — ${path}`);
+  return r.json();
+}
+
+async function detectMode() {
+  try {
+    const r = await fetch('api/health', { cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.mode === 'live') return 'live';
+    }
+  } catch { /* 정적 호스팅 */ }
+  return 'static';
+}
+
+async function loadTask(id) {
+  if (state.tasks.has(id)) return state.tasks.get(id);
+  const t = await getJSON(`data/tasks/${encodeURIComponent(id)}/task.json`);
+  state.tasks.set(id, t);
+  return t;
+}
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let j = {};
+  try { j = await r.json(); } catch { /* 빈 응답 */ }
+  if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+  return j;
+}
+
+// ====================================================================== 라우팅 / 렌더링
+function parseRoute() {
+  const h = location.hash.replace(/^#\/?/, '');
+  const [p, qs = ''] = h.split('?');
+  const parts = p.split('/').filter(Boolean).map(decodeURIComponent);
+  return { name: parts[0] || 'dashboard', rest: parts.slice(1), q: Object.fromEntries(new URLSearchParams(qs)) };
+}
+
+const VIEWS = {
+  dashboard: viewDashboard,
+  tasks: viewTasks,
+  task: viewTask,
+  approvals: viewApprovals,
+  reviews: viewReviews,
+  artifacts: viewArtifacts,
+  artifact: viewArtifact,
+  activity: viewActivity,
+  new: viewNewTask,
+};
+
+let renderSeq = 0;
+async function render({ keepScroll = false } = {}) {
+  const seq = ++renderSeq;
+  const route = parseRoute();
+  const main = $('#main');
+  saveDetails(main);
+  const y = window.scrollY;
+  updateChrome(route);
+  let view;
+  try {
+    if (!state.index) view = state.loadError ? viewLoadError(state.loadError) : html`<div class="empty">불러오는 중…</div>`;
+    else view = VIEWS[route.name] ? await VIEWS[route.name](route) : viewNotFound();
+  } catch (e) {
+    console.error(e);
+    view = viewError(e);
+  }
+  if (seq !== renderSeq) return;
+  main.innerHTML = String(view);
+  restoreDetails(main);
+  hydrate(main);
+  $('#update-pill').classList.remove('show');
+  window.scrollTo(0, keepScroll ? y : 0);
+}
+
+function hydrate(root) {
+  enhance(root);
+  $$('[data-av]', root).forEach((el) => {
+    const d = el.closest('details');
+    if (d && !d.open) {
+      d.addEventListener('toggle', () => d.open && mountArtifact(el));
+      return;
+    }
+    mountArtifact(el);
+  });
+  const search = $('#task-search', root);
+  if (search) {
+    search.value = state.taskSearch;
+    search.addEventListener('input', () => { state.taskSearch = search.value; filterTasks(); });
+    filterTasks();
+  }
+  const form = $('#new-task-form', root);
+  if (form) form.addEventListener('submit', submitNewTask);
+}
+
+function mountArtifact(el) {
+  if (el.dataset.mounted) return;
+  el.dataset.mounted = '1';
+  const [tid, fid] = el.dataset.av.split('/');
+  const art = state.tasks.get(tid)?.artifacts?.find((a) => a.id === fid);
+  if (!art) { el.innerHTML = '<div class="av-error">결과물을 찾을 수 없습니다</div>'; return; }
+  renderArtifactInto(el, tid, art);
+}
+
+function saveDetails(root) { $$('details[data-key]', root).forEach((d) => state.details.set(d.dataset.key, d.open)); }
+function restoreDetails(root) {
+  $$('details[data-key]', root).forEach((d) => { if (state.details.has(d.dataset.key)) d.open = state.details.get(d.dataset.key); });
+}
+
+function isEditing() {
+  const main = $('#main');
+  const a = document.activeElement;
+  if (a && main.contains(a) && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName) && a.id !== 'task-search') return true;
+  return $$('textarea, #new-task-form input[type="text"]', main).some((t) => t.value.trim());
+}
+
+function isRelevant(changed, prev, idx) {
+  if (!prev) return true;
+  const r = parseRoute();
+  if (r.name === 'task' || r.name === 'artifact') return changed.has(r.rest[0]);
+  if (r.name === 'reviews') {
+    const ids = (x) => x.reviews.map((v) => v.task_id + v.id).join();
+    return ids(prev) !== ids(idx) || changed.has(r.rest[0] || idx.reviews[0]?.task_id);
+  }
+  return true;
+}
+
+// ====================================================================== 폴링 / 알림
+async function poll({ force = false } = {}) {
+  const btn = $('#refresh-btn');
+  try {
+    const idx = await getJSON('data/index.json');
+    const prev = state.index;
+    const changed = new Set();
+    if (prev) {
+      const before = new Map(prev.tasks.map((t) => [t.id, t.updated_at]));
+      for (const t of idx.tasks) if (before.get(t.id) !== t.updated_at) changed.add(t.id);
+      for (const id of before.keys()) if (!idx.tasks.some((t) => t.id === id)) changed.add(id);
+    }
+    changed.forEach((id) => state.tasks.delete(id));
+    state.index = idx;
+    const hadError = !!state.loadError;
+    state.loadError = null;
+    processNotifications(idx);
+    const dataChanged = !prev || idx.generated_at !== prev.generated_at;
+    if (force || hadError || (dataChanged && isRelevant(changed, prev, idx))) {
+      if (!force && prev && isEditing()) {
+        $('#update-pill').classList.add('show');
+        updateChrome();
+      } else {
+        await render({ keepScroll: !!prev });
+      }
+    } else {
+      updateChrome();
+    }
+  } catch (e) {
+    state.loadError = e;
+    if (!state.index) await render();
+    else updateChrome();
+  }
+  if (btn && force) { btn.classList.remove('spin'); void btn.offsetWidth; btn.classList.add('spin'); }
+}
+
+const EVENT_TONE = { issue: 'orange', error: 'red', commit: 'green', artifact: '', status: 'green' };
+
+function processNotifications(idx) {
+  const pending = new Map(idx.notifications.map((n) => [`${n.task_id}/${n.approval_id}`, n]));
+  const latest = Math.max(0, ...idx.events.map((e) => tsNum(e.ts)));
+  if (state.knownPending) {
+    let shown = 0;
+    for (const [k, n] of pending) {
+      if (state.knownPending.has(k) || shown >= 3) continue;
+      shown++;
+      notify({
+        title: `승인 요청: ${n.title}`, meta: `${n.task_id} · ${n.task_title}`, tone: 'amber',
+        href: `#/task/${n.task_id}/approvals`, sticky: true,
+      });
+    }
+    idx.events
+      .filter((e) => tsNum(e.ts) > state.lastEventTs && e.kind !== 'approval')
+      .slice(0, 3)
+      .forEach((e) => {
+        const tone = e.kind === 'status' && e.meta?.to === 'blocked' ? 'red' : EVENT_TONE[e.kind] ?? '';
+        notify({ title: e.message, meta: `${e.task_id} · ${e.task_title}`, tone, href: `#/task/${e.task_id}` });
+      });
+  }
+  state.knownPending = new Set(pending.keys());
+  state.lastEventTs = Math.max(state.lastEventTs, latest);
+}
+
+function notify(opts) {
+  toast(opts);
+  if (LS.get('desktopNotify', false) && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const n = new Notification(opts.title, { body: opts.meta || '', tag: opts.href || opts.title });
+      n.onclick = () => { window.focus(); if (opts.href) location.hash = opts.href; n.close(); };
+    } catch { /* 일부 브라우저는 페이지에서 직접 생성 불가 */ }
+  }
+}
+
+function toast({ title, meta, tone = '', href, sticky = false }) {
+  const box = $('#toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${tone}`;
+  el.setAttribute('role', 'status');
+  el.innerHTML = html`<div class="body"><div class="title">${title}</div>${meta ? html`<div class="meta">${meta}</div>` : ''}${href ? html`<a class="go" href="${href}">확인하기 →</a>` : ''}</div><button class="x" aria-label="닫기">${icon('x')}</button>`.s;
+  el.querySelector('.x').onclick = () => el.remove();
+  el.querySelector('.go')?.addEventListener('click', () => el.remove());
+  box.appendChild(el);
+  setTimeout(() => el.remove(), sticky ? 20000 : 6000);
+  while (box.children.length > 4) box.firstChild.remove();
+}
+
+// ====================================================================== 상단바 / 사이드바
+function updateChrome(route = parseRoute()) {
+  const navName = { task: 'tasks', artifact: 'artifacts', new: 'new' }[route.name] || route.name;
+  $$('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.nav === navName));
+  const idx = state.index;
+  const pending = idx ? idx.notifications.length : 0;
+  const navCount = $('#nav-approvals-count');
+  navCount.textContent = pending;
+  navCount.hidden = !pending;
+  const seen = LS.get('seenTs', 0);
+  const unseen = idx ? idx.events.filter((e) => e.kind !== 'approval' && tsNum(e.ts) > seen).length : 0;
+  $('#bell-count').textContent = pending;
+  $('#bell-count').hidden = !pending;
+  $('#bell-dot').hidden = !!pending || !unseen;
+  document.title = `${pending ? `(${pending}) ` : ''}DevTrack · AI 개발 진행 현황`;
+
+  const chip = $('#mode-chip');
+  if (state.loadError && idx) {
+    chip.className = 'mode-chip error';
+    chip.innerHTML = '<span class="dot"></span><span>연결 끊김</span>';
+    chip.title = `데이터를 새로 불러오지 못했습니다: ${state.loadError.message}`;
+  } else if (state.mode === 'live') {
+    chip.className = 'mode-chip live';
+    chip.innerHTML = '<span class="dot"></span><span>실시간<span class="label-long"> · 로컬 서버</span></span>';
+    chip.title = '로컬 서버에 연결됨: 웹에서 승인·피드백·작업 지시가 바로 저장됩니다';
+  } else {
+    chip.className = 'mode-chip';
+    chip.innerHTML = '<span class="dot"></span><span>정적<span class="label-long"> · 읽기 전용</span></span>';
+    chip.title = '정적 호스팅 모드: 데이터는 자동 갱신되지만, 승인/피드백은 Claude에게 전달할 메시지로 표시됩니다';
+  }
+  $('#sync-info').innerHTML = idx
+    ? html`데이터 갱신 <b>${ago(idx.generated_at)}</b><br>${POLL_MS / 1000}초마다 자동 확인`.s
+    : '데이터 없음';
+  if ($('#notif-dd').classList.contains('open')) renderDropdown();
+}
+
+function renderDropdown() {
+  const idx = state.index;
+  const dd = $('#notif-dd');
+  if (!idx) { dd.innerHTML = '<div class="empty">데이터 없음</div>'; return; }
+  const seen = LS.get('seenTs', 0);
+  const pend = idx.notifications;
+  const evs = idx.events.filter((e) => e.kind !== 'approval').slice(0, 15);
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const on = LS.get('desktopNotify', false) && perm === 'granted';
+  dd.innerHTML = html`
+    <div class="dd-head"><b>알림</b><a href="#/approvals" data-close-dd>승인 요청 보기</a></div>
+    <div class="dd-sec">결정 대기 · ${pend.length}</div>
+    ${pend.length ? pend.map((n) => html`
+      <a class="dd-item" href="#/task/${n.task_id}/approvals" data-close-dd>
+        <span class="ic tone-amber">${icon(pick(APPROVAL_KIND, n.kind, 'general').icon)}</span>
+        <div class="body"><div class="title">${n.title}</div><div class="meta">${n.task_id} · ${n.task_title} · ${ago(n.created_at)}</div></div>
+      </a>`) : html`<div class="dd-item muted">대기 중인 승인 요청이 없습니다</div>`}
+    <div class="dd-sec">최근 소식</div>
+    ${evs.length ? evs.map((e) => {
+      const k = pick(LOG_KIND, e.kind, 'info');
+      return html`<a class="dd-item ${tsNum(e.ts) > seen ? 'unseen' : ''}" href="#/task/${e.task_id}" data-close-dd>
+        <span class="ic tone-${k.tone}">${icon(k.icon)}</span>
+        <div class="body"><div class="title">${e.message}</div><div class="meta">${e.task_id} · ${authorName(e.author)} · ${ago(e.ts)}</div></div>
+      </a>`;
+    }) : html`<div class="dd-item muted">새 소식이 없습니다</div>`}
+    <div class="dd-foot">
+      <span>${perm === 'unsupported' ? '이 브라우저는 데스크톱 알림을 지원하지 않습니다' : perm === 'denied' ? '브라우저에서 알림이 차단됨' : on ? '데스크톱 알림 켜짐' : '데스크톱 알림 꺼짐'}</span>
+      ${perm !== 'unsupported' && perm !== 'denied' ? html`<button class="btn btn-sm" data-action="desktop-notify">${on ? '끄기' : '켜기'}</button>` : ''}
+    </div>`.s;
+}
+
+// ====================================================================== 공통 컴포넌트
+const statusBadge = (s) => badge(STATUS, s, { dot: true });
+const typeBadge = (t) => badge(TYPES, t, { withIcon: true });
+
+function repoLabel(repo = {}) {
+  if (repo.url) {
+    const m = /github\.com[:/](.+?)(?:\.git)?$/.exec(repo.url);
+    if (m) return { text: m[1], href: `https://github.com/${m[1]}` };
+    return { text: repo.url, href: /^https?:/.test(repo.url) ? repo.url : null };
+  }
+  return repo.path ? { text: repo.path, href: null } : null;
+}
+
+function commitLink(remoteUrl, sha) {
+  const short = (sha || '').slice(0, 8);
+  const m = /github\.com[:/](.+?)(?:\.git)?$/.exec(remoteUrl || '');
+  return m ? html`<a class="mono" href="https://github.com/${m[1]}/commit/${sha}" target="_blank" rel="noopener">${short}</a>` : html`<code>${short}</code>`;
+}
+
+function progressBar(t, lg = false) {
+  return html`<div class="progress ${lg ? 'lg' : ''} s-${t.status}"><span style="width:${Math.max(0, Math.min(100, t.progress || 0))}%"></span></div>`;
+}
+
+/** 작업의 '지금 상태'를 한 줄로: 진행 중이면 현재 단계, 승인 대기면 무엇을 기다리는지 */
+function taskNow(t) {
+  if (t.status === 'awaiting_approval') {
+    const n = state.index?.notifications.find((x) => x.task_id === t.id);
+    if (n) return { label: '승인 대기', text: n.title };
+  }
+  if (t.status === 'in_progress' && t.current_step) return { label: '지금', text: t.current_step };
+  return { label: '최근', text: t.last_log?.message || t.current_step || '' };
+}
+
+function taskCard(t) {
+  const now = taskNow(t);
+  return html`<a class="task-card" href="#/task/${t.id}">
+    <div class="tc-top">${typeBadge(t.type)}${statusBadge(t.status)}<span class="tc-id">${t.id}</span></div>
+    <div class="tc-title">${t.title}</div>
+    <div class="tc-step">${now.text ? html`<span class="lbl">${now.label}</span>${now.text}` : html`<span class="muted">기록 없음</span>`}</div>
+    <div class="tc-prog">${progressBar(t)}<span class="pct">${t.progress || 0}%</span></div>
+    <div class="tc-meta">
+      <span>${t.agent}</span><span>${ago(t.updated_at)}</span>
+      ${t.pending_approvals ? html`<span class="flag amber">${icon('bell')}승인 ${t.pending_approvals}</span>` : ''}
+      ${t.open_issues ? html`<span class="flag ${t.max_severity >= 2 ? 'red' : 'orange'}">${icon('alert')}문제 ${t.open_issues}</span>` : ''}
+    </div>
+  </a>`;
+}
+
+function feedItem(e) {
+  const k = pick(LOG_KIND, e.kind, 'info');
+  return html`<li>
+    <span class="ic tone-${k.tone}">${icon(k.icon)}</span>
+    <div class="body">
+      <div class="msg">${e.kind === 'user' ? html`<b>사용자:</b> ${e.message}` : e.message}</div>
+      <div class="meta"><a href="#/task/${e.task_id}">${e.task_id}</a><span>${authorName(e.author)}</span>${ago(e.ts)}</div>
+    </div>
+  </li>`;
+}
+
+function timelineItem(e, { taskLink = false } = {}) {
+  const k = pick(LOG_KIND, e.kind, 'info');
+  const isUser = e.author === 'user';
+  const commit = e.kind === 'commit' && e.meta?.commit ? html` · ${commitLink(e.meta.remote_url, e.meta.commit)}` : '';
+  return html`<li class="kind-${e.kind} ${isUser ? 'user' : ''}">
+    <span class="ic tone-${k.tone}">${icon(k.icon)}</span>
+    <div class="body">
+      ${e.kind === 'user'
+        ? html`<div class="head"><span class="msg">사용자 메시지</span></div><div class="msg-box markdown-body compact">${raw(renderMarkdown(e.message))}</div>`
+        : html`<div class="head"><span class="msg">${e.message}</span></div>`}
+      <div class="meta">${authorName(e.author)} · ${ago(e.ts)}${e.ref ? ` · ${e.ref}` : ''}${commit}${taskLink ? html` · <a href="#/task/${e.task_id}">${e.task_id} ${e.task_title}</a>` : ''}</div>
+      ${e.detail ? html`<div class="detail markdown-body compact">${raw(renderMarkdown(e.detail))}</div>` : ''}
+    </div>
+  </li>`;
+}
+
+function issueItem(i) {
+  const sev = pick(SEVERITY, i.severity, 'medium');
+  return html`<div class="issue ${i.status}">
+    <span class="sev sev-${i.severity}"></span>
+    <div class="body">
+      <div class="title">${i.title} <span class="badge tone-${sev.tone}">${sev.label}</span>${i.status === 'resolved' ? html`<span class="badge tone-green">${icon('check')}해결됨</span>` : ''}</div>
+      <div class="meta">${i.id} · ${authorName(i.author)} · ${ago(i.created_at)}${i.resolved_at ? html` · 해결 ${ago(i.resolved_at)}` : ''}</div>
+      ${i.detail ? html`<div class="detail markdown-body compact">${raw(renderMarkdown(i.detail))}</div>` : ''}
+      ${i.resolution ? html`<div class="resolution"><b>해결:</b> ${i.resolution}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function artRow(tid, a) {
+  const k = pick(ART_KIND, a.kind, 'file');
+  return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
+    <span class="ic">${icon(k.icon)}</span>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${a.id} · ${k.label}${a.category === 'review' ? ' · 리뷰' : ''} · ${ago(a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}</div></div>
+    ${icon('chev')}
+  </a>`;
+}
+
+function artCard(a) {
+  const k = pick(ART_KIND, a.kind, 'file');
+  const url = a.path ? artifactUrl(a.task_id, a) : null;
+  return html`<a class="art-card" href="#/artifact/${a.task_id}/${a.id}">
+    <div class="thumb">${a.kind === 'image' && url ? html`<img src="${url}" alt="" loading="lazy">` : icon(k.icon)}</div>
+    <div class="info">
+      <div class="title" title="${a.title}">${a.title}</div>
+      <div class="meta"><span class="badge">${k.label}</span>${a.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}<span>${a.task_id}</span>${ago(a.created_at)}</div>
+    </div>
+  </a>`;
+}
+
+function planList(t) {
+  const plan = t.plan || [];
+  if (!plan.length) return html`<div class="muted">아직 계획이 등록되지 않았습니다</div>`;
+  const cur = t.status === 'done' ? -1 : plan.findIndex((p) => !p.done);
+  return html`<ol class="plan">${plan.map((p, i) => html`
+    <li class="${p.done ? 'done' : ''} ${i === cur ? 'current' : ''}">
+      <span class="num">${i + 1}</span><span class="box">${p.done ? icon('check') : ''}</span><span class="txt">${p.text}</span>
+    </li>`)}</ol>`;
+}
+
+function feedbackBox(t, title = '에이전트에게 메시지') {
+  return html`<section class="card feedback-card">
+    <div class="card-head"><h2>${icon('message')} ${title}</h2></div>
+    <div class="card-body">
+      <textarea id="fb-${t.id}" placeholder="추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)"></textarea>
+      <div class="actions">
+        <span class="hint">${state.mode === 'live' ? '에이전트가 devtrack inbox 로 확인합니다' : '정적 모드: 보내기를 누르면 Claude에게 전달할 내용이 표시됩니다'}</span>
+        <button class="btn btn-primary" data-action="comment" data-task="${t.id}">${icon('send')} 보내기</button>
+      </div>
+    </div>
+  </section>`;
+}
+
+function commitBox(act) {
+  const st = act.stat || {};
+  const repo = repoLabel({ url: act.remote_url, path: act.repo });
+  return html`<div class="commit-box">
+    <div class="cb-head">${icon('git')} 승인하면 커밋${act.push ? ' 후 푸시' : ''}
+      ${act.branch ? html`<span class="badge">${icon('branch')}${act.branch}</span>` : ''}
+      <span class="stat">${st.files ?? '?'}개 파일 <span class="add">+${st.additions ?? 0}</span> <span class="del">−${st.deletions ?? 0}</span></span>
+    </div>
+    <div class="cb-msg">${act.message}</div>
+    <dl class="kv">
+      <dt>저장소</dt><dd class="mono">${repo?.href ? html`<a href="${repo.href}" target="_blank" rel="noopener">${repo.text}</a>` : repo?.text || act.repo}</dd>
+      ${act.remote_url ? html`<dt>경로</dt><dd class="mono">${act.repo}</dd>` : ''}
+      ${act.files?.length ? html`<dt>대상 파일</dt><dd class="mono">${act.files.join(', ')}</dd>` : ''}
+    </dl>
+  </div>`;
+}
+
+function approvalCard(t, ap, { showTask = false, skip = [] } = {}) {
+  const kind = pick(APPROVAL_KIND, ap.kind, 'general');
+  const st = pick(APPROVAL_STATUS, ap.status, 'pending');
+  const linked = (ap.artifacts || []).filter((id) => !skip.includes(id))
+    .map((id) => t.artifacts.find((a) => a.id === id)).filter(Boolean);
+  return html`<article class="approval ${ap.status}" id="ap-${t.id}-${ap.id}">
+    <header>
+      <span class="ic tone-${st.tone}">${icon(kind.icon)}</span>
+      <div class="hd">
+        <div class="th-badges" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:5px"><span class="badge">${kind.label}</span>${badge(APPROVAL_STATUS, ap.status, { dot: true })}</div>
+        <h3>${ap.title}</h3>
+        <div class="meta"><span class="mono">${ap.id}</span>${showTask ? html`<a href="#/task/${t.id}">${t.id} · ${t.title}</a>` : ''}<span>${authorName(ap.author)} 요청 · ${ago(ap.created_at)}</span></div>
+      </div>
+    </header>
+    <div class="ap-body">
+      ${ap.description ? html`<div class="ap-desc markdown-body compact">${raw(renderMarkdown(ap.description))}</div>` : ''}
+      ${ap.action ? commitBox(ap.action) : ''}
+      ${linked.length ? html`<div class="ap-linked">${linked.map((a, i) => html`
+        <details data-key="ap:${t.id}:${ap.id}:${a.id}" ${ap.status === 'pending' && i === 0 ? raw('open') : ''}>
+          <summary><span class="s-title">${icon(pick(ART_KIND, a.kind, 'file').icon)} ${a.title} <span class="muted">${pick(ART_KIND, a.kind, 'file').label}</span></span>
+            <a class="btn btn-ghost btn-sm" href="#/artifact/${t.id}/${a.id}">${icon('external')} 크게 보기</a>${icon('chev', 'chev')}</summary>
+          <div data-av="${t.id}/${a.id}"></div>
+        </details>`)}</div>` : ''}
+    </div>
+    ${ap.status === 'pending' ? decisionForm(t, ap) : decisionResult(ap)}
+  </article>`;
+}
+
+function decisionForm(t, ap) {
+  const btn = (d, cls, ic, label) => html`<button class="btn ${cls}" data-action="decide" data-task="${t.id}" data-ap="${ap.id}" data-decision="${d}">${icon(ic)} ${label}</button>`;
+  return html`<div class="decision-form">
+    <textarea id="cm-${t.id}-${ap.id}" placeholder="코멘트 (선택) — 수정 요청이라면 무엇을 고쳐야 하는지 적어주세요"></textarea>
+    <div class="actions">
+      ${btn('approve', 'btn-approve', 'check', ap.action ? '승인 (커밋·푸시 진행)' : '승인')}
+      ${btn('changes', 'btn-changes', 'edit', '수정 요청')}
+      ${btn('reject', 'btn-reject', 'x', '거절')}
+      <span class="hint">${state.mode === 'live' ? '결정은 즉시 저장되어 에이전트에게 전달됩니다' : '정적 모드: Claude에게 전달할 메시지가 표시됩니다'}</span>
+    </div>
+  </div>`;
+}
+
+function decisionResult(ap) {
+  const st = pick(APPROVAL_STATUS, ap.status, 'pending');
+  let applied = '';
+  if (ap.applied) {
+    const a = ap.applied;
+    applied = html`<div class="applied">${icon('git')} 커밋 ${commitLink(ap.action?.remote_url, a.commit)} · ${a.pushed ? '푸시 완료' : a.push_error ? html`<span class="del">푸시 실패</span>` : '푸시 안 함'} · ${ago(a.at)}</div>`;
+  } else if (ap.status === 'approved' && ap.action) {
+    applied = html`<div class="applied">${icon('clock')} 에이전트가 커밋/푸시를 실행하기를 기다리는 중</div>`;
+  }
+  return html`<div class="decision-result ${ap.status}">${icon(st.icon)}
+    <div><b>${st.label}</b> · ${authorName(ap.decided_by)} · ${ago(ap.decided_at)}
+      ${ap.comment ? html`<div class="comment">${ap.comment}</div>` : ''}${applied}</div>
+  </div>`;
+}
+
+function staticBanner() {
+  if (state.mode === 'live') return '';
+  return html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>정적 모드 (읽기 전용)</b>
+    <p>승인·피드백 버튼을 누르면 Claude 세션에 붙여넣을 메시지가 표시됩니다. 웹에서 바로 저장하려면 <code>devtrack serve</code> 로 실행한 주소로 여세요.</p></div></div>`;
+}
+
+function kpi(label, value, ic, tone, href, sub, attention = false) {
+  return html`<a class="kpi ${attention ? 'attention' : ''}" href="${href}">
+    <div class="kpi-label"><span class="ic tone-${tone}">${icon(ic)}</span>${label}</div>
+    <div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div>
+  </a>`;
+}
+
+// ====================================================================== 화면: 대시보드
+function viewDashboard() {
+  const idx = state.index;
+  if (!idx.tasks.length) return viewWelcome();
+  const tasks = idx.tasks;
+  const c = idx.counts || {};
+  const active = tasks.filter((t) => ACTIVE.includes(t.status));
+  const openIssues = tasks.reduce((s, t) => s + (t.open_issues || 0), 0);
+  const pend = idx.notifications;
+
+  const attention = [
+    ...pend.map((n) => html`<a class="attn-item" href="#/task/${n.task_id}/approvals">
+      <span class="ic tone-amber">${icon(pick(APPROVAL_KIND, n.kind, 'general').icon)}</span>
+      <div class="body"><div class="title">${n.title}</div><div class="meta">승인 요청 · ${pick(APPROVAL_KIND, n.kind, 'general').label} · ${n.task_id} ${n.task_title} · ${ago(n.created_at)}</div></div>
+      <span class="btn btn-sm">확인</span></a>`),
+    ...tasks.filter((t) => t.status === 'blocked').map((t) => html`<a class="attn-item" href="#/task/${t.id}/issues">
+      <span class="ic tone-red">${icon('slash')}</span>
+      <div class="body"><div class="title">${t.title}</div><div class="meta">작업이 막혔습니다 · ${t.id} · ${t.current_step || t.last_log?.message || ''}</div></div>
+      <span class="go">${icon('chev')}</span></a>`),
+    ...tasks.filter((t) => t.status !== 'blocked' && t.max_severity >= 2 && ACTIVE.includes(t.status)).map((t) => html`<a class="attn-item" href="#/task/${t.id}/issues">
+      <span class="ic tone-orange">${icon('alert')}</span>
+      <div class="body"><div class="title">${t.title}</div><div class="meta">심각도 높은 문제 ${t.open_issues}건 · ${t.id}</div></div>
+      <span class="go">${icon('chev')}</span></a>`),
+    ...tasks.filter((t) => t.status === 'queued').map((t) => html`<a class="attn-item" href="#/task/${t.id}">
+      <span class="ic tone-gray">${icon('inbox')}</span>
+      <div class="body"><div class="title">${t.title}</div><div class="meta">에이전트가 아직 시작하지 않은 지시 · ${t.id} · ${ago(t.created_at)}</div></div>
+      <span class="go">${icon('chev')}</span></a>`),
+  ];
+  const working = active.filter((t) => t.status !== 'queued');
+  const recentDone = tasks.filter((t) => t.status === 'done').slice(0, 3);
+
+  return html`
+    <div class="page-head">
+      <div><h1>대시보드</h1><p class="sub">AI 에이전트가 진행 중인 작업과 확인이 필요한 항목</p></div>
+      <a class="btn btn-primary" href="#/new">${icon('plus')} 새 작업 지시</a>
+    </div>
+    <div class="kpis">
+      ${kpi('진행 중', working.length, 'play', 'blue', '#/tasks?status=active', `대기 ${c.queued || 0} · 막힘 ${c.blocked || 0}`)}
+      ${kpi('승인 대기', pend.length, 'bell', 'amber', '#/approvals', pend.length ? '확인이 필요합니다' : '대기 중인 요청 없음', pend.length > 0)}
+      ${kpi('열린 문제', openIssues, 'alert', 'red', '#/tasks?filter=issues', `${tasks.filter((t) => t.open_issues).length}개 작업`)}
+      ${kpi('완료', c.done || 0, 'check-circle', 'green', '#/tasks?status=done', `전체 작업 ${tasks.length}`)}
+    </div>
+    <div class="dash-grid">
+      <div>
+        <section class="card">
+          <div class="card-head"><h2>${icon('bell')} 확인이 필요한 항목</h2>${pend.length ? html`<a href="#/approvals">승인 요청 전체</a>` : ''}</div>
+          ${attention.length ? html`<div class="attn-list">${attention}</div>` : html`<div class="empty">${icon('check-circle')}<p>지금 확인할 항목이 없습니다</p></div>`}
+        </section>
+        <section class="section">
+          <h2 class="section-title">진행 중인 작업 <span class="muted">${working.length}</span></h2>
+          ${working.length ? html`<div class="task-grid">${working.map(taskCard)}</div>` : html`<div class="card empty">진행 중인 작업이 없습니다</div>`}
+        </section>
+        ${recentDone.length ? html`<section class="section">
+          <h2 class="section-title">최근 완료 <span class="muted"><a href="#/tasks?status=done">전체 보기</a></span></h2>
+          <div class="task-grid">${recentDone.map(taskCard)}</div>
+        </section>` : ''}
+      </div>
+      <section class="card">
+        <div class="card-head"><h2>${icon('activity')} 최근 활동</h2><a href="#/activity">전체 보기</a></div>
+        <ul class="feed">${idx.activity.slice(0, 16).map(feedItem)}</ul>
+      </section>
+    </div>`;
+}
+
+function viewWelcome() {
+  return html`
+    <div class="page-head"><div><h1>대시보드</h1><p class="sub">AI 에이전트의 작업 진행 현황</p></div>
+      <a class="btn btn-primary" href="#/new">${icon('plus')} 새 작업 지시</a></div>
+    <section class="card welcome">
+      <h2>아직 기록된 작업이 없습니다</h2>
+      <p class="muted">Claude(또는 다른 AI)가 <code>devtrack</code> 명령으로 작업을 기록하면 이 화면에 실시간으로 표시됩니다.</p>
+      <ol>
+        <li>작업 시작: <code>devtrack new "작업 제목" -t code --repo ~/project --plan "분석" "구현" "테스트"</code></li>
+        <li>진행 기록: <code>devtrack step T-0001 "지금 하는 일" -p 30</code>, 문제: <code>devtrack issue T-0001 "문제" -s high</code></li>
+        <li>결과물/리뷰: <code>devtrack artifact T-0001 fig.png</code>, <code>devtrack review T-0001 report.md</code></li>
+        <li>승인 요청: <code>devtrack request T-0001 "커밋 승인" --commit -m "메시지"</code> → 웹 알림 → 승인 후 <code>devtrack apply</code></li>
+      </ol>
+      <p class="muted">예시 화면을 보려면:</p>
+      <pre>devtrack --data demo-data demo\ndevtrack --data demo-data serve</pre>
+    </section>`;
+}
+
+// ====================================================================== 화면: 작업 목록
+function tasksHref(q) {
+  const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v && v !== 'all'));
+  const s = p.toString();
+  return `#/tasks${s ? '?' + s : ''}`;
+}
+
+function viewTasks({ q }) {
+  const idx = state.index;
+  const status = q.status || 'all';
+  const type = q.type || 'all';
+  let tasks = idx.tasks;
+  if (status === 'active') tasks = tasks.filter((t) => ACTIVE.includes(t.status));
+  else if (status !== 'all') tasks = tasks.filter((t) => t.status === status);
+  if (type !== 'all') tasks = tasks.filter((t) => t.type === type);
+  if (q.filter === 'issues') tasks = tasks.filter((t) => t.open_issues > 0);
+  const count = (fn) => idx.tasks.filter(fn).length;
+  const chip = (key, label, n) => html`<a class="chip ${status === key ? 'active' : ''}" href="${tasksHref({ ...q, status: key })}">${label}${n != null ? html` <span class="n">${n}</span>` : ''}</a>`;
+  return html`
+    <div class="page-head">
+      <div><h1>작업</h1><p class="sub">지시된 모든 작업과 진행 상태</p></div>
+      <a class="btn btn-primary" href="#/new">${icon('plus')} 새 작업 지시</a>
+    </div>
+    <div class="filter-bar">
+      <div class="chips">
+        ${chip('all', '전체', idx.tasks.length)}
+        ${chip('active', '활성', count((t) => ACTIVE.includes(t.status)))}
+        ${['in_progress', 'awaiting_approval', 'changes_requested', 'blocked', 'queued', 'done'].map((s) => chip(s, STATUS[s].label, count((t) => t.status === s)))}
+      </div>
+    </div>
+    <div class="toolbar">
+      <label class="search"><span class="sr-only">검색</span>${icon('search')}<input id="task-search" type="search" placeholder="제목, ID, 에이전트 검색"></label>
+      <select data-change="type-filter" style="width:auto" aria-label="유형">
+        <option value="all">모든 유형</option>
+        ${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${type === k ? raw('selected') : ''}>${v.label}</option>`)}
+      </select>
+      ${q.filter === 'issues' ? html`<a class="chip active" href="${tasksHref({ ...q, filter: '' })}">열린 문제 있음 ${icon('x')}</a>` : ''}
+    </div>
+    ${tasks.length ? html`<div class="table-wrap"><table class="data">
+      <thead><tr><th>작업</th><th>유형</th><th>상태</th><th>진행률</th><th>에이전트</th><th>확인 필요</th><th>업데이트</th></tr></thead>
+      <tbody>${tasks.map((t) => html`<tr data-href="#/task/${t.id}" data-search="${[t.id, t.title, t.agent, TYPES[t.type]?.label, t.current_step, (t.tags || []).join(' ')].filter(Boolean).join(' ').toLowerCase()}">
+        <td><div class="t-title"><span class="muted mono" style="font-weight:500;margin-right:6px">${t.id}</span>${t.title}</div><div class="t-step">${taskNow(t).text}</div></td>
+        <td class="t-type">${typeBadge(t.type)}</td>
+        <td>${statusBadge(t.status)}</td>
+        <td><div class="t-prog">${progressBar(t)}<span>${t.progress || 0}%</span></div></td>
+        <td class="nowrap t-agent">${t.agent}</td>
+        <td class="nowrap">${t.pending_approvals ? html`<span class="flag amber" style="font-weight:600">${icon('bell')} 승인 ${t.pending_approvals}</span> ` : ''}${t.open_issues ? html`<span class="flag ${t.max_severity >= 2 ? 'red' : 'orange'}" style="font-weight:600">${icon('alert')} 문제 ${t.open_issues}</span>` : ''}${!t.pending_approvals && !t.open_issues ? html`<span class="muted">—</span>` : ''}</td>
+        <td class="nowrap muted">${ago(t.updated_at)}</td>
+      </tr>`)}</tbody></table></div>
+      <div id="no-match" class="empty" hidden>검색 결과가 없습니다</div>`
+    : html`<div class="card empty">${icon('inbox')}<p>조건에 맞는 작업이 없습니다</p></div>`}`;
+}
+
+function filterTasks() {
+  const q = state.taskSearch.trim().toLowerCase();
+  let shown = 0;
+  $$('tr[data-search]').forEach((tr) => {
+    const ok = !q || tr.dataset.search.includes(q);
+    tr.hidden = !ok;
+    if (ok) shown++;
+  });
+  const nm = $('#no-match');
+  if (nm) nm.hidden = shown > 0;
+}
+
+// ====================================================================== 화면: 작업 상세
+function nowCard(t) {
+  const lastMsg = [...(t.log || [])].reverse().find((e) => e.kind !== 'user')?.message || '';
+  const cfg = {
+    in_progress: { label: '지금 하는 일', pulse: true },
+    awaiting_approval: { label: '사용자 승인 대기 중', pulse: false },
+    changes_requested: { label: '수정 요청 반영 대기', pulse: false },
+    blocked: { label: '막힘 — 확인 필요', pulse: false },
+    queued: { label: '에이전트가 아직 시작하지 않음', pulse: false },
+    done: { label: '완료', pulse: false },
+    cancelled: { label: '취소됨', pulse: false },
+  }[t.status] || { label: '현재 상태' };
+  const pending = (t.approvals || []).filter((a) => a.status === 'pending');
+  let text = t.status === 'done' ? (lastMsg || '작업이 완료되었습니다') : (t.current_step || lastMsg || '—');
+  if (t.status === 'awaiting_approval' && pending.length) text = pending[0].title + (pending.length > 1 ? ` 외 ${pending.length - 1}건` : '');
+  const plan = t.plan || [];
+  return html`<section class="card now-card">
+    <div><div class="now-label">${cfg.pulse ? raw('<span class="pulse"></span>') : icon(STATUS[t.status]?.icon || 'circle')} ${cfg.label}</div><div class="now-text">${text}</div></div>
+    <div class="now-prog"><div class="row"><span>${plan.length ? `계획 ${plan.filter((p) => p.done).length}/${plan.length}단계` : '진행률'}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
+  </section>`;
+}
+
+async function viewTask({ rest }) {
+  const [id, tabArg] = rest;
+  const t = await loadTask(id);
+  const pend = t.approvals.filter((a) => a.status === 'pending');
+  const openIssues = t.issues.filter((i) => i.status === 'open');
+  const tab = tabArg || 'overview';
+  const repo = repoLabel(t.repo);
+  const tabs = [
+    ['overview', '개요'],
+    ['log', '진행 기록', t.log.length],
+    ['issues', '문제점', openIssues.length || null, openIssues.length > 0],
+    ['artifacts', '결과물', t.artifacts.length],
+    ['approvals', '승인', pend.length || t.approvals.length || null, pend.length > 0],
+  ];
+  let body;
+  switch (tab) {
+    case 'log': body = taskLog(t); break;
+    case 'issues': body = taskIssues(t); break;
+    case 'artifacts': body = taskArtifacts(t); break;
+    case 'approvals': body = taskApprovals(t); break;
+    default: body = taskOverview(t, openIssues);
+  }
+  return html`
+    <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><span class="mono">${t.id}</span></div>
+    <div class="task-head"><div style="min-width:0;flex:1">
+      <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${t.priority === 'high' ? html`<span class="badge tone-red">우선순위 높음</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
+      <h1><span class="th-id">${t.id}</span>${t.title}</h1>
+      <div class="th-meta">
+        <span>${icon('cpu')} ${t.agent}</span>
+        ${repo ? html`<span>${icon('folder')} ${repo.href ? html`<a href="${repo.href}" target="_blank" rel="noopener">${repo.text}</a>` : repo.text}</span>` : ''}
+        ${t.repo?.branch ? html`<span>${icon('branch')} ${t.repo.branch}</span>` : ''}
+        <span>${icon('clock')} 시작 ${fmtAbs(t.created_at)}</span>
+        <span>업데이트 ${ago(t.updated_at)}</span>
+      </div>
+    </div></div>
+    ${pend.length && tab !== 'approvals' ? html`<div class="alert alert-amber">${icon('bell')}<div class="alert-body"><b>승인이 필요한 항목 ${pend.length}건</b><p>${pend.map((a) => a.title).join(' · ')}</p></div><a class="btn btn-sm" href="#/task/${t.id}/approvals">확인하기</a></div>` : ''}
+    ${nowCard(t)}
+    <nav class="tabs">${tabs.map(([k, label, n, hot]) => html`<a class="${tab === k ? 'active' : ''}" href="#/task/${t.id}${k === 'overview' ? '' : '/' + k}">${label}${n != null ? html`<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`)}</nav>
+    ${body}`;
+}
+
+function taskOverview(t, openIssues) {
+  const plan = t.plan || [];
+  const recent = [...t.log].reverse().slice(0, 8);
+  const arts = [...t.artifacts].reverse().slice(0, 6);
+  return html`<div class="detail-grid">
+    <div>
+      <section class="card">
+        <div class="card-head"><h2>${icon('message')} 작업 지시</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
+        <div class="card-body">${t.instruction ? html`<div class="markdown-body">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted">지시 내용이 기록되지 않았습니다</div>`}</div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>${icon('activity')} 최근 진행 기록</h2><a href="#/task/${t.id}/log">전체 ${t.log.length}건</a></div>
+        <div class="card-body"><ul class="timeline">${recent.map((e) => timelineItem(e))}</ul></div>
+      </section>
+      ${feedbackBox(t)}
+    </div>
+    <div>
+      <section class="card">
+        <div class="card-head"><h2>${icon('list')} 작업 계획</h2><span class="muted">${plan.filter((p) => p.done).length}/${plan.length}</span></div>
+        <div class="card-body">${planList(t)}</div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>${icon('alert')} 열린 문제</h2><a href="#/task/${t.id}/issues">전체 ${t.issues.length}건</a></div>
+        ${openIssues.length ? openIssues.map(issueItem) : html`<div class="empty inline" style="padding:14px 18px">열린 문제가 없습니다</div>`}
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>${icon('package')} 결과물</h2><a href="#/task/${t.id}/artifacts">전체 ${t.artifacts.length}개</a></div>
+        ${arts.length ? arts.map((a) => artRow(t.id, a)) : html`<div class="empty inline" style="padding:14px 18px">아직 결과물이 없습니다</div>`}
+      </section>
+    </div>
+  </div>`;
+}
+
+function taskLog(t) {
+  const items = [...t.log].reverse();
+  return html`<div class="detail-grid">
+    <div><section class="card"><div class="card-body"><ul class="timeline">${items.map((e) => timelineItem(e))}</ul></div></section></div>
+    <div>${feedbackBox(t)}</div>
+  </div>`;
+}
+
+function taskIssues(t) {
+  const open = t.issues.filter((i) => i.status === 'open');
+  const done = t.issues.filter((i) => i.status !== 'open');
+  if (!t.issues.length) return html`<div class="card empty">${icon('check-circle')}<p>기록된 문제가 없습니다</p></div>`;
+  return html`
+    <h2 class="section-title">열린 문제 <span class="muted">${open.length}</span></h2>
+    <div class="card">${open.length ? open.map(issueItem) : html`<div class="empty inline" style="padding:14px 18px">열린 문제가 없습니다</div>`}</div>
+    ${done.length ? html`<h2 class="section-title" style="margin-top:24px">해결된 문제 <span class="muted">${done.length}</span></h2><div class="card">${done.map(issueItem)}</div>` : ''}`;
+}
+
+function taskArtifacts(t) {
+  if (!t.artifacts.length) return html`<div class="card empty">${icon('package')}<p>아직 결과물이 없습니다</p></div>`;
+  const items = [...t.artifacts].reverse().map((a) => ({ ...a, task_id: t.id }));
+  return html`<div class="art-grid">${items.map(artCard)}</div>`;
+}
+
+function taskApprovals(t) {
+  if (!t.approvals.length) return html`<div class="card empty">${icon('bell')}<p>승인 요청이 없습니다</p></div>`;
+  const list = [...t.approvals].sort((a, b) => (a.status === 'pending') === (b.status === 'pending') ? tsNum(b.created_at) - tsNum(a.created_at) : a.status === 'pending' ? -1 : 1);
+  return html`${staticBanner()}${list.map((ap) => approvalCard(t, ap))}`;
+}
+
+// ====================================================================== 화면: 승인 요청
+async function viewApprovals() {
+  const idx = state.index;
+  const pend = idx.notifications;
+  await Promise.all([...new Set(pend.map((n) => n.task_id))].map(loadTask));
+  const history = (idx.approvals || []).filter((a) => a.status !== 'pending').slice(0, 60);
+  return html`
+    <div class="page-head"><div><h1>승인 요청</h1><p class="sub">에이전트가 다음 단계(커밋·푸시, 계획 진행 등) 전에 확인을 요청한 항목</p></div></div>
+    ${staticBanner()}
+    <h2 class="section-title">결정 대기 <span class="muted">${pend.length}</span></h2>
+    ${pend.length ? pend.map((n) => {
+      const t = state.tasks.get(n.task_id);
+      const ap = t?.approvals.find((a) => a.id === n.approval_id);
+      return ap ? approvalCard(t, ap, { showTask: true }) : '';
+    }) : html`<div class="card empty">${icon('check-circle')}<p>결정을 기다리는 요청이 없습니다</p></div>`}
+    <h2 class="section-title" style="margin-top:28px">처리된 요청 <span class="muted">${history.length}</span></h2>
+    ${history.length ? html`<div class="card">${history.map((a) => {
+      const st = pick(APPROVAL_STATUS, a.status, 'pending');
+      return html`<a class="art-row" href="#/task/${a.task_id}/approvals">
+        <span class="ic tone-${st.tone}">${icon(st.icon)}</span>
+        <div class="body"><div class="title">${a.title}</div>
+          <div class="meta">${st.label} · ${a.task_id} ${a.task_title} · ${ago(a.decided_at)}${a.commit ? ` · 커밋 ${a.commit.slice(0, 8)}` : ''}${a.comment ? ` · "${a.comment.slice(0, 60)}${a.comment.length > 60 ? '…' : ''}"` : ''}</div></div>
+        ${icon('chev')}</a>`;
+    })}</div>` : html`<div class="card empty inline" style="padding:16px 18px">아직 처리된 요청이 없습니다</div>`}`;
+}
+
+// ====================================================================== 화면: 리뷰
+function viewerHead(t, art) {
+  const k = pick(ART_KIND, art.kind, 'file');
+  const url = artifactUrl(t.id, art);
+  return html`<div class="viewer-head">
+    <div style="min-width:0"><h2>${art.title}</h2>
+      <div class="meta"><span class="badge">${icon(k.icon)}${k.label}</span>${art.category === 'review' ? html`<span class="badge tone-violet">리뷰</span>` : ''}<a href="#/task/${t.id}">${t.id} · ${t.title}</a><span>${authorName(art.author)} · ${ago(art.created_at)}</span>${art.size ? html`<span>${fmtBytes(art.size)}</span>` : ''}</div>
+    </div>
+    <div class="actions">${url ? html`<a class="btn btn-sm" href="${url}" target="_blank" rel="noopener">${icon('external')} 새 탭</a>${art.path ? html`<a class="btn btn-sm" href="${url}" download>${icon('download')} 다운로드</a>` : ''}` : ''}</div>
+  </div>`;
+}
+
+async function viewReviews({ rest }) {
+  const reviews = state.index.reviews;
+  const head = html`<div class="page-head"><div><h1>코드 리뷰</h1><p class="sub">AI가 작성한 리뷰 리포트 (Markdown · PDF)</p></div></div>`;
+  if (!reviews.length) {
+    return html`${head}<div class="card empty">${icon('eye')}<p>등록된 리뷰 리포트가 없습니다</p><p><code>devtrack review T-0001 review_report.md</code> 로 등록하면 여기에 표시됩니다</p></div>`;
+  }
+  const [tid, fid] = rest;
+  const sel = reviews.find((r) => r.task_id === tid && r.id === fid) || reviews[0];
+  const t = await loadTask(sel.task_id);
+  const art = t.artifacts.find((a) => a.id === sel.id);
+  if (!art) return viewNotFound();
+  const related = t.approvals.filter((a) => a.status === 'pending' && (a.kind === 'review' || (a.artifacts || []).includes(art.id)));
+  return html`${head}
+    <div class="review-layout">
+      <aside class="card review-list">${reviews.map((r) => html`
+        <a class="review-item ${r === sel ? 'active' : ''}" href="#/reviews/${r.task_id}/${r.id}">
+          <div class="title">${r.title}</div>
+          <div class="meta"><span class="badge">${pick(ART_KIND, r.kind, 'file').label}</span><span>${r.task_id}</span>${ago(r.created_at)}</div>
+          <div class="meta">${r.task_title}</div>
+        </a>`)}</aside>
+      <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
+        ${related.map((a) => approvalCard(t, a, { skip: [art.id] }))}
+        <section class="card" style="overflow:hidden">
+          ${viewerHead(t, art)}
+          ${art.description ? html`<div class="card-body markdown-body compact" style="border-bottom:1px solid var(--border)">${raw(renderMarkdown(art.description))}</div>` : ''}
+          <div data-av="${t.id}/${art.id}"></div>
+        </section>
+        ${feedbackBox(t, '리뷰에 대한 의견 보내기')}
+      </div>
+    </div>`;
+}
+
+// ====================================================================== 화면: 결과물
+const ART_GROUPS = {
+  all: { label: '전체', test: () => true },
+  doc: { label: '문서', test: (a) => ['markdown', 'pdf', 'text', 'latex'].includes(a.kind) },
+  code: { label: '코드 · 변경사항', test: (a) => ['code', 'diff'].includes(a.kind) },
+  figure: { label: '그림 · 시각화', test: (a) => ['image', 'html'].includes(a.kind) },
+  data: { label: '데이터 · 노트북', test: (a) => ['csv', 'notebook'].includes(a.kind) },
+  review: { label: '리뷰', test: (a) => a.category === 'review' },
+  link: { label: '링크 · 기타', test: (a) => ['link', 'file'].includes(a.kind) },
+};
+
+function viewArtifacts({ q }) {
+  const all = state.index.artifacts;
+  const g = ART_GROUPS[q.kind] ? q.kind : 'all';
+  const items = all.filter(ART_GROUPS[g].test);
+  return html`
+    <div class="page-head"><div><h1>결과물</h1><p class="sub">코드 변경, 리포트, 그림, 데이터 등 에이전트가 만든 모든 결과물</p></div></div>
+    <div class="filter-bar"><div class="chips">${Object.entries(ART_GROUPS).map(([k, v]) => html`<a class="chip ${g === k ? 'active' : ''}" href="#/artifacts${k === 'all' ? '' : '?kind=' + k}">${v.label} <span class="n">${all.filter(v.test).length}</span></a>`)}</div></div>
+    ${items.length ? html`<div class="art-grid">${items.map(artCard)}</div>` : html`<div class="card empty">${icon('package')}<p>결과물이 없습니다</p></div>`}`;
+}
+
+async function viewArtifact({ rest }) {
+  const [tid, fid] = rest;
+  const t = await loadTask(tid);
+  const art = t.artifacts.find((a) => a.id === fid);
+  if (!art) return viewNotFound();
+  const linked = t.approvals.filter((a) => (a.artifacts || []).includes(art.id));
+  return html`
+    <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><a href="#/task/${t.id}">${t.id}</a><span>/</span><a href="#/task/${t.id}/artifacts">결과물</a><span>/</span><span class="mono">${art.id}</span></div>
+    <section class="card" style="overflow:hidden">
+      ${viewerHead(t, art)}
+      ${art.description ? html`<div class="card-body markdown-body compact" style="border-bottom:1px solid var(--border)">${raw(renderMarkdown(art.description))}</div>` : ''}
+      <div data-av="${t.id}/${art.id}"></div>
+    </section>
+    ${linked.length ? html`<h2 class="section-title" style="margin-top:22px">연결된 승인 요청</h2>${linked.map((a) => approvalCard(t, a, { skip: [art.id] }))}` : ''}`;
+}
+
+// ====================================================================== 화면: 활동 기록
+const ACT_FILTERS = {
+  all: { label: '전체', test: () => true },
+  step: { label: '진행', test: (e) => ['step', 'success', 'status', 'info'].includes(e.kind) },
+  issue: { label: '문제 · 오류', test: (e) => ['issue', 'error', 'warning'].includes(e.kind) },
+  approval: { label: '승인 · 결정', test: (e) => ['approval', 'decision'].includes(e.kind) },
+  commit: { label: '커밋', test: (e) => e.kind === 'commit' },
+  artifact: { label: '결과물', test: (e) => e.kind === 'artifact' },
+  user: { label: '사용자', test: (e) => e.author === 'user' },
+};
+
+function viewActivity({ q }) {
+  const f = ACT_FILTERS[q.f] ? q.f : 'all';
+  const items = state.index.activity.filter(ACT_FILTERS[f].test);
+  const groups = [];
+  const today = new Date().toDateString();
+  const yest = new Date(Date.now() - 86400000).toDateString();
+  for (const e of items) {
+    const d = new Date(e.ts);
+    const key = d.toDateString();
+    const label = key === today ? '오늘' : key === yest ? '어제' : d.toLocaleDateString('ko', { month: 'long', day: 'numeric', weekday: 'short' });
+    if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, label, items: [] });
+    groups[groups.length - 1].items.push(e);
+  }
+  return html`
+    <div class="page-head"><div><h1>활동 기록</h1><p class="sub">모든 작업의 진행 기록 (최근 300건)</p></div></div>
+    <div class="filter-bar"><div class="chips">${Object.entries(ACT_FILTERS).map(([k, v]) => html`<a class="chip ${f === k ? 'active' : ''}" href="#/activity${k === 'all' ? '' : '?f=' + k}">${v.label}</a>`)}</div></div>
+    ${groups.length ? groups.map((g) => html`
+      <h2 class="section-title" style="margin-top:18px">${g.label} <span class="muted">${g.items.length}</span></h2>
+      <section class="card"><div class="card-body"><ul class="timeline">${g.items.map((e) => timelineItem(e, { taskLink: true }))}</ul></div></section>`)
+    : html`<div class="card empty">기록이 없습니다</div>`}`;
+}
+
+// ====================================================================== 화면: 새 작업 지시
+function viewNewTask() {
+  return html`
+    <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><span>새 작업 지시</span></div>
+    <div class="page-head"><div><h1>새 작업 지시</h1><p class="sub">AI 에이전트에게 맡길 작업을 적어주세요. 에이전트는 진행 상황을 기록하고, 확인이 필요하면 알림으로 요청합니다.</p></div></div>
+    ${state.mode !== 'live' ? html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>정적 모드</b><p>등록을 누르면 Claude 세션에 붙여넣을 지시문이 만들어집니다.</p></div></div>` : ''}
+    <form id="new-task-form" class="card card-pad" style="max-width:820px" autocomplete="off">
+      <label class="field"><span>작업 제목 *</span><input type="text" name="title" required maxlength="200" placeholder="예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성"></label>
+      <div class="field-row">
+        <label class="field"><span>작업 유형</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}">${v.label}</option>`)}</select></label>
+        <label class="field"><span>담당 AI</span><select name="agent"><option>Claude</option><option>Codex</option><option>Gemini</option><option>기타</option></select></label>
+        <label class="field"><span>우선순위</span><select name="priority"><option value="normal">보통</option><option value="high">높음</option><option value="low">낮음</option></select></label>
+      </div>
+      <div class="field-row">
+        <label class="field"><span>대상 저장소 경로</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>코드 작업일 때 결과를 커밋할 저장소</small></label>
+        <label class="field"><span>브랜치</span><input type="text" name="branch" placeholder="(현재 브랜치)"></label>
+      </div>
+      <label class="field"><span>지시 내용</span><textarea name="instruction" rows="9" placeholder="무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:"></textarea></label>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <a class="btn btn-ghost" href="#/tasks">취소</a>
+        <button class="btn btn-primary" type="submit">${icon('send')} ${state.mode === 'live' ? '작업 지시 등록' : '지시문 만들기'}</button>
+      </div>
+    </form>`;
+}
+
+async function submitNewTask(ev) {
+  ev.preventDefault();
+  const form = ev.currentTarget;
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.title = (data.title || '').trim();
+  if (!data.title) return;
+  if (state.mode === 'live') {
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const r = await api('api/tasks', data);
+      form.reset();
+      toast({ title: '작업 지시를 등록했습니다', meta: `${r.task.id} — 에이전트가 devtrack inbox 로 확인합니다`, tone: 'green' });
+      await poll({ force: true });
+      location.hash = `#/task/${r.task.id}`;
+    } catch (e) {
+      toast({ title: '등록 실패', meta: e.message, tone: 'red' });
+      btn.disabled = false;
+    }
+    return;
+  }
+  const typeLabel = TYPES[data.type]?.label || data.type;
+  const cmd = [
+    'devtrack new', shellQuote(data.title), '-t', data.type, '--agent', shellQuote(data.agent),
+    data.priority !== 'normal' ? `--priority ${data.priority}` : '',
+    data.repo ? `--repo ${shellQuote(data.repo)}` : '', data.branch ? `--branch ${shellQuote(data.branch)}` : '',
+    data.instruction ? `-i ${shellQuote(data.instruction)}` : '',
+  ].filter(Boolean).join(' ');
+  const msg = [
+    '[DevTrack 새 작업 지시]',
+    `제목: ${data.title}`,
+    `유형: ${typeLabel} (${data.type})`,
+    data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : '',
+    data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : '',
+    '',
+    data.instruction ? `지시 내용:\n${data.instruction}` : '',
+    '',
+    'devtrack 으로 작업을 등록하고, 진행 단계·문제점·결과물을 기록하면서 진행해 주세요. 커밋/푸시 전에는 반드시 승인 요청을 올려 주세요.',
+  ].filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
+  openModal({
+    title: 'Claude에게 보낼 작업 지시',
+    body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 등록', cmd)}`,
+  });
+}
+
+// ====================================================================== 화면: 오류
+function viewNotFound() {
+  return html`<div class="card empty">${icon('alert')}<p>페이지를 찾을 수 없습니다</p><p><a href="#/">대시보드로 이동</a></p></div>`;
+}
+function viewError(e) {
+  return html`<div class="alert alert-red">${icon('alert')}<div class="alert-body"><b>화면을 그리는 중 오류가 발생했습니다</b><p>${e.message}</p></div></div>`;
+}
+function viewLoadError(e) {
+  const file = location.protocol === 'file:';
+  return html`<section class="card welcome">
+    <h2>${icon('alert')} 데이터를 불러올 수 없습니다</h2>
+    <p class="muted"><code>data/index.json</code> — ${e.message}</p>
+    <ol>
+      ${file ? html`<li><b>file:// 로 직접 연 경우 동작하지 않습니다.</b> 웹 서버로 열어주세요: <code>devtrack serve</code></li>` : ''}
+      <li>로컬: <code>devtrack serve</code> 실행 후 <code>http://localhost:8765</code> 접속</li>
+      <li>정적 호스팅(Frontier www): <code>devtrack publish --to ~/www/devtrack</code> 로 웹과 데이터를 함께 배포했는지 확인</li>
+      <li>데이터가 아직 없다면 <code>devtrack init</code> 또는 첫 작업을 <code>devtrack new</code> 로 생성</li>
+    </ol>
+  </section>`;
+}
+
+// ====================================================================== 모달 / 복사
+function copyBlock(label, text) {
+  return html`<div class="copy-block"><div class="lbl">${label}</div><pre>${text}</pre><button class="btn btn-sm" data-action="copy" data-copy="${text}">${icon('copy')} 복사</button></div>`;
+}
+
+function openModal({ title, body }) {
+  closeModal();
+  const root = $('#modal-root');
+  root.innerHTML = html`<div class="modal-back" data-action="modal-close-back"><div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+    <div class="m-head"><h2>${title}</h2><button class="icon-btn" data-action="modal-close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="m-body">${body}</div>
+    <div class="m-foot"><button class="btn" data-action="modal-close">닫기</button></div>
+  </div></div>`.s;
+  root.querySelector('.modal .btn')?.focus();
+}
+function closeModal() { $('#modal-root').innerHTML = ''; }
+
+// ====================================================================== 액션
+async function actDecide(btn) {
+  const { task, ap, decision } = btn.dataset;
+  const ta = document.getElementById(`cm-${task}-${ap}`);
+  const comment = ta?.value.trim() || '';
+  if (decision === 'changes' && !comment) {
+    toast({ title: '무엇을 수정해야 하는지 코멘트를 적어주세요', tone: 'orange' });
+    ta?.focus();
+    return;
+  }
+  if (state.mode !== 'live') {
+    const t = state.tasks.get(task);
+    const a = t?.approvals.find((x) => x.id === ap);
+    const label = DECISION[decision].label;
+    const cmd = `devtrack decide ${task} ${ap} ${decision}${comment ? ' -m ' + shellQuote(comment) : ''}`;
+    const msg = `[DevTrack 결정] ${task} / ${ap} "${a?.title || ''}" → ${label}${comment ? `\n코멘트: ${comment}` : ''}\n\n위 결정을 기록하고(${cmd}) 다음 단계를 진행해 주세요.`;
+    openModal({
+      title: `${label} — Claude에게 전달`,
+      body: html`<p>이 페이지는 <b>정적 모드(읽기 전용)</b>라 웹에서 직접 저장할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으면 결정이 기록되고 다음 단계가 진행됩니다.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
+    });
+    return;
+  }
+  const form = btn.closest('.decision-form');
+  $$('button', form).forEach((b) => { b.disabled = true; });
+  try {
+    await api(`api/tasks/${task}/approvals/${ap}/decision`, { decision, comment });
+    if (ta) ta.value = '';
+    toast({ title: `${DECISION[decision].label} 처리했습니다`, meta: `${task} ${ap} — 에이전트에게 전달됩니다`, tone: DECISION[decision].tone });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: '저장하지 못했습니다', meta: e.message, tone: 'red' });
+    $$('button', form).forEach((b) => { b.disabled = false; });
+  }
+}
+
+async function actComment(btn) {
+  const task = btn.dataset.task;
+  const ta = document.getElementById(`fb-${task}`);
+  const message = ta?.value.trim();
+  if (!message) { ta?.focus(); return; }
+  if (state.mode !== 'live') {
+    const cmd = `devtrack comment ${task} ${shellQuote(message)}`;
+    const msg = `[DevTrack 메시지] ${task}\n${message}`;
+    openModal({
+      title: 'Claude에게 메시지 전달',
+      body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 내용을 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
+    });
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`api/tasks/${task}/comments`, { message });
+    ta.value = '';
+    toast({ title: '메시지를 보냈습니다', meta: `${task} — 에이전트가 devtrack inbox 로 확인합니다`, tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: '보내지 못했습니다', meta: e.message, tone: 'red' });
+    btn.disabled = false;
+  }
+}
+
+function effectiveTheme() {
+  return document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+}
+function syncThemeIcon() {
+  $('#theme-btn').innerHTML = String(icon(effectiveTheme() === 'dark' ? 'sun' : 'moon'));
+}
+
+async function onAction(el, ev) {
+  const a = el.dataset.action;
+  switch (a) {
+    case 'decide': return actDecide(el);
+    case 'comment': return actComment(el);
+    case 'copy': {
+      const ok = await copyText(el.dataset.copy || '');
+      const prev = el.innerHTML;
+      el.innerHTML = ok ? String(icon('check')) + ' 복사됨' : '복사 실패';
+      setTimeout(() => { el.innerHTML = prev; }, 1400);
+      return;
+    }
+    case 'theme': {
+      const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      LS.set('theme', next);
+      syncThemeIcon();
+      return;
+    }
+    case 'refresh': return poll({ force: true });
+    case 'apply-update': return render({ keepScroll: true });
+    case 'bell': {
+      const dd = $('#notif-dd');
+      const open = !dd.classList.contains('open');
+      dd.classList.toggle('open', open);
+      if (open) { renderDropdown(); LS.set('seenTs', Date.now()); updateChrome(); renderDropdown(); }
+      return;
+    }
+    case 'desktop-notify': {
+      if (LS.get('desktopNotify', false) && Notification.permission === 'granted') {
+        LS.set('desktopNotify', false);
+      } else {
+        const p = await Notification.requestPermission();
+        LS.set('desktopNotify', p === 'granted');
+        if (p === 'granted') toast({ title: '데스크톱 알림을 켰습니다', meta: '새 승인 요청이 오면 알려드립니다', tone: 'green' });
+      }
+      renderDropdown();
+      return;
+    }
+    case 'menu': document.body.classList.toggle('nav-open'); return;
+    case 'modal-close': closeModal(); return;
+    case 'modal-close-back': if (ev.target === el) closeModal(); return;
+    default:
+  }
+}
+
+// ====================================================================== 시작
+function bindEvents() {
+  document.addEventListener('click', (ev) => {
+    const actionEl = ev.target.closest('[data-action]');
+    if (actionEl) {
+      if (actionEl.tagName === 'BUTTON') ev.preventDefault();
+      onAction(actionEl, ev);
+      if (actionEl.dataset.action !== 'bell' && !actionEl.closest('#notif-dd')) $('#notif-dd').classList.remove('open');
+      return;
+    }
+    if (ev.target.closest('[data-close-dd]')) $('#notif-dd').classList.remove('open');
+    else if (!ev.target.closest('#notif-dd')) $('#notif-dd').classList.remove('open');
+    if (ev.target.closest('.sidebar a')) document.body.classList.remove('nav-open');
+    const row = ev.target.closest('tr[data-href]');
+    if (row && !ev.target.closest('a')) location.hash = row.dataset.href;
+  });
+  document.addEventListener('change', (ev) => {
+    const el = ev.target.closest('[data-change]');
+    if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
+  });
+  document.addEventListener('toggle', (ev) => {
+    const d = ev.target;
+    if (d.matches?.('details[data-key]')) state.details.set(d.dataset.key, d.open);
+  }, true);
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { closeModal(); $('#notif-dd').classList.remove('open'); document.body.classList.remove('nav-open'); }
+  });
+  window.addEventListener('hashchange', () => render());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeIcon);
+  setInterval(() => {
+    $$('time[data-ts]').forEach((t) => { if (t.dataset.ts) t.textContent = fmtRel(t.dataset.ts); });
+  }, 30000);
+}
+
+async function init() {
+  syncThemeIcon();
+  bindEvents();
+  state.mode = await detectMode();
+  await poll({ force: true });
+  setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
+}
+
+init();

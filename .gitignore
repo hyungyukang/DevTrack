@@ -1,0 +1,12 @@
+# DevTrack 런타임 데이터 (작업 기록 · 결과물)
+/data/
+/demo-data/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / 편집기
+.DS_Store
+.vscode/
+.idea/

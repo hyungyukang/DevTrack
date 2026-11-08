@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""devtrack 실행 스크립트 — PATH 에 링크해서 어디서든 사용할 수 있다.
+
+    ln -s /path/to/AI_Dev_Progress_Checker/bin/devtrack ~/bin/devtrack
+"""
+import os
+import sys
+
+if sys.version_info < (3, 7):
+    sys.stderr.write("devtrack 은 Python 3.7 이상이 필요합니다 (현재 {}).\n"
+                     "Frontier 에서는 'module load cray-python' 후 다시 실행하세요.\n".format(sys.version.split()[0]))
+    sys.exit(1)
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+from devtrack.cli import main  # noqa: E402
+
+sys.exit(main())
