@@ -100,6 +100,9 @@ def make_handler(store, web_root, verbose=False):
                 body = self._body()
                 with write_lock:
                     if path == "/api/tasks":
+                        related = body.get("related") or []
+                        if isinstance(related, str):
+                            related = [related]
                         t = store.create_task(
                             (body.get("title") or "").strip() or _need("title"),
                             instruction=body.get("instruction") or "",
@@ -108,7 +111,7 @@ def make_handler(store, web_root, verbose=False):
                             repo=(body.get("repo") or "").strip() or None,
                             branch=(body.get("branch") or "").strip() or None,
                             priority=body.get("priority") or "normal",
-                            status="queued", created_by=USER,
+                            status="queued", created_by=USER, related=[r for r in related if r],
                         )
                         return self._json({"ok": True, "task": {"id": t["id"]}}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/comments$", path)

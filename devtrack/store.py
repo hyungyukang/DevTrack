@@ -291,7 +291,7 @@ class Store:
     # ------------------------------------------------------------------ 작업
     def create_task(self, title, instruction="", type="code", agent="Claude", repo=None, branch=None,
                     repo_url=None, tags=None, priority="normal", status="in_progress", created_by=None,
-                    plan=None):
+                    plan=None, related=None):
         if type not in TASK_TYPES:
             raise DevTrackError("알 수 없는 작업 유형: {} ({})".format(type, ", ".join(TASK_TYPES)))
         if status not in STATUSES:
@@ -312,6 +312,7 @@ class Store:
         with self.locked():
             ids = self.task_ids()
             tid = "T-{:04d}".format((int(ids[-1][2:]) if ids else 0) + 1)
+            related = self._check_related(related, tid)
             ts = now()
             task = {
                 "id": tid,
@@ -326,6 +327,7 @@ class Store:
                 "current_step": "",
                 "plan": [{"text": p, "done": False} for p in (plan or [])],
                 "tags": list(tags or []),
+                "related": related,
                 "created_by": created_by or agent or "Claude",
                 "created_at": ts,
                 "updated_at": ts,
@@ -343,8 +345,51 @@ class Store:
                 self._log(task, "작업을 시작했습니다", kind="status", author=task["agent"], meta={"to": status})
             if plan:
                 self._log(task, "작업 계획 수립 ({}단계)".format(len(plan)), kind="step", author=task["agent"])
+            if related:
+                self._log(task, "관련 작업 연결: " + self._related_label(related), kind="info",
+                          author=created_by or task["agent"])
             self._save(task)
         return task
+
+    def _check_related(self, ids, self_id=None):
+        out = []
+        for r in ids or []:
+            rid = normalize_task_id(r)
+            if rid == self_id:
+                raise DevTrackError("작업을 자기 자신과 연결할 수 없습니다: {}".format(rid))
+            if not os.path.exists(os.path.join(self.tasks_dir, rid, "task.json")):
+                raise DevTrackError("연결할 작업을 찾을 수 없습니다: {}".format(rid))
+            if rid not in out:
+                out.append(rid)
+        return out
+
+    def _related_label(self, ids):
+        parts = []
+        for rid in ids:
+            try:
+                parts.append("{} {}".format(rid, self.load(rid)["title"]))
+            except (DevTrackError, ValueError, OSError):
+                parts.append(rid)
+        return ", ".join(parts)
+
+    def link_tasks(self, tid, others, unlink=False, author=None):
+        """작업 간 연결 (예: 데이터 분석 → 그 결과를 쓰는 논문 작업). 화면에서는 양방향으로 표시된다."""
+        tid = normalize_task_id(tid)
+        ids = self._check_related(others, tid)
+        with self.edit(tid) as t:
+            rel = t.setdefault("related", [])
+            changed = []
+            for rid in ids:
+                if unlink and rid in rel:
+                    rel.remove(rid)
+                    changed.append(rid)
+                elif not unlink and rid not in rel:
+                    rel.append(rid)
+                    changed.append(rid)
+            if changed:
+                self._log(t, ("관련 작업 연결 해제: " if unlink else "관련 작업 연결: ") + self._related_label(changed),
+                          kind="info", author=author)
+            return rel
 
     def update_task(self, tid, status=None, progress=None, step=None, message=None, title=None,
                     author=None, kind="info"):
@@ -436,7 +481,8 @@ class Store:
 
     # ------------------------------------------------------------------ 결과물
     def _add_artifact(self, t, path=None, url=None, text=None, filename=None, title=None, kind=None,
-                      description=None, category="result", copy=True, author=None, lang=None):
+                      description=None, category="result", copy=True, author=None, lang=None,
+                      extra=None, log=True):
         fid = self._next(t, "F")
         art = {"id": fid, "category": category, "created_at": now(), "author": author or t.get("agent")}
         name = filename or (os.path.basename(path.rstrip("/")) if path else None)
@@ -479,11 +525,63 @@ class Store:
         art["title"] = title or name or url
         if description:
             art["description"] = description
+        if extra:
+            art.update(extra)
         t.setdefault("artifacts", []).append(art)
-        label = "리뷰 리포트 등록" if category == "review" else "결과물 추가"
-        self._log(t, "{}: {}".format(label, art["title"]), kind="artifact", author=author, ref=fid,
-                  meta={"category": category, "kind": art["kind"]})
+        if log:
+            label = "리뷰 리포트 등록" if category == "review" else "결과물 추가"
+            self._log(t, "{}: {}".format(label, art["title"]), kind="artifact", author=author, ref=fid,
+                      meta={"category": category, "kind": art["kind"]})
         return art
+
+    # ------------------------------------------------------------------ LaTeX 빌드
+    def record_build(self, tid, source, result, author=None):
+        """LaTeX 빌드 결과 기록. 성공하면 PDF, 실패하면 로그를 결과물로 첨부한다."""
+        from .latex import warning_count
+        ok = result.get("status") == "ok"
+        stem = os.path.splitext(os.path.basename(source))[0] or "main"
+        with self.edit(tid) as t:
+            bid = self._next(t, "B")
+            n = bid.split("-")[1]
+            build = {
+                "id": bid, "source": source, "engine": result.get("engine"),
+                "status": "ok" if ok else "failed", "pages": result.get("pages"),
+                "duration": result.get("duration"), "errors": result.get("errors") or [],
+                "warnings": result.get("warnings") or {}, "created_at": now(),
+                "author": author or t.get("agent"),
+            }
+            if ok and result.get("pdf"):
+                art = self._add_artifact(t, path=result["pdf"], filename=stem + ".pdf", kind="pdf", author=author,
+                                         title="{}.pdf (빌드 #{})".format(stem, n), extra={"build": bid}, log=False)
+                build["pdf"] = art["id"]
+            if not ok and result.get("log_text"):
+                art = self._add_artifact(t, text=result["log_text"], filename=stem + ".log", kind="text",
+                                         title="{}.log (빌드 #{} 실패)".format(stem, n), extra={"build": bid},
+                                         author=author, log=False)
+                build["log"] = art["id"]
+            t.setdefault("builds", []).append(build)
+            w = build["warnings"]
+            if ok:
+                wc = warning_count(w)
+                msg = "LaTeX 컴파일 성공: {}.pdf ({}쪽{})".format(
+                    stem, build["pages"] or "?", ", 경고 {}".format(wc) if wc else "")
+                lines = []
+                if w.get("undefined_citations"):
+                    lines.append("- 정의되지 않은 인용: " + ", ".join("`{}`".format(c) for c in w["undefined_citations"]))
+                if w.get("undefined_references"):
+                    lines.append("- 정의되지 않은 참조: " + ", ".join("`{}`".format(r) for r in w["undefined_references"]))
+                if w.get("overfull"):
+                    lines.append("- Overfull box {}개".format(w["overfull"]))
+                self._log(t, msg, kind="success", author=author, ref=bid, detail="\n".join(lines) or None,
+                          meta={"build": bid, "pdf": build.get("pdf")})
+            else:
+                e = (build["errors"] or [{"message": "알 수 없는 오류"}])[0]
+                where = " ({}:{})".format(e.get("file") or source, e["line"]) if e.get("line") else ""
+                detail = "\n".join("- `{}{}` {}".format(x.get("file") or "", ":{}".format(x["line"]) if x.get("line") else "",
+                                                        x["message"]) for x in build["errors"])
+                self._log(t, "LaTeX 컴파일 실패: {}{}".format(e["message"], where), kind="error", author=author,
+                          ref=bid, detail=detail or None, meta={"build": bid})
+            return build
 
     def add_artifact(self, tid, **kw):
         with self.edit(tid) as t:
@@ -673,7 +771,7 @@ class Store:
                 "id": t["id"], "title": t["title"], "type": t["type"], "status": t["status"],
                 "priority": t.get("priority", "normal"), "agent": t.get("agent"),
                 "progress": t.get("progress", 0), "current_step": t.get("current_step", ""),
-                "repo": t.get("repo") or {}, "tags": t.get("tags") or [],
+                "repo": t.get("repo") or {}, "tags": t.get("tags") or [], "related": t.get("related") or [],
                 "created_at": t["created_at"], "updated_at": t["updated_at"],
                 "completed_at": t.get("completed_at"),
                 "plan_total": len(plan), "plan_done": sum(1 for p in plan if p.get("done")),
@@ -693,7 +791,7 @@ class Store:
             for a in t.get("artifacts", []):
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
-                                                   "created_at", "author", "size", "description", "lang")})
+                                                   "created_at", "author", "size", "description", "lang", "build")})
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)

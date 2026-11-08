@@ -12,6 +12,11 @@ const DECISION = {
   changes: { label: '수정 요청', tone: 'orange' },
   reject: { label: '거절', tone: 'red' },
 };
+// 작업 유형 → 분야 섹션 (사이드바 메뉴)
+const SECTION_OF_TYPE = { paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews' };
+const SECTION_LABEL = { papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', tasks: '작업' };
+const ANALYSIS_TYPES = ['analysis', 'visualization'];
+const FIGURE_KINDS = ['image', 'html'];
 
 const state = {
   mode: 'static',
@@ -78,6 +83,8 @@ const VIEWS = {
   task: viewTask,
   approvals: viewApprovals,
   reviews: viewReviews,
+  papers: viewPapers,
+  analysis: viewAnalysis,
   artifacts: viewArtifacts,
   artifact: viewArtifact,
   activity: viewActivity,
@@ -88,6 +95,7 @@ let renderSeq = 0;
 async function render({ keepScroll = false } = {}) {
   const seq = ++renderSeq;
   const route = parseRoute();
+  state.routeKey = [route.name, ...route.rest].join('/');
   const main = $('#main');
   saveDetails(main);
   const y = window.scrollY;
@@ -132,9 +140,27 @@ function mountArtifact(el) {
   if (el.dataset.mounted) return;
   el.dataset.mounted = '1';
   const [tid, fid] = el.dataset.av.split('/');
-  const art = state.tasks.get(tid)?.artifacts?.find((a) => a.id === fid);
+  const task = state.tasks.get(tid);
+  const art = task?.artifacts?.find((a) => a.id === fid);
   if (!art) { el.innerHTML = '<div class="av-error">결과물을 찾을 수 없습니다</div>'; return; }
-  renderArtifactInto(el, tid, art);
+  const ok = buildInfo(task)?.ok;
+  renderArtifactInto(el, tid, art, {
+    resolveImage: (p) => resolveFigure(tid, p),
+    pdfHref: ok ? `#/artifact/${tid}/${ok.pdf}` : null,
+  });
+}
+
+/** \includegraphics{figs/fig4_1.pdf} → 같은 이름(확장자 무관)으로 올라온 그림 결과물. 같은 작업 > 연결된 작업 > 그 외 순 */
+function resolveFigure(tid, ref) {
+  const stemOf = (p) => baseName(p).replace(/^F-\d+_/, '').replace(/\.[A-Za-z0-9]+$/, '').toLowerCase();
+  const want = stemOf(ref);
+  if (!want) return null;
+  const cands = (state.index?.artifacts || []).filter((a) => a.path && ['image', 'pdf'].includes(a.kind) && stemOf(a.path) === want);
+  if (!cands.length) return null;
+  const related = new Set(linksOf(tid).map((x) => x.id));
+  const rank = (a) => (a.task_id === tid ? 0 : related.has(a.task_id) ? 1 : 2) * 2 + (a.kind === 'image' ? 0 : 1);
+  const a = cands.sort((x, y) => rank(x) - rank(y))[0];
+  return { url: artifactUrl(a.task_id, a), kind: a.kind, title: `${a.title} (${a.task_id})`, href: `#/artifact/${a.task_id}/${a.id}` };
 }
 
 function saveDetails(root) { $$('details[data-key]', root).forEach((d) => state.details.set(d.dataset.key, d.open)); }
@@ -247,14 +273,24 @@ function toast({ title, meta, tone = '', href, sticky = false }) {
 }
 
 // ====================================================================== 상단바 / 사이드바
+function sectionOfTask(id) {
+  const t = state.index?.tasks.find((x) => x.id === id);
+  return t ? SECTION_OF_TYPE[t.type] : null;
+}
+
 function updateChrome(route = parseRoute()) {
-  const navName = { task: 'tasks', artifact: 'artifacts', new: 'new' }[route.name] || route.name;
+  let navName = { new: 'new' }[route.name] || route.name;
+  if (route.name === 'task') navName = sectionOfTask(route.rest[0]) || 'tasks';
+  if (route.name === 'artifact') navName = sectionOfTask(route.rest[0]) || 'artifacts';
   $$('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.nav === navName));
   const idx = state.index;
   const pending = idx ? idx.notifications.length : 0;
-  const navCount = $('#nav-approvals-count');
-  navCount.textContent = pending;
-  navCount.hidden = !pending;
+  const setCount = (sel, n) => { const el = $(sel); el.textContent = n; el.hidden = !n; };
+  setCount('#nav-approvals-count', pending);
+  // 분야별 메뉴에는 그 분야의 승인 대기 수
+  const pendIn = (sec) => (idx ? idx.notifications.filter((n) => sectionOfTask(n.task_id) === sec).length : 0);
+  setCount('#nav-papers-count', pendIn('papers'));
+  setCount('#nav-analysis-count', pendIn('analysis'));
   const seen = LS.get('seenTs', 0);
   const unseen = idx ? idx.events.filter((e) => e.kind !== 'approval' && tsNum(e.ts) > seen).length : 0;
   $('#bell-count').textContent = pending;
@@ -346,12 +382,27 @@ function taskNow(t) {
   return { label: '최근', text: t.last_log?.message || t.current_step || '' };
 }
 
-function taskCard(t) {
+/** 연결된 작업 (양방향: 내가 연결한 것 + 나를 연결한 것) */
+function linksOf(id) {
+  const tasks = state.index?.tasks || [];
+  const me = tasks.find((t) => t.id === id);
+  const ids = new Set(me?.related || []);
+  tasks.forEach((t) => { if ((t.related || []).includes(id)) ids.add(t.id); });
+  return [...ids].map((rid) => tasks.find((t) => t.id === rid)).filter(Boolean);
+}
+const artsOf = (id) => (state.index?.artifacts || []).filter((a) => a.task_id === id);
+const figuresOf = (id) => artsOf(id).filter((a) => a.kind === 'image' && a.path);
+
+function taskCard(t, { thumbs = false, links = false } = {}) {
   const now = taskNow(t);
+  const figs = thumbs ? figuresOf(t.id).slice(0, 4) : [];
+  const papers = links ? linksOf(t.id).filter((x) => x.type === 'paper') : [];
   return html`<a class="task-card" href="#/task/${t.id}">
     <div class="tc-top">${typeBadge(t.type)}${statusBadge(t.status)}<span class="tc-id">${t.id}</span></div>
     <div class="tc-title">${t.title}</div>
+    ${papers.length ? html`<div class="tc-link">${icon('book')} 논문용 · ${papers.map((p) => `${p.id} ${p.title}`).join(', ')}</div>` : ''}
     <div class="tc-step">${now.text ? html`<span class="lbl">${now.label}</span>${now.text}` : html`<span class="muted">기록 없음</span>`}</div>
+    ${figs.length ? html`<div class="tc-thumbs">${figs.map((a) => html`<img src="${artifactUrl(a.task_id, a)}" alt="" loading="lazy" title="${a.title}">`)}</div>` : ''}
     <div class="tc-prog">${progressBar(t)}<span class="pct">${t.progress || 0}%</span></div>
     <div class="tc-meta">
       <span>${t.agent}</span><span>${ago(t.updated_at)}</span>
@@ -401,11 +452,11 @@ function issueItem(i) {
   </div>`;
 }
 
-function artRow(tid, a) {
+function artRow(tid, a, { showTask = false } = {}) {
   const k = pick(ART_KIND, a.kind, 'file');
   return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
     <span class="ic">${icon(k.icon)}</span>
-    <div class="body"><div class="title">${a.title}</div><div class="meta">${a.id} · ${k.label}${a.category === 'review' ? ' · 리뷰' : ''} · ${ago(a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}</div></div>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ' · 리뷰' : ''} · ${ago(a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
     ${icon('chev')}
   </a>`;
 }
@@ -524,6 +575,14 @@ function staticBanner() {
     <p>승인·피드백 버튼을 누르면 Claude 세션에 붙여넣을 메시지가 표시됩니다. 웹에서 바로 저장하려면 <code>devtrack serve</code> 로 실행한 주소로 여세요.</p></div></div>`;
 }
 
+function attnApproval(n) {
+  const k = pick(APPROVAL_KIND, n.kind, 'general');
+  return html`<a class="attn-item" href="#/task/${n.task_id}/approvals">
+    <span class="ic tone-amber">${icon(k.icon)}</span>
+    <div class="body"><div class="title">${n.title}</div><div class="meta">승인 요청 · ${k.label} · ${n.task_id} ${n.task_title} · ${ago(n.created_at)}</div></div>
+    <span class="btn btn-sm">확인</span></a>`;
+}
+
 function kpi(label, value, ic, tone, href, sub, attention = false) {
   return html`<a class="kpi ${attention ? 'attention' : ''}" href="${href}">
     <div class="kpi-label"><span class="ic tone-${tone}">${icon(ic)}</span>${label}</div>
@@ -542,10 +601,7 @@ function viewDashboard() {
   const pend = idx.notifications;
 
   const attention = [
-    ...pend.map((n) => html`<a class="attn-item" href="#/task/${n.task_id}/approvals">
-      <span class="ic tone-amber">${icon(pick(APPROVAL_KIND, n.kind, 'general').icon)}</span>
-      <div class="body"><div class="title">${n.title}</div><div class="meta">승인 요청 · ${pick(APPROVAL_KIND, n.kind, 'general').label} · ${n.task_id} ${n.task_title} · ${ago(n.created_at)}</div></div>
-      <span class="btn btn-sm">확인</span></a>`),
+    ...pend.map(attnApproval),
     ...tasks.filter((t) => t.status === 'blocked').map((t) => html`<a class="attn-item" href="#/task/${t.id}/issues">
       <span class="ic tone-red">${icon('slash')}</span>
       <div class="body"><div class="title">${t.title}</div><div class="meta">작업이 막혔습니다 · ${t.id} · ${t.current_step || t.last_log?.message || ''}</div></div>
@@ -712,18 +768,22 @@ async function viewTask({ rest }) {
     ['log', '진행 기록', t.log.length],
     ['issues', '문제점', openIssues.length || null, openIssues.length > 0],
     ['artifacts', '결과물', t.artifacts.length],
+    ...(t.builds?.length ? [['builds', '빌드', t.builds.length, t.builds[t.builds.length - 1].status !== 'ok']] : []),
     ['approvals', '승인', pend.length || t.approvals.length || null, pend.length > 0],
   ];
   let body;
   switch (tab) {
     case 'log': body = taskLog(t); break;
+    case 'builds': body = html`<div class="card">${[...(t.builds || [])].reverse().map((b) => buildRow(t, b))}</div>`; break;
     case 'issues': body = taskIssues(t); break;
     case 'artifacts': body = taskArtifacts(t); break;
     case 'approvals': body = taskApprovals(t); break;
     default: body = taskOverview(t, openIssues);
   }
+  const sec = SECTION_OF_TYPE[t.type] || 'tasks';
+  const links = linksOf(t.id);
   return html`
-    <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><span class="mono">${t.id}</span></div>
+    <div class="crumbs"><a href="#/${sec}">${SECTION_LABEL[sec]}</a><span>/</span><span class="mono">${t.id}</span></div>
     <div class="task-head"><div style="min-width:0;flex:1">
       <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${t.priority === 'high' ? html`<span class="badge tone-red">우선순위 높음</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
       <h1><span class="th-id">${t.id}</span>${t.title}</h1>
@@ -734,6 +794,7 @@ async function viewTask({ rest }) {
         <span>${icon('clock')} 시작 ${fmtAbs(t.created_at)}</span>
         <span>업데이트 ${ago(t.updated_at)}</span>
       </div>
+      ${links.length ? html`<div class="th-links">${icon('link')} 관련 작업 ${links.map((l) => html`<a class="link-chip" href="#/task/${l.id}"><span class="sdot tone-${pick(STATUS, l.status, 'queued').tone}"></span>${l.id} · ${pick(TYPES, l.type).label} · ${l.title}</a>`)}</div>` : ''}
     </div></div>
     ${pend.length && tab !== 'approvals' ? html`<div class="alert alert-amber">${icon('bell')}<div class="alert-body"><b>승인이 필요한 항목 ${pend.length}건</b><p>${pend.map((a) => a.title).join(' · ')}</p></div><a class="btn btn-sm" href="#/task/${t.id}/approvals">확인하기</a></div>` : ''}
     ${nowCard(t)}
@@ -758,6 +819,10 @@ function taskOverview(t, openIssues) {
       ${feedbackBox(t)}
     </div>
     <div>
+      ${t.builds?.length ? html`<section class="card">
+        <div class="card-head"><h2>${icon('file-text')} 컴파일된 PDF</h2><a href="#/task/${t.id}/builds">빌드 기록 ${t.builds.length}</a></div>
+        <div class="card-body">${buildBox(t)}</div>
+      </section>` : ''}
       <section class="card">
         <div class="card-head"><h2>${icon('list')} 작업 계획</h2><span class="muted">${plan.filter((p) => p.done).length}/${plan.length}</span></div>
         <div class="card-body">${planList(t)}</div>
@@ -874,6 +939,229 @@ async function viewReviews({ rest }) {
     </div>`;
 }
 
+// ====================================================================== 화면: 분야 섹션 (논문 작성 / 데이터 분석)
+function sectionHead(title, sub, newHref) {
+  return html`<div class="page-head"><div><h1>${title}</h1><p class="sub">${sub}</p></div>
+    <a class="btn btn-primary" href="${newHref}">${icon('plus')} 새 작업 지시</a></div>`;
+}
+
+function sectionStats(tasks, arts) {
+  const n = (f) => tasks.filter(f).length;
+  const pend = tasks.reduce((s, t) => s + (t.pending_approvals || 0), 0);
+  const blocked = n((t) => t.status === 'blocked');
+  const st = (v, label, cls = '') => html`<div class="st ${cls}"><b>${v}</b><span>${label}</span></div>`;
+  return html`<div class="sec-stats">
+    ${st(n((t) => ['in_progress', 'changes_requested'].includes(t.status)), '진행 중')}
+    ${st(pend, '승인 대기', pend ? 'hot' : '')}
+    ${st(blocked, '막힘', blocked ? 'bad' : '')}
+    ${st(n((t) => t.status === 'queued'), '대기')}
+    ${st(n((t) => t.status === 'done'), '완료')}
+    ${st(arts.length, '결과물')}
+  </div>`;
+}
+
+function sectionAttention(ids) {
+  const pend = state.index.notifications.filter((n) => ids.has(n.task_id));
+  if (!pend.length) return '';
+  return html`<section class="card" style="margin-bottom:20px">
+    <div class="card-head"><h2>${icon('bell')} 확인이 필요한 항목</h2></div>
+    <div class="attn-list">${pend.map(attnApproval)}</div></section>`;
+}
+
+function sectionFeed(ids, n = 14) {
+  const items = state.index.activity.filter((e) => ids.has(e.task_id)).slice(0, n);
+  return html`<section class="card">
+    <div class="card-head"><h2>${icon('activity')} 최근 진행</h2><a href="#/activity">전체 기록</a></div>
+    ${items.length ? html`<ul class="feed">${items.map(feedItem)}</ul>` : html`<div class="empty">아직 기록이 없습니다</div>`}
+  </section>`;
+}
+
+const DRAFT_KINDS = ['latex', 'pdf', 'markdown', 'text'];
+const isBuildLog = (a) => !!a.build && a.kind !== 'pdf';
+const isDraft = (a) => DRAFT_KINDS.includes(a.kind) && !isBuildLog(a);
+const PAPER_GROUPS = {
+  all: { label: '전체', test: () => true },
+  pdf: { label: '컴파일된 PDF', test: (a) => a.kind === 'pdf' && !!a.build },
+  draft: { label: '원고', test: isDraft },
+  figure: { label: '그림', test: (a) => FIGURE_KINDS.includes(a.kind) },
+  data: { label: '표 · 데이터', test: (a) => ['csv', 'notebook'].includes(a.kind) },
+  other: { label: '기타', test: (a) => isBuildLog(a) || ![...DRAFT_KINDS, ...FIGURE_KINDS, 'csv', 'notebook'].includes(a.kind) },
+};
+
+// ---------------------------------------------------------------- LaTeX 빌드
+const bnum = (b) => (b?.id || '').split('-')[1];
+const baseName = (p) => String(p || '').split('/').pop();
+const warnCount = (w = {}) => (w.undefined_citations?.length || 0) + (w.undefined_references?.length || 0)
+  + (w.other?.length || 0) + (w.overfull || 0);
+
+function buildInfo(t) {
+  const bs = t?.builds || [];
+  if (!bs.length) return null;
+  return { last: bs[bs.length - 1], ok: [...bs].reverse().find((b) => b.status === 'ok' && b.pdf) };
+}
+
+function buildErrText(b) {
+  const e = b.errors?.[0];
+  if (!e) return '컴파일 실패';
+  return `${e.message}${e.line ? ` (${e.file || baseName(b.source)}:${e.line})` : ''}`;
+}
+
+function warnChips(w = {}) {
+  const items = [];
+  (w.undefined_citations || []).forEach((c) => items.push(html`<span class="wchip">인용 없음 <code>${c}</code></span>`));
+  (w.undefined_references || []).forEach((r) => items.push(html`<span class="wchip">참조 없음 <code>${r}</code></span>`));
+  if (w.overfull) items.push(html`<span class="wchip">Overfull box ${w.overfull}</span>`);
+  (w.other || []).slice(0, 4).forEach((o) => items.push(html`<span class="wchip">${o.replace(/^LaTeX Warning:\s*/, '')}</span>`));
+  return html`<div class="wchips">${items.length ? items : html`<span class="wchip ok">${icon('check')} 경고 없음</span>`}</div>`;
+}
+
+/** 논문 카드 / 작업 개요에 쓰는 '최신 PDF' 상자 */
+function buildBox(t) {
+  const info = buildInfo(t);
+  if (!info) return html`<div class="muted mini-empty">아직 컴파일된 PDF 가 없습니다 <span class="mono">(devtrack latex)</span></div>`;
+  const { last, ok } = info;
+  const failed = last.status !== 'ok';
+  return html`<div class="build-box">
+    ${failed ? html`<a class="build-fail" href="#/task/${t.id}/builds">${icon('x-circle')}<span><b>최근 컴파일 실패</b> · 빌드 #${bnum(last)} · ${buildErrText(last)} · ${ago(last.created_at)}</span></a>` : ''}
+    ${ok ? html`<a class="pdf-row" href="#/artifact/${t.id}/${ok.pdf}">
+      <span class="pdf-ic">PDF</span>
+      <div class="body"><div class="title">${baseName(ok.source).replace(/\.tex$/, '')}.pdf <span class="muted">${failed ? '마지막 성공 · ' : ''}빌드 #${bnum(ok)}</span></div>
+        <div class="meta">${ok.pages ? `${ok.pages}쪽 · ` : ''}${warnCount(ok.warnings) ? html`<span class="warn-t">경고 ${warnCount(ok.warnings)}</span>` : '경고 없음'} · ${ago(ok.created_at)}</div></div>
+      <span class="btn btn-sm btn-primary">${icon('eye')} PDF 보기</span></a>` : html`<div class="muted mini-empty">성공한 빌드가 아직 없습니다</div>`}
+  </div>`;
+}
+
+function buildRow(t, b, { actions = true } = {}) {
+  const ok = b.status === 'ok';
+  const meta = [b.engine, b.pages ? `${b.pages}쪽` : '', b.duration != null ? `${b.duration}초` : '', authorName(b.author)].filter(Boolean).join(' · ');
+  return html`<div class="build-row">
+    <span class="ic tone-${ok ? 'green' : 'red'}">${icon(ok ? 'check' : 'x')}</span>
+    <div class="body">
+      <div class="title">빌드 #${bnum(b)} <span class="badge tone-${ok ? 'green' : 'red'}">${ok ? '성공' : '실패'}</span><span class="mono muted">${b.source}</span></div>
+      <div class="meta">${meta} · ${ago(b.created_at)}</div>
+      ${!ok && b.errors?.length ? html`<ul class="build-errors">${b.errors.map((e) => html`<li><code>${e.file || baseName(b.source)}${e.line ? `:${e.line}` : ''}</code> ${e.message}</li>`)}</ul>` : ''}
+      ${ok ? warnChips(b.warnings) : ''}
+    </div>
+    ${actions ? html`<div class="actions">${b.pdf ? html`<a class="btn btn-sm btn-primary" href="#/artifact/${t.id}/${b.pdf}">${icon('eye')} PDF</a>` : ''}${b.log ? html`<a class="btn btn-sm" href="#/artifact/${t.id}/${b.log}">${icon('file')} 로그</a>` : ''}</div>` : ''}
+  </div>`;
+}
+
+/** PDF/로그 뷰어 위에 붙는 빌드 정보 + 다른 빌드로 이동 */
+function buildPanel(t, bid) {
+  const b = (t.builds || []).find((x) => x.id === bid);
+  if (!b) return '';
+  const all = (t.builds || []).filter((x) => x.pdf || x.log);
+  return html`<div class="build-panel">
+    ${buildRow(t, b, { actions: false })}
+    ${all.length > 1 ? html`<div class="bp-hist"><span class="muted">다른 빌드</span>${[...all].reverse().map((x) => html`<a class="bchip ${x.id === bid ? 'active' : ''} ${x.status}" href="#/artifact/${t.id}/${x.pdf || x.log}">${icon(x.status === 'ok' ? 'check' : 'x')}#${bnum(x)}</a>`)}</div>` : ''}
+  </div>`;
+}
+
+function paperCard(t, s) {
+  if (!t) return '';
+  const arts = artsOf(t.id);
+  const drafts = arts.filter((a) => isDraft(a) && !a.build).slice(0, 4);
+  const figs = arts.filter((a) => a.kind === 'image' && a.path);
+  const links = linksOf(t.id);
+  const issues = (t.issues || []).filter((i) => i.status === 'open');
+  const plan = t.plan || [];
+  const now = taskNow(s);
+  const sdot = (st) => html`<span class="sdot tone-${pick(STATUS, st, 'queued').tone}"></span>`;
+  return html`<article class="card work-card">
+    <div class="wc-head">
+      <div class="wc-title">
+        <div class="th-badges">${statusBadge(t.status)}${s.pending_approvals ? html`<span class="badge tone-amber">${icon('bell')}승인 ${s.pending_approvals}</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
+        <h3><a href="#/task/${t.id}"><span class="th-id">${t.id}</span>${t.title}</a></h3>
+        ${now.text ? html`<div class="wc-now"><span class="lbl">${now.label}</span>${now.text}</div>` : ''}
+        <div class="wc-meta">${t.agent} · 업데이트 ${ago(t.updated_at)}</div>
+      </div>
+      <div class="wc-prog"><div class="row"><span>${plan.length ? `작성 계획 ${plan.filter((p) => p.done).length}/${plan.length}` : '진행률'}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
+    </div>
+    <div class="wc-body">
+      <div>
+        <div class="wc-label"><span>원고 구성 · 작성 계획</span></div>
+        ${planList(t)}
+      </div>
+      <div>
+        <div class="wc-label"><span>컴파일된 PDF</span>${t.builds?.length ? html`<a href="#/task/${t.id}/builds">빌드 기록 ${t.builds.length}</a>` : ''}</div>
+        ${buildBox(t)}
+        <div class="wc-label"><span>원고 파일</span>${drafts.length ? html`<a href="#/task/${t.id}/artifacts">전체 결과물</a>` : ''}</div>
+        ${drafts.length ? drafts.map((a) => html`<a class="mini-row" href="#/artifact/${t.id}/${a.id}">${icon(pick(ART_KIND, a.kind, 'file').icon)}<span class="t">${a.title}</span>${a.kind === 'latex' ? html`<span class="badge tone-teal">문서 보기</span>` : ''}<span class="muted nowrap">${ago(a.created_at)}</span></a>`) : html`<div class="muted mini-empty">아직 원고가 없습니다</div>`}
+        <div class="wc-label"><span>그림 ${figs.length}</span></div>
+        ${figs.length ? html`<div class="thumbs">${figs.slice(0, 8).map((a) => html`<a class="thumb-sm" href="#/artifact/${t.id}/${a.id}" title="${a.title}"><img src="${artifactUrl(t.id, a)}" alt="${a.title}" loading="lazy"></a>`)}</div>` : html`<div class="muted mini-empty">아직 그림이 없습니다</div>`}
+        <div class="wc-label"><span>연결된 데이터 분석</span><a href="#/new?type=analysis&related=${t.id}">${icon('plus')} 이 논문용 분석 지시</a></div>
+        ${links.length ? html`<div>${links.map((l) => html`<a class="link-chip" href="#/task/${l.id}" title="${pick(STATUS, l.status, 'queued').label}">${sdot(l.status)}${l.id} ${l.title}</a>`)}</div>` : html`<div class="muted mini-empty">연결된 분석이 없습니다</div>`}
+        ${issues.length ? html`<div class="wc-label"><span>열린 문제 ${issues.length}</span></div>${issues.slice(0, 3).map((i) => html`<a class="mini-row" href="#/task/${t.id}/issues"><span class="sev-dot sev-${i.severity}"></span><span class="t">${i.title}</span></a>`)}` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function viewPapers({ q }) {
+  const idx = state.index;
+  const papers = idx.tasks.filter((t) => t.type === 'paper');
+  const ids = new Set(papers.map((t) => t.id));
+  const active = papers.filter((t) => ACTIVE.includes(t.status));
+  const finished = papers.filter((t) => !ACTIVE.includes(t.status));
+  await Promise.all(active.map((t) => loadTask(t.id)));
+  const arts = idx.artifacts.filter((a) => ids.has(a.task_id));
+  const g = PAPER_GROUPS[q.kind] ? q.kind : 'all';
+  const shown = arts.filter(PAPER_GROUPS[g].test);
+  return html`
+    ${sectionHead('논문 작성', '논문 원고 작성 과정과 원고 · 그림 · 표 등 결과물', '#/new?type=paper')}
+    ${sectionStats(papers, arts)}
+    ${sectionAttention(ids)}
+    <div class="dash-grid">
+      <div>
+        <h2 class="section-title">작성 중인 논문 <span class="muted">${active.length}</span></h2>
+        ${active.length ? active.map((s) => paperCard(state.tasks.get(s.id), s)) : html`<div class="card empty">${icon('book')}<p>작성 중인 논문이 없습니다</p><p><a href="#/new?type=paper">논문 작성 지시하기</a></p></div>`}
+        ${finished.length ? html`<h2 class="section-title" style="margin-top:24px">완료된 논문 작업 <span class="muted">${finished.length}</span></h2><div class="task-grid">${finished.map((t) => taskCard(t, { thumbs: true }))}</div>` : ''}
+        <h2 class="section-title" style="margin-top:24px">논문 결과물 <span class="muted">${arts.length}</span></h2>
+        <div class="chips" style="margin-bottom:12px">${Object.entries(PAPER_GROUPS).map(([k, v]) => html`<a class="chip ${g === k ? 'active' : ''}" href="#/papers${k === 'all' ? '' : '?kind=' + k}">${v.label} <span class="n">${arts.filter(v.test).length}</span></a>`)}</div>
+        ${shown.length ? html`<div class="art-grid">${shown.map(artCard)}</div>` : html`<div class="card empty inline" style="padding:16px 18px">해당하는 결과물이 없습니다</div>`}
+      </div>
+      ${sectionFeed(ids)}
+    </div>`;
+}
+
+const ANALYSIS_FILTERS = {
+  all: { label: '전체', test: () => true },
+  analysis: { label: '데이터 분석', test: (t) => t.type === 'analysis' },
+  visualization: { label: '시각화', test: (t) => t.type === 'visualization' },
+  paper: { label: '논문용', test: (t) => linksOf(t.id).some((x) => x.type === 'paper') },
+  active: { label: '활성', test: (t) => ACTIVE.includes(t.status) },
+  done: { label: '완료', test: (t) => t.status === 'done' },
+};
+
+function viewAnalysis({ q }) {
+  const idx = state.index;
+  const all = idx.tasks.filter((t) => ANALYSIS_TYPES.includes(t.type));
+  const allIds = new Set(all.map((t) => t.id));
+  const f = ANALYSIS_FILTERS[q.f] ? q.f : 'all';
+  const tasks = all.filter(ANALYSIS_FILTERS[f].test)
+    .sort((a, b) => Number(!ACTIVE.includes(a.status)) - Number(!ACTIVE.includes(b.status)));
+  const ids = new Set(tasks.map((t) => t.id));
+  const arts = idx.artifacts.filter((a) => ids.has(a.task_id));
+  const figs = arts.filter((a) => FIGURE_KINDS.includes(a.kind));
+  const others = arts.filter((a) => !FIGURE_KINDS.includes(a.kind));
+  return html`
+    ${sectionHead('데이터 분석', '데이터 · 그림 분석, 데이터 가시화, 논문에 쓰일 분석의 진행 과정과 결과물', '#/new?type=analysis')}
+    ${sectionStats(all, idx.artifacts.filter((a) => allIds.has(a.task_id)))}
+    ${sectionAttention(allIds)}
+    <div class="chips" style="margin-bottom:16px">${Object.entries(ANALYSIS_FILTERS).map(([k, v]) => html`<a class="chip ${f === k ? 'active' : ''}" href="#/analysis${k === 'all' ? '' : '?f=' + k}">${v.label} <span class="n">${all.filter(v.test).length}</span></a>`)}</div>
+    <div class="dash-grid">
+      <div>
+        <h2 class="section-title">분석 작업 <span class="muted">${tasks.length}</span></h2>
+        ${tasks.length ? html`<div class="task-grid">${tasks.map((t) => taskCard(t, { thumbs: true, links: true }))}</div>` : html`<div class="card empty">${icon('bar')}<p>해당하는 분석 작업이 없습니다</p><p><a href="#/new?type=analysis">데이터 분석 지시하기</a></p></div>`}
+        <h2 class="section-title" style="margin-top:24px">그림 · 시각화 <span class="muted">${figs.length}</span></h2>
+        ${figs.length ? html`<div class="art-grid gallery">${figs.map(artCard)}</div>` : html`<div class="card empty inline" style="padding:16px 18px">아직 그림이 없습니다</div>`}
+        <h2 class="section-title" style="margin-top:24px">데이터 · 노트북 · 리포트 <span class="muted">${others.length}</span></h2>
+        ${others.length ? html`<div class="card">${others.map((a) => artRow(a.task_id, a, { showTask: true }))}</div>` : html`<div class="card empty inline" style="padding:16px 18px">아직 결과물이 없습니다</div>`}
+      </div>
+      ${sectionFeed(ids)}
+    </div>`;
+}
+
 // ====================================================================== 화면: 결과물
 const ART_GROUPS = {
   all: { label: '전체', test: () => true },
@@ -902,9 +1190,10 @@ async function viewArtifact({ rest }) {
   if (!art) return viewNotFound();
   const linked = t.approvals.filter((a) => (a.artifacts || []).includes(art.id));
   return html`
-    <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><a href="#/task/${t.id}">${t.id}</a><span>/</span><a href="#/task/${t.id}/artifacts">결과물</a><span>/</span><span class="mono">${art.id}</span></div>
+    <div class="crumbs"><a href="#/${SECTION_OF_TYPE[t.type] || 'tasks'}">${SECTION_LABEL[SECTION_OF_TYPE[t.type] || 'tasks']}</a><span>/</span><a href="#/task/${t.id}">${t.id}</a><span>/</span><a href="#/task/${t.id}/artifacts">결과물</a><span>/</span><span class="mono">${art.id}</span></div>
     <section class="card" style="overflow:hidden">
       ${viewerHead(t, art)}
+      ${art.build ? buildPanel(t, art.build) : ''}
       ${art.description ? html`<div class="card-body markdown-body compact" style="border-bottom:1px solid var(--border)">${raw(renderMarkdown(art.description))}</div>` : ''}
       <div data-av="${t.id}/${art.id}"></div>
     </section>
@@ -945,7 +1234,10 @@ function viewActivity({ q }) {
 }
 
 // ====================================================================== 화면: 새 작업 지시
-function viewNewTask() {
+function viewNewTask({ q = {} } = {}) {
+  const type = TYPES[q.type] ? q.type : 'code';
+  const tasks = [...state.index.tasks].sort((a, b) => Number(b.type === 'paper') - Number(a.type === 'paper'));
+  const relTask = tasks.find((t) => t.id === q.related);
   return html`
     <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><span>새 작업 지시</span></div>
     <div class="page-head"><div><h1>새 작업 지시</h1><p class="sub">AI 에이전트에게 맡길 작업을 적어주세요. 에이전트는 진행 상황을 기록하고, 확인이 필요하면 알림으로 요청합니다.</p></div></div>
@@ -953,7 +1245,7 @@ function viewNewTask() {
     <form id="new-task-form" class="card card-pad" style="max-width:820px" autocomplete="off">
       <label class="field"><span>작업 제목 *</span><input type="text" name="title" required maxlength="200" placeholder="예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성"></label>
       <div class="field-row">
-        <label class="field"><span>작업 유형</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}">${v.label}</option>`)}</select></label>
+        <label class="field"><span>작업 유형</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${v.label}</option>`)}</select></label>
         <label class="field"><span>담당 AI</span><select name="agent"><option>Claude</option><option>Codex</option><option>Gemini</option><option>기타</option></select></label>
         <label class="field"><span>우선순위</span><select name="priority"><option value="normal">보통</option><option value="high">높음</option><option value="low">낮음</option></select></label>
       </div>
@@ -961,6 +1253,11 @@ function viewNewTask() {
         <label class="field"><span>대상 저장소 경로</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>코드 작업일 때 결과를 커밋할 저장소</small></label>
         <label class="field"><span>브랜치</span><input type="text" name="branch" placeholder="(현재 브랜치)"></label>
       </div>
+      <label class="field"><span>관련 작업 (선택)</span>
+        <select name="related"><option value="">없음</option>${tasks.map((t) => html`<option value="${t.id}" ${t.id === q.related ? raw('selected') : ''}>${t.id} · ${pick(TYPES, t.type).label} · ${t.title}</option>`)}</select>
+        <small>예: 논문에 쓸 데이터 분석이라면 해당 논문 작업을 선택하세요. 논문 작성 화면에 연결되어 표시됩니다.</small>
+      </label>
+      ${relTask ? html`<div class="alert alert-info" style="margin-bottom:14px">${icon('link')}<div class="alert-body"><b>${relTask.id} ${relTask.title}</b> 에 연결된 작업으로 등록됩니다.</div></div>` : ''}
       <label class="field"><span>지시 내용</span><textarea name="instruction" rows="9" placeholder="무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:"></textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <a class="btn btn-ghost" href="#/tasks">취소</a>
@@ -975,11 +1272,12 @@ async function submitNewTask(ev) {
   const data = Object.fromEntries(new FormData(form).entries());
   data.title = (data.title || '').trim();
   if (!data.title) return;
+  const rel = data.related ? state.index.tasks.find((t) => t.id === data.related) : null;
   if (state.mode === 'live') {
     const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     try {
-      const r = await api('api/tasks', data);
+      const r = await api('api/tasks', { ...data, related: data.related ? [data.related] : [] });
       form.reset();
       toast({ title: '작업 지시를 등록했습니다', meta: `${r.task.id} — 에이전트가 devtrack inbox 로 확인합니다`, tone: 'green' });
       await poll({ force: true });
@@ -995,6 +1293,7 @@ async function submitNewTask(ev) {
     'devtrack new', shellQuote(data.title), '-t', data.type, '--agent', shellQuote(data.agent),
     data.priority !== 'normal' ? `--priority ${data.priority}` : '',
     data.repo ? `--repo ${shellQuote(data.repo)}` : '', data.branch ? `--branch ${shellQuote(data.branch)}` : '',
+    data.related ? `--related ${data.related}` : '',
     data.instruction ? `-i ${shellQuote(data.instruction)}` : '',
   ].filter(Boolean).join(' ');
   const msg = [
@@ -1003,6 +1302,7 @@ async function submitNewTask(ev) {
     `유형: ${typeLabel} (${data.type})`,
     data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : '',
     data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : '',
+    rel ? `관련 작업: ${rel.id} ${rel.title} (devtrack new 에 --related ${rel.id})` : '',
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',
@@ -1193,7 +1493,12 @@ function bindEvents() {
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') { closeModal(); $('#notif-dd').classList.remove('open'); document.body.classList.remove('nav-open'); }
   });
-  window.addEventListener('hashchange', () => render());
+  window.addEventListener('hashchange', () => {
+    // 같은 화면에서 필터만 바뀌면 스크롤 위치 유지
+    const r = parseRoute();
+    const key = [r.name, ...r.rest].join('/');
+    render({ keepScroll: key === state.routeKey });
+  });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeIcon);
   setInterval(() => {

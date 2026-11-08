@@ -58,6 +58,7 @@ def cmd_new(store, args):
         type=args.type, agent=args.agent or args.author, repo=args.repo, branch=args.branch,
         repo_url=args.url, tags=args.tag, priority=args.priority,
         status="queued" if queued else "in_progress", created_by=USER if queued else None, plan=args.plan,
+        related=args.related,
     )
     _info("새 작업 생성: {} — {}".format(t["id"], t["title"]))
     _out(args, t, t["id"])
@@ -81,6 +82,11 @@ def cmd_status(store, args):
     t = store.update_task(args.task, status=args.status, progress=args.progress, message=args.message,
                           author=args.author)
     _out(args, t, "{} {} {}%".format(t["id"], STATUSES[t["status"]], t.get("progress", 0)))
+
+
+def cmd_link(store, args):
+    rel = store.link_tasks(args.task, args.others, unlink=args.unlink, author=args.author)
+    _out(args, rel, "{} 관련 작업: {}".format(normalize_task_id(args.task), ", ".join(rel) or "없음"))
 
 
 def cmd_log(store, args):
@@ -136,6 +142,29 @@ def cmd_artifact(store, args, category=None):
 def cmd_review(store, args):
     args.url = args.git_diff = None
     cmd_artifact(store, args, category="review")
+
+
+def cmd_latex(store, args):
+    from . import latex
+    task = store.load(args.task)
+    tex_abs = os.path.abspath(os.path.expanduser(args.tex))
+    repo = (task.get("repo") or {}).get("path")
+    source = os.path.relpath(tex_abs, repo) if repo and tex_abs.startswith(repo.rstrip("/") + "/") else args.tex
+    if args.pdf:
+        result = latex.from_existing(args.tex, args.pdf)
+    else:
+        _info("LaTeX 컴파일 중: {}".format(args.tex))
+        result = latex.compile_tex(args.tex, engine=args.engine, timeout=args.timeout)
+    b = store.record_build(args.task, source, result, author=args.author)
+    if b["status"] == "ok":
+        wc = latex.warning_count(b["warnings"])
+        _out(args, b, "{} 성공: {}쪽{} (PDF {})".format(b["id"], b.get("pages") or "?",
+                                                       ", 경고 {}".format(wc) if wc else "", b.get("pdf")))
+        return 0
+    first = (b["errors"] or [{"message": "?"}])[0]
+    _out(args, b, "{} 실패: {}{}".format(b["id"], first["message"],
+                                         " (줄 {})".format(first["line"]) if first.get("line") else ""))
+    return 1
 
 
 def cmd_request(store, args):
@@ -232,6 +261,8 @@ def cmd_show(store, args):
     if repo:
         print("  저장소: {}{}".format(repo.get("path") or repo.get("url"),
                                     " ({})".format(repo["branch"]) if repo.get("branch") else ""))
+    if t.get("related"):
+        print("  관련 작업: " + ", ".join(t["related"]))
     if t.get("current_step"):
         print("  현재 단계: " + t["current_step"])
     if t.get("plan"):
@@ -334,6 +365,7 @@ def build_parser():
     sp.add_argument("--tag", action="append", help="태그 (여러 번 지정 가능)")
     sp.add_argument("--priority", default="normal", choices=PRIORITIES)
     sp.add_argument("--plan", nargs="+", metavar="STEP", help="초기 작업 계획 단계들")
+    sp.add_argument("--related", nargs="+", metavar="T-ID", help="관련 작업 (예: 이 분석을 사용할 논문 작업)")
     sp.add_argument("--queued", action="store_true", help="사용자 지시로 '대기' 상태 생성")
 
     sp = add("start", cmd_start, "대기 중인 작업을 진행 중으로 전환")
@@ -350,6 +382,11 @@ def build_parser():
     sp.add_argument("status", nargs="?", choices=list(STATUSES))
     sp.add_argument("-p", "--progress", type=int)
     sp.add_argument("-m", "--message", help="변경 사유")
+
+    sp = add("link", cmd_link, "작업 연결 (예: 데이터 분석 → 논문 작업)")
+    sp.add_argument("task")
+    sp.add_argument("others", nargs="+", metavar="T-ID")
+    sp.add_argument("--unlink", action="store_true", help="연결 해제")
 
     sp = add("log", cmd_log, "진행 기록 남기기")
     sp.add_argument("task")
@@ -400,6 +437,13 @@ def build_parser():
     sp.add_argument("-k", "--kind")
     sp.add_argument("-d", "--desc")
     sp.add_argument("--desc-file", metavar="FILE")
+
+    sp = add("latex", cmd_latex, "LaTeX 컴파일 → PDF 를 결과물로 기록 (실패하면 오류·로그 기록, exit 1)")
+    sp.add_argument("task")
+    sp.add_argument("tex", help="메인 .tex 파일")
+    sp.add_argument("--engine", choices=["pdf", "xe", "lua"], default="pdf", help="pdflatex / xelatex / lualatex")
+    sp.add_argument("--timeout", type=int, default=600, help="최대 컴파일 시간(초)")
+    sp.add_argument("--pdf", metavar="FILE", help="컴파일하지 않고 이미 만든 PDF 를 기록 (같은 이름 .log 가 있으면 분석)")
 
     sp = add("request", cmd_request, "승인 요청 (웹 알림으로 표시, 승인 ID 출력)")
     sp.add_argument("task")

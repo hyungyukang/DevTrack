@@ -25,6 +25,7 @@ devtrack inbox
 TID=$(devtrack new "압력 솔버 HIP 포팅" -t code --repo ~/cfd-solver \
       -i "사용자 지시 원문" --plan "구조 분석" "포팅" "검증" "커밋 승인 요청")
 devtrack start T-0007 "지시 확인, 분석 시작"        # 대기(queued) 작업인 경우
+devtrack link  T-0008 T-0005                         # 관련 작업 연결 (예: 이 분석 → 논문 작업)
 
 # 2. 진행 기록 — 지금 무엇을 하는지
 devtrack step $TID "hipify 변환 중 (커널 3개)" -p 30
@@ -40,6 +41,7 @@ devtrack artifact $TID perf_report.md -n "성능 측정 리포트"
 devtrack artifact $TID fig/speedup.png -n "가속비 그림"
 devtrack artifact $TID --git-diff ~/cfd-solver -n "현재 변경사항"
 devtrack artifact $TID --url https://github.com/org/repo/pull/12 -n "PR"
+devtrack latex    $TID paper/main.tex                 # 논문: 컴파일 → PDF/오류 기록 (TeX 없으면 --pdf 로 기록)
 
 # 5. 커밋 승인 요청 (diff 자동 첨부) → 웹 알림
 AID=$(devtrack request $TID "HIP 포팅 커밋" --commit -m "Port solver to HIP" \
@@ -61,8 +63,8 @@ devtrack done $TID -m "HIP 포팅 완료, 커밋 abc1234"
 |---|---|
 | `code` | 계획, 단계별 진행, 테스트 결과, `request --commit` |
 | `review` | `templates/review_report.md` 형식의 리포트를 `devtrack review` 로 등록 (md, 필요하면 pdf 도). PR 에 코멘트를 게시하기 전 `request -k review` |
-| `paper` | `.tex` 초안, 그림(PDF/SVG/PNG), 수치 검증 결과. 원본 데이터와 다른 수치는 `issue` |
-| `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md). 해석이 필요한 결과는 `request -k result` |
+| `paper` | `--plan` 에 원고 구성(절/장)을 넣는다 — 웹의 논문 카드에 체크리스트로 표시. 원고를 고칠 때마다 `.tex` 를 `artifact` 로 올리고 **`devtrack latex <TID> paper/main.tex` 로 컴파일 결과(PDF/오류)를 기록**한다. 그림은 `\includegraphics` 와 **같은 파일 이름(확장자 무관)** 으로 올려야 웹의 문서 보기에서 연결된다 (예: `figs/fig4_1.pdf` ↔ `fig4_1.png`). 원본 데이터와 다른 수치는 `issue` |
+| `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md). 해석이 필요한 결과는 `request -k result`. **논문에 쓸 분석이면 `--related <논문 T-ID>`** 로 연결 |
 | `visualization` | 그림/HTML(plotly 등) 결과물, 사용한 스크립트 |
 | `model` | 학습 설정, 손실 곡선 그림, 로그, 평가 결과. 큰 자원 사용 전 `request -k plan` |
 

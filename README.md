@@ -29,7 +29,7 @@ Claude 등 AI 에이전트가 수행하는 작업(코드 개발, 코드 리뷰, 
 ## 빠른 시작 (로컬에서 예시 화면 보기)
 
 ```bash
-bin/devtrack --data demo-data demo        # 예시 작업 7개 생성 (실제 git 저장소 포함)
+bin/devtrack --data demo-data demo        # 예시 작업 8개 생성 (실제 git 저장소 포함)
 bin/devtrack --data demo-data serve --open
 # → http://localhost:8765
 ```
@@ -50,6 +50,9 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 - **작업 상세** — 지시 내용, 현재 단계와 진행률, 작업 계획 체크리스트, 진행 기록 타임라인, 문제점, 결과물, 승인 요청
 - **승인 요청** — 커밋 diff · 리포트를 펼쳐 보고 **승인 / 수정 요청 / 거절** + 코멘트
 - **코드 리뷰** — 리뷰 리포트(Markdown · PDF) 목록과 뷰어, 리뷰 관련 승인 요청과 의견 보내기
+- **논문 작성** — 논문(유형 `paper`)별 카드: 원고 구성(작성 계획), **컴파일된 PDF**(최신 빌드 · 경고 · 실패 알림), 원고 파일, 그림, 연결된 데이터 분석, 열린 문제. 논문 결과물(PDF · 원고 · 그림 · 표/데이터) 모아보기
+- **LaTeX 문서 보기** — `.tex` 결과물을 코드 대신 읽기 쉬운 문서로 표시: 절 제목 · 수식(KaTeX) · 표 · 목록 · 각주, `\cite`/`\ref`/`\eqref` 번호 연결, `\includegraphics` 는 같은 이름으로 올라온 그림(같은 작업 또는 연결된 분석 작업)을 찾아 표시. `원본 코드` 로 전환 가능. 번호·레이아웃은 실제 PDF 와 다를 수 있는 미리보기
+- **데이터 분석** — 데이터 분석 · 시각화 작업(유형 `analysis`, `visualization`)과 그림 갤러리, 데이터 · 노트북 · 리포트. `논문용` 필터는 논문 작업에 연결된 분석만 표시
 - **결과물** — Markdown, PDF, 이미지/SVG, diff, 코드/LaTeX(하이라이트), CSV 표, Jupyter 노트북, HTML
 - **활동 기록** — 모든 작업의 기록을 날짜별로
 - **새 작업 지시** — 제목 · 유형 · 저장소 · 지시 내용으로 작업 등록
@@ -87,8 +90,10 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `new` / `start` / `done` | 작업 생성 / 대기 작업 시작 / 완료 |
 | `step` / `status` / `log` | 현재 단계 / 상태·진행률 변경 / 기록 남기기 |
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
+| `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `issue` / `resolve` | 문제 기록 / 해결 |
 | `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 |
+| `latex` | LaTeX 컴파일 → 성공하면 PDF 를 빌드로 기록(쪽수, 정의 안 된 인용/참조, overfull 경고), 실패하면 오류 위치와 로그 기록. `--pdf` 로 다른 곳에서 만든 PDF 기록 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부) / 결정 대기 / 승인된 커밋 실행 |
 | `decide` / `comment` | 사용자 결정 · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
 | `inbox` | 처리할 사용자 입력 (`--ack` 로 처리 완료 표시) |

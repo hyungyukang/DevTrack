@@ -99,30 +99,26 @@ def svg_bar_chart(cats, vals, title, ylabel, w=640, h=360, highlight=None):
     return "\n".join(out)
 
 
-def simple_pdf(title, lines):
-    """ASCII 텍스트 한 페이지짜리 PDF."""
-    def esc(s):
-        return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    parts = ["BT /F2 18 Tf 56 780 Td ({}) Tj ET".format(esc(title)),
-             "0.8 0.8 0.8 RG 56 768 m 539 768 l S"]
-    y = 744
-    for line in lines:
-        bold = line.startswith("## ")
-        text = line[3:] if bold else line
-        size = 13 if bold else 10.5
-        if bold:
-            y -= 6
-        parts.append("BT /{} {} Tf 56 {} Td ({}) Tj ET".format("F2" if bold else "F1", size, y, esc(text)))
-        y -= 20 if bold else 15
-    stream = "\n".join(parts).encode("latin-1")
-    objs = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
-    ]
+def _pdf_esc(s):
+    return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def pdf_pages(pages):
+    """페이지별 content stream(ASCII) 목록 → PDF. 글꼴: F1 Helvetica, F2 Helvetica-Bold,
+    F3 Times-Roman, F4 Times-Bold, F5 Times-Italic."""
+    fonts = ["Helvetica", "Helvetica-Bold", "Times-Roman", "Times-Bold", "Times-Italic"]
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", None]
+    objs += ["<< /Type /Font /Subtype /Type1 /BaseFont /{} /Encoding /WinAnsiEncoding >>".format(f).encode() for f in fonts]
+    font_res = " ".join("/F{} {} 0 R".format(i + 1, i + 3) for i in range(len(fonts)))
+    kids = []
+    for content in pages:
+        data = content.encode("latin-1")
+        pid = len(objs) + 1
+        kids.append("{} 0 R".format(pid))
+        objs.append("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << {} >> >> /Contents {} 0 R >>"
+                    .format(font_res, pid + 1).encode())
+        objs.append(b"<< /Length " + str(len(data)).encode() + b" >>\nstream\n" + data + b"\nendstream")
+    objs[1] = "<< /Type /Pages /Kids [{}] /Count {} >>".format(" ".join(kids), len(pages)).encode()
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for i, o in enumerate(objs, 1):
@@ -134,6 +130,240 @@ def simple_pdf(title, lines):
         out += "{:010d} 00000 n \n".format(off).encode()
     out += "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n".format(len(objs) + 1, xref).encode()
     return bytes(out)
+
+
+def simple_pdf(title, lines):
+    """ASCII 텍스트 한 페이지짜리 PDF."""
+    parts = ["BT /F2 18 Tf 56 780 Td ({}) Tj ET".format(_pdf_esc(title)),
+             "0.8 0.8 0.8 RG 56 768 m 539 768 l S"]
+    y = 744
+    for line in lines:
+        bold = line.startswith("## ")
+        text = line[3:] if bold else line
+        size = 13 if bold else 10.5
+        if bold:
+            y -= 6
+        parts.append("BT /{} {} Tf 56 {} Td ({}) Tj ET".format("F2" if bold else "F1", size, y, _pdf_esc(text)))
+        y -= 20 if bold else 15
+    return pdf_pages(["\n".join(parts)])
+
+
+class _Page:
+    """논문 모양 데모 PDF 를 그리기 위한 아주 작은 도우미."""
+
+    def __init__(self, num):
+        self.ops, self.y, self.num = [], 770, num
+
+    def text(self, s, x=72, size=10.5, font="F3", y=None):
+        self.ops.append("BT /{} {} Tf {:.1f} {:.1f} Td ({}) Tj ET".format(font, size, x, self.y if y is None else y, _pdf_esc(s)))
+
+    def para(self, s, size=10.5, width=98, lead=13.5, x=72, font="F3"):
+        import textwrap
+        for ln in textwrap.wrap(s, width):
+            self.text(ln, x=x, size=size, font=font)
+            self.y -= lead
+        self.y -= 5
+
+    def heading(self, s, size=12):
+        self.y -= 8
+        self.text(s, size=size, font="F4")
+        self.y -= size + 7
+
+    def line(self, x1, y1, x2, y2, w=0.6, rgb="0 0 0", dash=False):
+        self.ops.append("q {} RG {} w {}{:.1f} {:.1f} m {:.1f} {:.1f} l S Q".format(
+            rgb, w, "[3 2] 0 d " if dash else "", x1, y1, x2, y2))
+
+    def poly(self, pts, rgb, w=1.2, dash=False):
+        path = " ".join("{:.1f} {:.1f} {}".format(x, y, "m" if i == 0 else "l") for i, (x, y) in enumerate(pts))
+        self.ops.append("q {} RG {} w {}{} S Q".format(rgb, w, "[3 2] 0 d " if dash else "", path))
+
+    def rect(self, x, y, w, h, rgb="0.23 0.36 0.8"):
+        self.ops.append("q {} rg {:.1f} {:.1f} {:.1f} {:.1f} re f Q".format(rgb, x, y, w, h))
+
+    def box(self, x, y, w, h):
+        self.ops.append("q 0.4 0.4 0.4 RG 0.6 w {:.1f} {:.1f} {:.1f} {:.1f} re S Q".format(x, y, w, h))
+
+    def render(self):
+        self.text(str(self.num), x=294, y=40, size=9.5)
+        return "\n".join(self.ops)
+
+
+def paper_pdf():
+    """'컴파일된' 논문 4장 데모 PDF (3쪽)."""
+    blue, orange = "0.23 0.36 0.8", "0.91 0.35 0.05"
+    p1 = _Page(1)
+    p1.text("GPU-Accelerated Pressure Solver for Exascale CFD", x=110, size=16, font="F4")
+    p1.y -= 18
+    p1.text("Draft -- Chapter 4: Results", x=228, size=10.5, font="F5")
+    p1.y -= 14
+    p1.line(72, p1.y, 523, p1.y, w=0.4, rgb="0.6 0.6 0.6")
+    p1.y -= 6
+    p1.heading("4   Results", size=14)
+    p1.para("This chapter evaluates the HIP port of the pressure solver in terms of accuracy (Section 4.1), "
+            "performance (Section 4.2) and physical fidelity (Section 4.3).")
+    p1.heading("4.1   Grid convergence")
+    p1.para("We measure the discretisation error against the analytic Taylor-Green solution using the relative L2 norm")
+    p1.text("e_h = || p_h - p_exact ||_2 / || p_exact ||_2 ,        p = log2 ( e_2h / e_h )", x=150, font="F5", size=11)
+    p1.text("(4.1)", x=500, size=10.5)
+    p1.y -= 22
+    p1.para("Figure 4.1 shows that the observed order of accuracy defined in (4.1) is p = 2.01, confirming the "
+            "second-order spatial discretisation.(1)")
+    top = p1.y - 10
+    x0, y0, w, h = 170, top - 190, 260, 180
+    p1.box(x0, y0, w, h)
+    hs = [1 / 16, 1 / 32, 1 / 64, 1 / 128, 1 / 256]
+    lx = lambda v: x0 + 10 + (math.log10(v) - math.log10(1 / 256)) / (math.log10(1 / 16) - math.log10(1 / 256)) * (w - 20)
+    ly = lambda v: y0 + 10 + (math.log10(v) + 6) / 5.5 * (h - 20)
+    p1.poly([(lx(v), ly(0.8 * v * v)) for v in hs], blue)
+    p1.poly([(lx(v), ly(0.5 * v)) for v in hs], orange, dash=True)
+    p1.text("grid spacing h", x=x0 + 95, y=y0 - 14, size=8.5, font="F1")
+    p1.y = y0 - 32
+    p1.para("Figure 4.1: Grid convergence of the pressure solver. The dashed line indicates first-order "
+            "convergence for reference.", size=9.5, width=104)
+    p1.line(72, 78, 200, 78, w=0.4)
+    p1.text("(1) All runs use double precision and a fixed pseudo-time step of 1e-4.", y=66, size=8.5)
+
+    p2 = _Page(2)
+    p2.heading("4.2   GPU performance")
+    p2.para("On a single Frontier node (8 MI250X GCDs) the HIP port achieves a 112x speedup over a 64-core CPU "
+            "baseline (Table 4.1 and Figure 4.2), comparable to results reported for other exascale CFD codes "
+            "[1, ?]. Three factors dominate:")
+    for b in ["64-wide wavefronts favour 64x4 thread blocks over the original 16x16;",
+              "the kernel is memory-bound, reaching 1.31 TB/s (82% of peak);",
+              "host-device transfers are overlapped using HIP streams."]:
+        p2.text("-", x=86)
+        p2.text(b, x=98)
+        p2.y -= 14
+    p2.y -= 12
+    p2.text("Table 4.1: Wall-clock time per step on a 2048^2 grid.", x=170, size=9.5)
+    p2.y -= 10
+    cols = [160, 330, 420]
+    p2.line(150, p2.y, 450, p2.y, w=1.0)
+    p2.y -= 14
+    for i, row in enumerate([("Platform", "Time/step [ms]", "Speedup"), ("CPU (64 cores)", "412.0", "1.0"),
+                             ("A100", "22.4", "18.4"), ("MI250X (1 GCD)", "25.9", "15.9"), ("MI250X (8 GCD)", "3.67", "112.3")]):
+        for x, cell in zip(cols, row):
+            p2.text(cell, x=x, size=10, font="F4" if i == 0 or (i == 4 and x == 420) else "F3")
+        if i == 0:
+            p2.line(150, p2.y - 5, 450, p2.y - 5, w=0.5)
+        p2.y -= 16
+    p2.line(150, p2.y + 9, 450, p2.y + 9, w=1.0)
+    p2.y -= 16
+    base = p2.y - 170
+    p2.box(170, base, 260, 165)
+    for i, v in enumerate([1.0, 18.4, 15.9, 112.3]):
+        hgt = v / 120 * 145
+        p2.rect(190 + i * 60, base + 8, 36, hgt, orange if i == 3 else blue)
+    p2.y = base - 20
+    p2.para("Figure 4.2: Speedup relative to the 64-core CPU baseline.", size=9.5)
+
+    p3 = _Page(3)
+    p3.heading("4.3   Turbulence statistics")
+    p3.text("[TODO: Finalise after T-0008 results are approved.]", font="F5", size=10, x=72)
+    p3.y -= 18
+    p3.para("The mean velocity profile agrees with the wind-tunnel measurements to within 2.1% (Figure 4.3a), and the "
+            "velocity-fluctuation PDF shows a positive skewness S = 0.31 (Figure 4.3b).")
+    top = p3.y - 10
+    for k, x0 in enumerate([90, 320]):
+        p3.box(x0, top - 140, 190, 130)
+        if k == 0:
+            pts = [(x0 + 8 + 174 * (i / 40), top - 132 + 112 * (1 - abs(2 * i / 40 - 1) ** 6)) for i in range(41)]
+        else:
+            pts = [(x0 + 8 + 174 * (i / 40), top - 132 + 112 * math.exp(-((i / 40 * 8 - 4) ** 2) / 2)) for i in range(41)]
+        p3.poly(pts, blue)
+        p3.text("({}) {}".format("a" if k == 0 else "b", "Mean velocity" if k == 0 else "Fluctuation PDF"),
+                x=x0 + 45, y=top - 156, size=9.5)
+    p3.y = top - 182
+    p3.para("Figure 4.3: Comparison of DNS and experiment.", size=9.5)
+    p3.heading("References")
+    p3.para("[1] J. Smith, A. Lee, Exascale CFD on AMD GPUs, J. Comput. Phys. 489 (2023) 112261.", size=9.5)
+    return pdf_pages([p1.render(), p2.render(), p3.render()])
+
+
+RESULTS_TEX = r"""\section{Results}\label{sec:results}
+
+This chapter evaluates the HIP port of the pressure solver in terms of accuracy
+(Section~\ref{sec:convergence}), performance (Section~\ref{sec:perf}) and physical
+fidelity (Section~\ref{sec:turb}).
+
+\subsection{Grid convergence}\label{sec:convergence}
+We measure the discretisation error against the analytic Taylor--Green solution
+using the relative $L_2$ norm
+\begin{equation}
+  \varepsilon_h = \frac{\lVert p_h - p_{\mathrm{exact}} \rVert_2}{\lVert p_{\mathrm{exact}} \rVert_2},
+  \qquad
+  p = \log_2 \frac{\varepsilon_{2h}}{\varepsilon_h}.
+  \label{eq:l2}
+\end{equation}
+Figure~\ref{fig:convergence} shows that the observed order of accuracy defined in
+\eqref{eq:l2} is $p = 2.01$, confirming the second-order spatial
+discretisation.\footnote{All runs use double precision and a fixed pseudo-time step
+$\Delta\tau = 10^{-4}$.}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figs/fig4_1_convergence.pdf}
+  \caption{Grid convergence of the pressure solver. The dashed line indicates
+  first-order convergence for reference.}
+  \label{fig:convergence}
+\end{figure}
+
+\subsection{GPU performance}\label{sec:perf}
+On a single Frontier node (8 MI250X GCDs) the HIP port achieves a $112\times$
+speedup over a 64-core CPU baseline (Table~\ref{tab:perf} and
+Figure~\ref{fig:speedup}), comparable to results reported for other exascale CFD
+codes~\cite{smith2023,kim2022}. Three factors dominate:
+\begin{itemize}
+  \item 64-wide wavefronts favour $64\times4$ thread blocks over the original $16\times16$;
+  \item the kernel is memory-bound, reaching 1.31\,TB/s (82\% of peak);
+  \item host--device transfers are overlapped using HIP streams.
+\end{itemize}
+
+% TODO: strong/weak scaling paragraph
+\begin{table}[t]
+  \centering
+  \caption{Wall-clock time per step on a $2048^2$ grid.}
+  \label{tab:perf}
+  \begin{tabular}{lrr}
+    \toprule
+    Platform & Time/step [ms] & Speedup \\
+    \midrule
+    CPU (64 cores)  & 412.0 & 1.0 \\
+    A100            &  22.4 & 18.4 \\
+    MI250X (1 GCD)  &  25.9 & 15.9 \\
+    MI250X (8 GCD)  &   3.67 & \textbf{112.3} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figs/fig4_2_speedup}
+  \caption{Speedup relative to the 64-core CPU baseline.}
+  \label{fig:speedup}
+\end{figure}
+
+\subsection{Turbulence statistics}\label{sec:turb}
+\todo{Finalise after T-0008 results are approved.}
+The mean velocity profile agrees with the wind-tunnel measurements to within 2.1\%
+(Figure~\ref{fig:turb}a), and the velocity-fluctuation PDF shows a positive
+skewness $S \approx 0.31$ (Figure~\ref{fig:turb}b).
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.48\linewidth}
+    \includegraphics[width=\linewidth]{figs/fig4_3a_profiles.pdf}
+    \caption{Mean velocity}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.48\linewidth}
+    \includegraphics[width=\linewidth]{figs/fig4_3b_pdf.pdf}
+    \caption{Fluctuation PDF}
+  \end{subfigure}
+  \caption{Comparison of DNS and wind-tunnel experiment.}
+  \label{fig:turb}
+\end{figure}
+"""
 
 
 # ------------------------------------------------------------------ 데모용 git 저장소
@@ -543,7 +773,7 @@ Taylor–Green 와류 테스트에서 운동에너지 감쇠율이 해석해 대
                     "1. 격자 수렴성 (Fig 4.1)\n2. GPU 성능 비교 (Fig 4.2, Table 4.1)\n3. 난류 통계 검증 (Fig 4.3)\n\n"
                     "수치는 반드시 `results/*.csv` 원본과 대조하고, 그림은 PDF 벡터로.",
         plan=["실험 결과 데이터 정리", "Fig 4.1–4.3 생성", "4.1절 격자 수렴성 작성", "4.2절 GPU 성능 작성",
-              "Table 4.1 수치 검증", "4.3절 및 참고문헌 정리"], tags=["paper", "latex"])
+              "Table 4.1 수치 검증", "4.3절 및 참고문헌 정리"], tags=["paper", "latex"], related=[tid2])
     tid5 = t5["id"]
     clk.at(240); s.update_task(tid5, step="results/*.csv 12개 파일 정리", progress=5)
     clk.at(225); s.check_plan(tid5, [1])
@@ -565,42 +795,25 @@ Taylor–Green 와류 테스트에서 운동에너지 감쇠율이 해석해 대
     clk.at(140)
     s.add_log(tid5, "사용자 요청 반영: Fig 4.1 에 h² 기준선 추가 예정 (다음 그림 갱신 때 반영)", kind="info")
     clk.at(120); s.check_plan(tid5, [3])
-    tex = r"""\section{Results}\label{sec:results}
-
-\subsection{Grid convergence}
-Figure~\ref{fig:convergence} shows the $L_2$ error of the pressure field against the
-analytic Taylor--Green solution. The observed order of accuracy is $p = 2.01$,
-confirming the second-order spatial discretisation.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.8\linewidth]{figs/fig4_1_convergence.pdf}
-  \caption{Grid convergence of the pressure solver.}
-  \label{fig:convergence}
-\end{figure}
-
-\subsection{GPU performance}
-On a single Frontier node (8 MI250X GCDs) the HIP port achieves a
-$112\times$ speedup over a 64-core CPU baseline (Table~\ref{tab:perf}).
-
-\begin{table}[t]
-  \centering
-  \begin{tabular}{lrr}
-    \toprule
-    Platform & Time/step [ms] & Speedup \\
-    \midrule
-    CPU (64 cores)  & 412.0 & 1.0 \\
-    A100            &  22.4 & 18.4 \\
-    MI250X (1 GCD)  &  25.9 & 15.9 \\
-    MI250X (8 GCD)  &   3.67 & 112.3 \\
-    \bottomrule
-  \end{tabular}
-  \caption{Wall-clock time per step on a $2048^2$ grid.}
-  \label{tab:perf}
-\end{table}
-"""
     clk.at(60)
-    s.add_artifact(tid5, path=f("results.tex", tex), title="results.tex (4.1–4.2절 초안)")
+    s.add_artifact(tid5, path=f("results.tex", RESULTS_TEX), title="results.tex (4장 초안)")
+    clk.at(58)
+    s.record_build(tid5, "paper/main.tex", {
+        "status": "failed", "engine": "latexmk -pdf", "duration": 4.8, "pages": None, "warnings": {},
+        "errors": [{"file": "results.tex", "line": 58, "message": "Undefined control sequence."}],
+        "log_text": ("This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023)\n(./main.tex\n"
+                     "(./chapters/results.tex\n./chapters/results.tex:58: Undefined control sequence.\n"
+                     "l.58     \\toprule\n\nNo pages of output.\n"),
+    })
+    clk.at(56)
+    s.add_log(tid5, "원인: booktabs 패키지 누락 → preamble 에 \\usepackage{booktabs} 추가 후 재컴파일", kind="info")
+    clk.at(54)
+    s.record_build(tid5, "paper/main.tex", {
+        "status": "ok", "engine": "latexmk -pdf", "duration": 6.2, "pages": 3, "errors": [],
+        "pdf": f("main.pdf", paper_pdf(), "wb"),
+        "warnings": {"undefined_citations": ["kim2022"], "undefined_references": [], "overfull": 1,
+                     "underfull": 0, "other": []},
+    })
     clk.at(45)
     s.add_issue(tid5, "Table 4.1 의 MI250X 8GCD 시간이 원본 로그(3.74 ms)와 2% 차이", severity="medium",
                 detail="`results/perf_8gcd.csv` 의 마지막 3회 평균은 3.74 ms. 표에는 최솟값 3.67 ms 가 들어감. 평균/최솟값 중 어느 기준으로 할지 확인 필요.")
@@ -658,3 +871,57 @@ $112\times$ speedup over a 64-core CPU baseline (Table~\ref{tab:perf}).
         created_by=store_mod.USER, priority="normal",
         instruction="`run_042/` 마지막 스냅샷으로 Q-criterion 등위면(Q=0.5) 을 속도 크기로 색칠한 그림을 만들어 주세요.\n\n"
                     "- 4K 해상도 PNG + 회전 애니메이션 mp4\n- 컬러맵: viridis")
+
+    # ---------------------------------------------------------------- T-0008 논문용 난류 통계 분석 (결과 확인 요청)
+    clk.at(230)
+    t8 = s.create_task(
+        "논문 4.3절용 난류 통계 검증 분석 (DNS vs 실험)", type="analysis", agent="Claude", related=[tid5],
+        instruction="논문 4.3절(난류 통계 검증)에 쓸 분석입니다.\n\n"
+                    "- DNS `run_042` 와 풍동 실험(T-0002)의 평균 속도 · 속도 변동 통계 비교\n"
+                    "- 속도 변동 확률밀도(PDF) 비교\n- 논문용 그림은 벡터(SVG/PDF), 수치는 표로 정리",
+        plan=["DNS 통계량 추출 (2,000 스냅샷 시간 평균)", "실험 데이터 좌표계 정렬", "프로파일 · PDF 비교 그림",
+              "오차 정량화 및 요약"], tags=["paper", "turbulence"])
+    tid8 = t8["id"]
+    clk.at(220); s.update_task(tid8, step="DNS 스냅샷 2,000개 시간 평균 계산 (sbatch job 2319011)", progress=10)
+    clk.at(170); s.check_plan(tid8, [1])
+    clk.at(160)
+    i8 = s.add_issue(tid8, "실험 데이터 x 좌표 원점이 DNS 와 0.05 m 어긋남", severity="medium",
+                     detail="실험은 노즐 출구, DNS 는 유입 경계 기준. 이동 후 비교해야 함.")
+    clk.at(150); s.resolve_issue(tid8, i8["id"], note="실험 좌표를 +0.05 m 이동해 정렬")
+    s.check_plan(tid8, [2])
+    ys = [i / 40 for i in range(41)]
+    dns = [(y, 1 - abs(2 * y - 1) ** 6) for y in ys]
+    exp_pts = [(y, max(0.0, 1 - abs(2 * y - 1) ** 6 + 0.015 * math.sin(9 * y))) for y in ys[::4]]
+    clk.at(110)
+    fa = s.add_artifact(tid8, path=f("fig4_3a_profiles.svg", svg_line_chart(
+        [("DNS", dns), ("experiment", exp_pts)], "Fig 4.3(a)  Mean velocity profile", "y / H", "U / U_c")),
+        title="Fig 4.3(a) 평균 속도 프로파일 비교", description="실험 좌표 정렬 후. 최대 차이 2.1% (y/H = 0.2)")
+    xs = [-4 + i * 0.2 for i in range(41)]
+    gauss = [(x, math.exp(-x * x / 2) / math.sqrt(2 * math.pi)) for x in xs]
+    skew = [(x, max(1e-4, math.exp(-x * x / 2) / math.sqrt(2 * math.pi) * (1 + 0.3 * (x ** 3 - 3 * x) / 6))) for x in xs]
+    clk.at(100)
+    fb = s.add_artifact(tid8, path=f("fig4_3b_pdf.svg", svg_line_chart(
+        [("Gaussian", gauss), ("DNS u'", skew)], "Fig 4.3(b)  PDF of streamwise velocity fluctuation", "u' / u_rms", "PDF")),
+        title="Fig 4.3(b) 속도 변동 PDF", description="왜도 S = 0.31 (양의 꼬리 두꺼움)")
+    s.check_plan(tid8, [3])
+    clk.at(70)
+    s.add_artifact(tid8, path=f("turb_stats_comparison.csv", (
+        "quantity,dns,experiment,rel_error_pct\n"
+        "U_c [m/s],12.40,12.31,0.73\nu_rms_peak [m/s],1.87,1.83,2.14\ny_peak / H,0.115,0.120,4.35\n"
+        "skewness,0.31,0.28,10.7\nflatness,3.42,3.35,2.09\n")), title="난류 통계 비교표 (Table 4.2 후보)")
+    clk.at(50)
+    summ = s.add_artifact(tid8, path=f("validation_summary.md", (
+        "# 4.3절 난류 통계 검증 요약\n\n"
+        "| 항목 | DNS | 실험 | 상대오차 |\n|---|---:|---:|---:|\n"
+        "| 중심선 속도 U_c | 12.40 | 12.31 | 0.7% |\n| u_rms 최대값 | 1.87 | 1.83 | 2.1% |\n"
+        "| 왜도 | 0.31 | 0.28 | 10.7% |\n\n"
+        "## 발견\n1. 평균 속도 프로파일은 전 구간에서 **2.1% 이내**로 일치\n"
+        "2. 속도 변동 PDF 는 양의 왜도(S≈0.3)를 보이며 실험과 경향이 같음\n"
+        "3. 왜도 차이(10.7%)는 실험 열선 풍속계의 공간 분해능 한계로 추정 — 본문에 한계로 명시 권장\n")),
+        title="검증 결과 요약")
+    s.check_plan(tid8, [4])
+    clk.at(30)
+    s.request_approval(tid8, "논문 4.3절에 사용할 그림 · 수치 확정", kind="result",
+                       artifact_ids=[summ["id"], fa["id"], fb["id"]],
+                       description="Fig 4.3(a)(b)와 비교표의 수치로 4.3절을 작성해도 될까요? "
+                                   "왜도 차이(10.7%)는 측정 한계로 본문에 명시할 예정입니다.")

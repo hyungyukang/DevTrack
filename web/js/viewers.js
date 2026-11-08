@@ -1,5 +1,6 @@
 // 결과물 뷰어: markdown, pdf, 이미지, diff, 코드/LaTeX, CSV, Jupyter 노트북, HTML, 링크
-import { esc, html, raw, icon, fmtBytes } from './util.js';
+import { esc, html, raw, icon, fmtBytes, LS } from './util.js';
+import { latexToHtml } from './latex.js';
 
 const MAX_TEXT = 2 * 1024 * 1024;     // 2MB 이상 텍스트는 잘라서 표시
 const MAX_HL_LINES = 6000;            // 이보다 긴 diff 는 하이라이트 생략
@@ -58,8 +59,66 @@ async function fetchText(url) {
 
 const truncNote = (t) => (t ? `<div class="av-note">파일이 커서 앞부분 ${fmtBytes(MAX_TEXT)}만 표시합니다. 전체는 다운로드해서 확인하세요.</div>` : '');
 
+/**
+ * LaTeX 원고: '문서 보기'(HTML 미리보기)와 '원본 코드' 전환.
+ * opts.resolveImage(path) — \includegraphics 경로를 업로드된 그림과 연결, opts.pdfHref — 컴파일된 PDF 링크
+ */
+function renderTexView(el, text, truncated, opts) {
+  let mode = LS.get('texView', 'doc');
+  let doc;
+  try {
+    doc = latexToHtml(text, { resolveImage: opts.resolveImage });
+  } catch (e) {
+    console.error(e);
+    doc = null;
+  }
+  if (!doc) mode = 'src';
+  const st = doc?.stats || {};
+  const facts = [
+    st.figures ? `그림 ${st.figures}` : '', st.tables ? `표 ${st.tables}` : '', st.equations ? `수식 ${st.equations}` : '',
+    st.citations ? `인용 ${st.citations}` : '',
+  ].filter(Boolean).join(' · ');
+  const warns = [
+    st.missingRefs ? `해결 안 된 참조 ${st.missingRefs}` : '', st.missingFigs ? `찾지 못한 그림 ${st.missingFigs}` : '',
+  ].filter(Boolean).join(' · ');
+  el.innerHTML = `${truncNote(truncated)}
+    <div class="tex-bar">
+      <div class="seg" role="tablist">
+        <button type="button" data-tex="doc" class="${mode === 'doc' ? 'on' : ''}" ${doc ? '' : 'disabled'}>${icon('book')} 문서 보기</button>
+        <button type="button" data-tex="src" class="${mode === 'src' ? 'on' : ''}">${icon('code')} 원본 코드</button>
+      </div>
+      <span class="tex-facts">${esc(facts)}${warns ? ` <span class="tex-warn">${esc(warns)}</span>` : ''}</span>
+      ${opts.pdfHref ? `<a class="btn btn-sm" href="${esc(opts.pdfHref)}">${icon('file-text')} 컴파일된 PDF</a>` : ''}
+    </div>
+    <div class="tex-pane" data-pane="doc" ${mode === 'doc' ? '' : 'hidden'}>
+      ${doc ? `<div class="tex-paper"><article class="tex-doc">${doc.html}</article></div>
+      <div class="tex-note">LaTeX 미리보기입니다 — 그림·표·수식 번호와 레이아웃은 컴파일된 PDF 와 다를 수 있습니다.</div>` : ''}
+    </div>
+    <div class="tex-pane" data-pane="src" ${mode === 'src' ? '' : 'hidden'}>${renderCode(text, 'latex')}</div>`;
+  el.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-tex]');
+    if (b && !b.disabled) {
+      const m = b.dataset.tex;
+      el.querySelectorAll('[data-tex]').forEach((x) => x.classList.toggle('on', x === b));
+      el.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== m; });
+      LS.set('texView', m);
+      return;
+    }
+    const j = ev.target.closest('[data-jump]');
+    if (j) { // 참조/인용/각주 → 해당 위치로 스크롤 (해시 라우팅과 충돌하지 않게)
+      ev.preventDefault();
+      const target = el.querySelector(`#${CSS.escape(j.dataset.jump)}`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('tex-flash');
+        setTimeout(() => target.classList.remove('tex-flash'), 1500);
+      }
+    }
+  });
+}
+
 /** el 안에 결과물을 렌더링한다. */
-export async function renderArtifactInto(el, taskId, art) {
+export async function renderArtifactInto(el, taskId, art, opts = {}) {
   const url = artifactUrl(taskId, art);
   el.classList.add('av', `av-${art.kind}`);
   if (!url) {
@@ -105,8 +164,14 @@ export async function renderArtifactInto(el, taskId, art) {
         enhance(el);
         break;
       }
-      case 'code':
       case 'latex':
+        if (/\.(tex|ltx)$/i.test(art.filename || art.path || '')) {
+          const { text, truncated } = await fetchText(url);
+          renderTexView(el, text, truncated, opts);
+          break;
+        }
+      // falls through — .bib/.sty 등은 코드로 표시
+      case 'code':
       case 'text': {
         const { text, truncated } = await fetchText(url);
         const lang = art.lang || (art.kind === 'latex' ? 'latex' : null);
