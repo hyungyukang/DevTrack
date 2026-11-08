@@ -180,7 +180,7 @@ Write the report Markdown the way GitHub renders it (CommonMark + tables): pipe 
      ```
      `--choices` without IDs offers every open finding as a checkbox; Blocker and Major start checked. Then `devtrack step <TID> "사용자가 코멘트할 항목을 고르기를 기다리는 중" -p 70`.
   4. End the chat message with: "DevTrack 웹의 **코드 리뷰** 화면에서 항목을 골라 진행하거나, 여기서 'R1, R3 코멘트 초안 써줘' 라고 하셔도 됩니다."
-  5. If the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web.
+  5. If the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web — unless a `devtrack inbox --wait` is already running in the background (web-instruction waiting mode), which also wakes on decisions.
 
 Then stop and wait.
 

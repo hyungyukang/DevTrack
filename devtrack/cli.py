@@ -257,19 +257,13 @@ def cmd_comment(store, args):
     _out(args, e, e["id"])
 
 
-def cmd_inbox(store, args):
-    items = store.inbox(ack=args.ack)
-    if args.json:
-        _out(args, items)
-        return 0
-    if not items:
-        print("처리할 사용자 입력이 없습니다.")
-        return 0
+def _print_inbox(items):
     for it in items:
         if it["type"] == "new_task":
             print("[새 작업] {task_id} {title} ({task_type})".format(**it))
             if it.get("instruction"):
                 print(_indent(it["instruction"]))
+            print(_indent("→ devtrack start {task_id}".format(**it)))
         elif it["type"] == "comment":
             print("[메시지] {task_id} {id}: {message}".format(**it))
         else:
@@ -280,6 +274,50 @@ def cmd_inbox(store, args):
                 print(_indent("코멘트: " + it["comment"]))
             if it["decision"] == "approved" and it.get("has_action"):
                 print(_indent("→ devtrack apply {task_id} {id}".format(**it)))
+
+
+def _inbox_wait(store, args):
+    """아직 보지 않은 사용자 입력이 생길 때까지 기다린다 (백그라운드 실행용)."""
+    if args.ack:
+        raise DevTrackError("--wait 와 --ack 는 함께 쓸 수 없습니다 (처리한 뒤 devtrack inbox --ack)")
+    deadline = time.time() + args.timeout if args.timeout else None
+    _info("새 사용자 입력을 기다리는 중 (웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C")
+    last = object()
+    while True:
+        token = store.change_token()
+        if token != last:
+            last = token
+            items = store.inbox()
+            seen = store.inbox_seen(args.author)
+            new = [it for it in items if store.inbox_key(it) not in seen]
+            if new:
+                store.mark_inbox_seen(args.author, items)
+                if args.json:
+                    _out(args, new)
+                    return 0
+                print("새 사용자 입력 {}건:".format(len(new)))
+                _print_inbox(new)
+                print("\n처리한 뒤 다시 `devtrack inbox --wait` 를 백그라운드로 실행해 다음 입력을 기다리세요.")
+                return 0
+        if deadline and time.time() >= deadline:
+            _out(args, [])
+            _info("시간 초과: 새 입력이 없습니다")
+            return 3
+        time.sleep(max(1, args.interval))
+
+
+def cmd_inbox(store, args):
+    if args.wait:
+        return _inbox_wait(store, args)
+    items = store.inbox(ack=args.ack)
+    store.mark_inbox_seen(args.author, items)
+    if args.json:
+        _out(args, items)
+        return 0
+    if not items:
+        print("처리할 사용자 입력이 없습니다.")
+        return 0
+    _print_inbox(items)
     return 0
 
 
@@ -542,6 +580,10 @@ def build_parser():
 
     sp = add("inbox", cmd_inbox, "에이전트가 처리할 사용자 입력 확인 (새 지시, 메시지, 결정)")
     sp.add_argument("--ack", action="store_true", help="확인한 메시지/결정을 처리됨으로 표시")
+    sp.add_argument("--wait", action="store_true",
+                    help="아직 보지 않은 입력이 생길 때까지 기다렸다가 출력 (에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응)")
+    sp.add_argument("--timeout", type=int, default=0, help="--wait 최대 대기 초 (0 = 무제한, 시간 초과 시 exit 3)")
+    sp.add_argument("--interval", type=int, default=3, help="--wait 확인 간격 초")
 
     sp = add("done", cmd_done, "작업 완료")
     sp.add_argument("task")

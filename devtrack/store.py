@@ -940,6 +940,39 @@ class Store:
         items.sort(key=lambda x: x.get("ts") or "")
         return items
 
+    # ------------------------------------------------------------------ 받은 편지함 대기 (inbox --wait)
+    @staticmethod
+    def inbox_key(it):
+        if it["type"] == "new_task":
+            return "task:" + it["task_id"]
+        if it["type"] == "comment":
+            return "comment:{}:{}".format(it["task_id"], it["id"])
+        return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
+
+    def _seen_path(self, agent):
+        # 점(.)으로 시작하는 디렉토리는 publish / 웹 서버에서 제외된다
+        return os.path.join(self.root, ".agent", "inbox-seen-{}.json".format(_safe_name(agent or "agent")))
+
+    def inbox_seen(self, agent):
+        try:
+            with open(self._seen_path(agent), encoding="utf-8") as fh:
+                return set(json.load(fh).get("seen", []))
+        except (OSError, ValueError):
+            return set()
+
+    def mark_inbox_seen(self, agent, items):
+        """에이전트가 본 항목을 기록한다. 현재 받은 편지함에 남아 있는 항목만 유지."""
+        keys = sorted(self.inbox_key(it) for it in items)
+        self._write_json(self._seen_path(agent), {"agent": agent, "updated_at": now(), "seen": keys})
+
+    def change_token(self):
+        """index.json 은 모든 저장 때 원자적으로 교체되므로 (inode, mtime, size) 로 변경을 감지한다."""
+        try:
+            st = os.stat(self.index_path)
+            return (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
     # ------------------------------------------------------------------ 인덱스 / 배포
     def rebuild_index(self):
         tasks = self.all_tasks()
