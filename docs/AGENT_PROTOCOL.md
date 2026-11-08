@@ -62,11 +62,59 @@ devtrack done $TID -m "HIP 포팅 완료, 커밋 abc1234"
 | 유형 (`-t`) | 남길 것 |
 |---|---|
 | `code` | 계획, 단계별 진행, 테스트 결과, `request --commit` |
-| `review` | `templates/review_report.md` 형식의 리포트를 `devtrack review` 로 등록 (md, 필요하면 pdf 도). PR 에 코멘트를 게시하기 전 `request -k review` |
+| `review` | **일반 사용자도 읽을 수 있는** 리포트(`templates/review_report.md` 형식: 한 줄 결론 · 한눈에 보기 · 쉬운 설명 · 용어 풀이)와 검토 항목 R1, R2… 를 `devtrack review <TID> report.md [report.pdf] --findings findings.json` 으로 등록. 코멘트할 항목은 `request -k review --choices` 로 사용자가 고르게 하고, PR 에 게시하기 전 초안으로 다시 `request -k review`. 자세한 흐름은 [코드 리뷰](#코드-리뷰) |
 | `paper` | `--plan` 에 원고 구성(절/장)을 넣는다 — 웹의 논문 카드에 체크리스트로 표시. 원고를 고칠 때마다 `.tex` 를 `artifact` 로 올리고 **`devtrack latex <TID> paper/main.tex` 로 컴파일 결과(PDF/오류)를 기록**한다. 그림은 `\includegraphics` 와 **같은 파일 이름(확장자 무관)** 으로 올려야 웹의 문서 보기에서 연결된다 (예: `figs/fig4_1.pdf` ↔ `fig4_1.png`). 원본 데이터와 다른 수치는 `issue` |
 | `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md). 해석이 필요한 결과는 `request -k result`. **논문에 쓸 분석이면 `--related <논문 T-ID>`** 로 연결 |
 | `visualization` | 그림/HTML(plotly 등) 결과물, 사용한 스크립트 |
 | `model` | 학습 설정, 손실 곡선 그림, 로그, 평가 결과. 큰 자원 사용 전 `request -k plan` |
+
+## 코드 리뷰
+
+Claude Code 의 `/review-pr` 스킬을 쓰면 아래 흐름이 자동으로 진행됩니다
+(DevTrack 연동판: [integrations/claude-skills](../integrations/claude-skills/README.md)). 직접 할 때도 같은 순서를 따릅니다.
+
+```bash
+TID=$(devtrack new "PR #42 코드 리뷰: <제목>" -t review --url https://github.com/org/repo/pull/42 --tag PR-42 \
+      --plan "PR 정보 · 변경사항 수집" "코드 검토" "리뷰 리포트 작성" "코멘트할 항목 선택 (사용자)" "코멘트 초안 작성 · 게시 승인" "PR 에 게시")
+
+# 1. 리포트 + 검토 항목 등록 → 웹의 '리뷰 결과 한눈에 보기'
+devtrack review $TID review-PR-42.md review-PR-42.pdf -n "PR #42 리뷰 리포트" --findings review-PR-42.json
+
+# 2. 코멘트할 항목을 사용자가 체크해서 고름 (값 없는 --choices = 열린 항목 전체, 반드시 수정 · 수정 권장은 미리 체크)
+AID=$(devtrack request $TID "PR #42: 코멘트를 작성할 항목을 골라주세요" -k review --choices \
+      --choices-label "PR 코멘트를 작성할 항목" -a F-1)
+devtrack wait $TID $AID      # → approved / 선택: R1, R3 / 코멘트: ...
+
+# 3. 고른 항목만 코멘트 초안 → 게시 승인 요청
+F=$(devtrack artifact $TID review-PR-42-comments.md -n "PR #42 리뷰 코멘트 초안" --review)
+AID=$(devtrack request $TID "PR #42 에 리뷰를 게시할까요? (COMMENT, 코멘트 2개)" -k review -a $F)
+
+# 4. 승인되면 게시 → 상태 갱신 (같은 ID 는 합쳐지므로 바뀐 필드만 줘도 됨)
+echo '[{"id":"R1","status":"commented"},{"id":"R3","status":"commented"}]' | devtrack review $TID --findings -
+devtrack artifact $TID --url <게시된 리뷰 URL> -n "PR #42 게시된 리뷰" --review
+devtrack done $TID -m "PR #42 리뷰 게시"
+```
+
+검토 항목 JSON (`--findings`):
+
+```json
+{
+  "pr": {"url": "https://github.com/org/repo/pull/42", "number": 42, "title": "...", "author": "...",
+         "base": "main", "head": "feature/x", "head_sha": "<리뷰한 커밋>", "files": 14, "additions": 612, "deletions": 430, "ci": "통과"},
+  "verdict": "request_changes",
+  "summary": "한 줄 결론 + 꼭 고칠 것 (쉬운 말 2~3문장)",
+  "findings": [
+    {"id": "R1", "severity": "blocker", "title": "기술적 한 줄 요약", "plain": "쉽게 말하면: 비전문가용 1~2문장",
+     "file": "src/a.cpp", "line": 88, "category": "정확성", "confidence": "high", "status": "open"}
+  ]
+}
+```
+
+- `severity`: `blocker`(반드시 수정) · `major`(수정 권장) · `minor`(개선 제안) · `nit`(사소함) · `question`(질문)
+- `status`: `open` · `fixed` · `commented`(PR 에 게시) · `dismissed`(제외) · `na`(해당 없음)
+- `verdict`: `approve` · `comment` · `request_changes`
+- **리포트는 일반 사용자도 이해할 수 있게** 쓴다: 맨 앞에 한 줄 결론, 비개발자용 "한눈에 보기", 항목마다 `plain`(어떤 상황에서
+  무엇이 잘못되는지), 전문 용어는 풀어서. 개발자용 상세(코드 · 위치 · 근거)는 그 뒤에 그대로 둔다.
 
 ## 승인 요청을 올려야 하는 때
 
@@ -80,6 +128,7 @@ devtrack done $TID -m "HIP 포팅 완료, 커밋 abc1234"
 - **로컬 서버 모드**: 사용자가 웹에서 누르면 즉시 기록됨 → `devtrack wait` / `devtrack inbox` 로 확인
 - **정적 모드 (Frontier www)**: 사용자가 Claude 세션에 `[DevTrack 결정] T-0001 / A-1 ... → 승인` 형태의 메시지를 붙여넣음
   → 에이전트가 `devtrack decide T-0001 A-1 approve -m "코멘트"` 로 기록한 뒤 `apply` 진행
+  (선택 항목이 있는 요청이면 메시지에 `선택: R1, R3` 이 있고, 명령에 `--select R1 R3` 가 붙어 있음)
 - `[DevTrack 메시지]` → `devtrack comment <TID> "..."` 로 기록 후 반영
 - `[DevTrack 새 작업 지시]` → `devtrack new ...` 로 등록 후 진행
 
@@ -91,6 +140,8 @@ devtrack done $TID -m "HIP 포팅 완료, 커밋 abc1234"
 - 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
+- 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면",
+  전문 용어 풀이. 검토 항목은 `devtrack review --findings` 로, 코멘트할 항목은 `request --choices` 로 사용자가 고르게 한다.
 - git commit/push 를 직접 하지 않는다. `devtrack request <TID> "..." --commit -m "..."` 로 승인을 요청하고,
   승인되면 `devtrack apply <TID> <AID>` 로 반영한다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` 메시지를 보내면

@@ -139,9 +139,38 @@ def cmd_artifact(store, args, category=None):
     _out(args, art, art["id"])
 
 
+def _load_json(path):
+    try:
+        if path == "-":
+            return json.load(sys.stdin)
+        with open(os.path.expanduser(path), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as e:
+        raise DevTrackError("JSON 을 읽을 수 없습니다 ({}): {}".format(path, e))
+
+
 def cmd_review(store, args):
-    args.url = args.git_diff = None
-    cmd_artifact(store, args, category="review")
+    if not args.paths and not args.findings:
+        raise DevTrackError("리포트 파일 또는 --findings 중 하나는 지정하세요")
+    if args.findings:
+        rv = store.set_review(args.task, _load_json(args.findings), author=args.author)
+        f = rv.get("findings", [])
+        _info("검토 결과 기록: 항목 {}개 (열림 {})".format(len(f), sum(1 for x in f if x["status"] == "open")))
+        if not args.paths:
+            _out(args, rv, " ".join(x["id"] for x in f))
+            return 0
+    desc = _text(args.desc, args.desc_file)
+    arts = []
+    for i, path in enumerate(args.paths):
+        title = args.title
+        if title and i:
+            title = "{} ({})".format(title, os.path.splitext(path)[1].lstrip(".").upper() or i + 1)
+        art = store.add_artifact(args.task, path=path, kind=args.kind, title=title,
+                                 description=desc if i == 0 else None, category="review", author=args.author)
+        _info("리뷰 리포트 등록: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
+        arts.append(art)
+    _out(args, arts, "\n".join(a["id"] for a in arts))
+    return 0
 
 
 def cmd_latex(store, args):
@@ -173,14 +202,17 @@ def cmd_request(store, args):
         commit = {"repo": args.repo, "branch": args.branch, "message": _text(args.message, args.message_file),
                   "files": args.files, "push": not args.no_push, "remote": args.remote}
     ap = store.request_approval(args.task, args.title, description=_text(args.desc, args.desc_file) or "",
-                                kind=args.kind, artifact_ids=args.artifact, commit=commit, author=args.author)
+                                kind=args.kind, artifact_ids=args.artifact, commit=commit, author=args.author,
+                                choices=args.choices, choices_label=args.choices_label)
     _info("승인 요청 등록: {} {} — 웹에 알림으로 표시됩니다".format(normalize_task_id(args.task), ap["id"]))
     _out(args, ap, ap["id"])
 
 
 def cmd_decide(store, args):
-    ap = store.decide(args.task, args.approval, args.decision, comment=args.message or "", by=args.by or USER)
-    _out(args, ap, "{} {} → {}".format(normalize_task_id(args.task), ap["id"], ap["status"]))
+    ap = store.decide(args.task, args.approval, args.decision, comment=args.message or "", by=args.by or USER,
+                      selected=args.select)
+    sel = " (선택: {})".format(", ".join(ap["selected"])) if ap.get("selected") else ""
+    _out(args, ap, "{} {} → {}{}".format(normalize_task_id(args.task), ap["id"], ap["status"], sel))
 
 
 def cmd_wait(store, args):
@@ -194,7 +226,12 @@ def cmd_wait(store, args):
             raise DevTrackError("승인 요청을 찾을 수 없습니다: {} {}".format(tid, aid))
         if ap["status"] != "pending":
             store.ack_decision(tid, aid)
-            _out(args, ap, "{}\n{}".format(ap["status"], ap.get("comment") or ""))
+            lines = [ap["status"]]
+            if ap.get("selected") is not None:
+                lines.append("선택: " + (", ".join(ap["selected"]) or "(없음)"))
+            if ap.get("comment"):
+                lines.append("코멘트: " + ap["comment"])
+            _out(args, ap, "\n".join(lines))
             return 0 if ap["status"] == "approved" else 2
         if deadline and time.time() >= deadline:
             _out(args, ap, "pending")
@@ -237,6 +274,8 @@ def cmd_inbox(store, args):
             print("[메시지] {task_id} {id}: {message}".format(**it))
         else:
             print("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
+            if it.get("selected"):
+                print(_indent("선택: " + ", ".join(it["selected"])))
             if it.get("comment"):
                 print(_indent("코멘트: " + it["comment"]))
             if it["decision"] == "approved" and it.get("has_action"):
@@ -269,6 +308,15 @@ def cmd_show(store, args):
         print("  계획:")
         for i, p in enumerate(t["plan"]):
             print("    [{}] {}. {}".format("x" if p["done"] else " ", i + 1, p["text"]))
+    rv = t.get("review") or {}
+    if rv.get("findings"):
+        pr = rv.get("pr") or {}
+        print("  리뷰 결과{}{}:".format(" — PR #{}".format(pr["number"]) if pr.get("number") else "",
+                                    " · 의견 {}".format(rv["verdict"]) if rv.get("verdict") else ""))
+        for f in rv["findings"]:
+            loc = "{}{}".format(f.get("file", ""), ":{}".format(f["line"]) if f.get("line") else "")
+            print("    {} [{}{}] {}{}".format(f["id"], f["severity"], "" if f["status"] == "open" else ", " + f["status"],
+                                           f["title"], "  ({})".format(loc) if loc else ""))
     issues = [i for i in t.get("issues", []) if i["status"] == "open"]
     if issues:
         print("  열린 문제:")
@@ -430,9 +478,12 @@ def build_parser():
     sp.add_argument("--review", action="store_true", help="리뷰 섹션에 표시")
     sp.add_argument("--no-copy", action="store_true", help="복사하지 않고 경로만 기록 (웹에서는 볼 수 없음)")
 
-    sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록")
+    sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록")
     sp.add_argument("task")
-    sp.add_argument("path")
+    sp.add_argument("paths", nargs="*", metavar="FILE", help="리뷰 리포트 파일 (md, pdf — 여러 개 가능)")
+    sp.add_argument("--findings", metavar="JSON",
+                    help="검토 결과 JSON: {pr, verdict, summary, findings:[{id, severity, title, plain, file, line, "
+                         "category, confidence, status}]} (- 는 stdin). 다시 실행하면 상태만 갱신")
     sp.add_argument("-n", "--title")
     sp.add_argument("-k", "--kind")
     sp.add_argument("-d", "--desc")
@@ -452,6 +503,10 @@ def build_parser():
     sp.add_argument("--desc-file", metavar="FILE")
     sp.add_argument("-k", "--kind", choices=APPROVAL_KINDS)
     sp.add_argument("-a", "--artifact", nargs="+", metavar="F-ID", help="함께 검토할 결과물 ID")
+    sp.add_argument("--choices", nargs="*", metavar="ID",
+                    help="사용자가 웹에서 체크해 고를 항목. 값 없이 쓰면 검토 항목(findings) 중 열린 것 전체 "
+                         "(예: PR 코멘트를 작성할 리뷰 항목)")
+    sp.add_argument("--choices-label", metavar="TEXT", help="선택 목록 제목 (기본: 진행할 항목 선택)")
     sp.add_argument("--commit", action="store_true", help="승인되면 commit/push 할 변경사항 (diff 자동 첨부)")
     sp.add_argument("--repo", help="커밋할 저장소 (기본: 작업의 저장소)")
     sp.add_argument("--branch", help="커밋할 브랜치 (기본: 현재 브랜치)")
@@ -466,6 +521,7 @@ def build_parser():
     sp.add_argument("approval", help="승인 ID (예: A-1)")
     sp.add_argument("decision", choices=["approve", "changes", "reject"])
     sp.add_argument("-m", "--message", help="코멘트")
+    sp.add_argument("--select", nargs="+", metavar="ID", help="선택 항목이 있는 요청에서 고른 항목 (예: R1 R3)")
     sp.add_argument("--by", help="결정자 (기본: user)")
 
     sp = add("wait", cmd_wait, "승인 결정을 기다림 (승인 0, 수정/거절 2, 시간초과 3)")

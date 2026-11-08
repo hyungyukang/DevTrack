@@ -1,7 +1,7 @@
 // DevTrack 웹 앱 — 정적 호스팅(읽기 전용)과 로컬 서버(쓰기 가능) 모두에서 동작
 import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
-  pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
+  FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 
@@ -172,6 +172,7 @@ function isEditing() {
   const main = $('#main');
   const a = document.activeElement;
   if (a && main.contains(a) && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName) && a.id !== 'task-search') return true;
+  if ($('.choice-box[data-dirty]', main)) return true;
   return $$('textarea, #new-task-form input[type="text"]', main).some((t) => t.value.trim());
 }
 
@@ -513,6 +514,105 @@ function commitBox(act) {
   </div>`;
 }
 
+// ---------------------------------------------------------------------- 코드 리뷰 검토 항목 (R1, R2…)
+const safeHttp = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : null);
+
+function sevBadge(sev) {
+  const m = pick(FINDING_SEV, sev, 'minor');
+  return html`<span class="badge tone-${m.tone}" title="${m.en} — ${m.hint}">${m.label}</span>`;
+}
+
+/** 검토 항목의 GitHub 위치 링크: PR URL + 리뷰한 커밋(head_sha) + 파일:줄 */
+function findingHref(pr = {}, f) {
+  if (safeHttp(f.url)) return f.url;
+  const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/.exec(pr.url || '');
+  if (!m || !pr.head_sha || !f.file) return null;
+  const [a, b] = String(f.line ?? '').split('-');
+  const anchor = /^\d+$/.test(a || '') ? `#L${a}${/^\d+$/.test(b || '') ? `-L${b}` : ''}` : '';
+  return `https://github.com/${m[1]}/blob/${encodeURIComponent(pr.head_sha)}/${String(f.file).split('/').map(encodeURIComponent).join('/')}${anchor}`;
+}
+
+function findingItem(pr, f) {
+  const loc = f.file ? `${f.file}${f.line ? `:${f.line}` : ''}` : '';
+  const href = loc ? findingHref(pr, f) : null;
+  return html`<li class="finding s-${f.status}">
+    <span class="fid">${f.id}</span>
+    <div class="f-body">
+      <div class="f-head">${sevBadge(f.severity)}<span class="f-title">${f.title}</span>${f.status !== 'open' ? badge(FINDING_STATUS, f.status) : ''}</div>
+      ${f.plain ? html`<div class="f-plain">${f.plain}</div>` : ''}
+      <div class="f-meta">${loc ? (href ? html`<a class="mono" href="${href}" target="_blank" rel="noopener">${loc}</a>` : html`<span class="mono">${loc}</span>`) : ''}${f.category ? html`<span>${f.category}</span>` : ''}${f.confidence ? html`<span>확신도 ${CONFIDENCE[f.confidence] || f.confidence}</span>` : ''}${safeHttp(f.comment_url) ? html`<a href="${f.comment_url}" target="_blank" rel="noopener">${icon('message')} 게시된 코멘트</a>` : ''}</div>
+    </div>
+  </li>`;
+}
+
+/** 남은(열린) 항목 수를 심각도별 칩으로 */
+function sevChips(by = {}, { empty = '' } = {}) {
+  const chips = Object.keys(FINDING_SEV).filter((k) => by[k]).map((k) => {
+    const m = FINDING_SEV[k];
+    return html`<span class="badge tone-${m.tone}" title="${m.hint}">${m.label} ${by[k]}</span>`;
+  });
+  return chips.length ? html`${chips}` : empty;
+}
+
+function prMeta(pr = {}) {
+  const bits = [];
+  if (pr.author) bits.push(html`<span>${icon('user')} ${pr.author}</span>`);
+  if (pr.base || pr.head) bits.push(html`<span class="mono">${pr.base || '?'} ← ${pr.head || '?'}</span>`);
+  if (pr.head_sha) bits.push(html`<span class="mono" title="리뷰한 커밋">${icon('git')} ${String(pr.head_sha).slice(0, 8)}</span>`);
+  if (pr.files != null || pr.additions != null) bits.push(html`<span>${pr.files ?? '?'}개 파일 <span class="add">+${pr.additions ?? 0}</span> <span class="del">−${pr.deletions ?? 0}</span></span>`);
+  if (pr.ci) bits.push(html`<span>CI ${pr.ci}</span>`);
+  return bits.length ? html`<div class="pr-meta">${bits}</div>` : '';
+}
+
+function reviewPanel(t) {
+  const rv = t.review;
+  if (!rv) return '';
+  const pr = rv.pr || {};
+  const all = rv.findings || [];
+  const open = all.filter((f) => f.status === 'open');
+  const by = {};
+  open.forEach((f) => { by[f.severity] = (by[f.severity] || 0) + 1; });
+  const v = rv.verdict ? pick(VERDICT, rv.verdict) : null;
+  const prHref = safeHttp(pr.url);
+  const prTitle = pr.number ? `PR #${pr.number}${pr.title ? ` · ${pr.title}` : ''}` : pr.title;
+  const settled = all.length - open.length;
+  return html`<section class="card review-sum">
+    <div class="card-head"><h2>${icon('eye')} 리뷰 결과 한눈에 보기</h2><span class="muted" style="font-size:12.5px">${ago(rv.updated_at)}</span></div>
+    <div class="card-body">
+      ${prTitle ? html`<div class="pr-title">${prHref ? html`<a href="${prHref}" target="_blank" rel="noopener">${prTitle} ${icon('external')}</a>` : prTitle}</div>` : ''}
+      ${prMeta(pr)}
+      ${v || rv.summary ? html`<div class="rv-verdict">
+        ${v ? html`<div class="rv-v"><span class="badge tone-${v.tone}">${icon(v.icon)} 리뷰 의견: ${v.label}</span></div>` : ''}
+        ${rv.summary ? html`<div class="markdown-body compact">${raw(renderMarkdown(rv.summary))}</div>` : ''}
+      </div>` : ''}
+      <div class="sev-row"><span class="lbl">남은 항목 ${open.length}개</span>${sevChips(by, { empty: html`<span class="badge tone-green">${icon('check')} 모두 처리됨</span>` })}${settled ? html`<span class="muted">· 처리됨 ${settled}</span>` : ''}</div>
+      ${all.length ? html`<ul class="finding-list">${all.map((f) => findingItem(pr, f))}</ul>` : ''}
+    </div>
+  </section>`;
+}
+
+function choiceBox(t, ap) {
+  const n = ap.choices.filter((c) => c.default).length;
+  return html`<fieldset class="choice-box" data-choices="${t.id}/${ap.id}">
+    <legend>${ap.choices_label || '진행할 항목 선택'}</legend>
+    <div class="choice-tools"><span class="muted" data-choice-count>${n}/${ap.choices.length}개 선택</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="choices" data-mode="all">전체 선택</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="choices" data-mode="none">모두 해제</button></div>
+    ${ap.choices.map((c) => html`<label class="choice">
+      <input type="checkbox" value="${c.id}" ${c.default ? raw('checked') : ''}>
+      <span class="fid">${c.id}</span>
+      <span class="c-body"><span class="c-head">${c.severity ? sevBadge(c.severity) : ''}<span class="c-label">${c.label}</span></span>${c.plain ? html`<span class="c-plain" title="${c.plain}">${c.plain}</span>` : ''}</span>
+    </label>`)}
+  </fieldset>`;
+}
+
+function syncChoiceCount(box) {
+  const all = $$('input[type="checkbox"]', box);
+  const n = all.filter((i) => i.checked).length;
+  const el = $('[data-choice-count]', box);
+  if (el) el.textContent = `${n}/${all.length}개 선택`;
+}
+
 function approvalCard(t, ap, { showTask = false, skip = [] } = {}) {
   const kind = pick(APPROVAL_KIND, ap.kind, 'general');
   const st = pick(APPROVAL_STATUS, ap.status, 'pending');
@@ -544,9 +644,10 @@ function approvalCard(t, ap, { showTask = false, skip = [] } = {}) {
 function decisionForm(t, ap) {
   const btn = (d, cls, ic, label) => html`<button class="btn ${cls}" data-action="decide" data-task="${t.id}" data-ap="${ap.id}" data-decision="${d}">${icon(ic)} ${label}</button>`;
   return html`<div class="decision-form">
+    ${ap.choices?.length ? choiceBox(t, ap) : ''}
     <textarea id="cm-${t.id}-${ap.id}" placeholder="코멘트 (선택) — 수정 요청이라면 무엇을 고쳐야 하는지 적어주세요"></textarea>
     <div class="actions">
-      ${btn('approve', 'btn-approve', 'check', ap.action ? '승인 (커밋·푸시 진행)' : '승인')}
+      ${btn('approve', 'btn-approve', 'check', ap.action ? '승인 (커밋·푸시 진행)' : ap.choices?.length ? '선택한 항목으로 진행' : '승인')}
       ${btn('changes', 'btn-changes', 'edit', '수정 요청')}
       ${btn('reject', 'btn-reject', 'x', '거절')}
       <span class="hint">${state.mode === 'live' ? '결정은 즉시 저장되어 에이전트에게 전달됩니다' : '정적 모드: Claude에게 전달할 메시지가 표시됩니다'}</span>
@@ -563,9 +664,11 @@ function decisionResult(ap) {
   } else if (ap.status === 'approved' && ap.action) {
     applied = html`<div class="applied">${icon('clock')} 에이전트가 커밋/푸시를 실행하기를 기다리는 중</div>`;
   }
+  const label = (id) => ap.choices?.find((c) => c.id === id)?.label || id;
+  const picked = ap.selected?.length ? html`<div class="picked">선택: ${ap.selected.map((id) => html`<span class="fid" title="${label(id)}">${id}</span>`)}</div>` : '';
   return html`<div class="decision-result ${ap.status}">${icon(st.icon)}
     <div><b>${st.label}</b> · ${authorName(ap.decided_by)} · ${ago(ap.decided_at)}
-      ${ap.comment ? html`<div class="comment">${ap.comment}</div>` : ''}${applied}</div>
+      ${picked}${ap.comment ? html`<div class="comment">${ap.comment}</div>` : ''}${applied}</div>
   </div>`;
 }
 
@@ -808,6 +911,7 @@ function taskOverview(t, openIssues) {
   const arts = [...t.artifacts].reverse().slice(0, 6);
   return html`<div class="detail-grid">
     <div>
+      ${reviewPanel(t)}
       <section class="card">
         <div class="card-head"><h2>${icon('message')} 작업 지시</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
         <div class="card-body">${t.instruction ? html`<div class="markdown-body">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted">지시 내용이 기록되지 않았습니다</div>`}</div>
@@ -919,15 +1023,21 @@ async function viewReviews({ rest }) {
   const art = t.artifacts.find((a) => a.id === sel.id);
   if (!art) return viewNotFound();
   const related = t.approvals.filter((a) => a.status === 'pending' && (a.kind === 'review' || (a.artifacts || []).includes(art.id)));
+  const sumOf = (id) => state.index.tasks.find((x) => x.id === id)?.review;
   return html`${head}
     <div class="review-layout">
-      <aside class="card review-list">${reviews.map((r) => html`
+      <aside class="card review-list">${reviews.map((r) => {
+        const rs = sumOf(r.task_id);
+        return html`
         <a class="review-item ${r === sel ? 'active' : ''}" href="#/reviews/${r.task_id}/${r.id}">
           <div class="title">${r.title}</div>
           <div class="meta"><span class="badge">${pick(ART_KIND, r.kind, 'file').label}</span><span>${r.task_id}</span>${ago(r.created_at)}</div>
           <div class="meta">${r.task_title}</div>
-        </a>`)}</aside>
+          ${rs?.total ? html`<div class="meta">${rs.open ? sevChips(rs.by_severity) : html`<span class="badge tone-green">모두 처리됨</span>`}</div>` : ''}
+        </a>`;
+      })}</aside>
       <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
+        ${reviewPanel(t)}
         ${related.map((a) => approvalCard(t, a, { skip: [art.id] }))}
         <section class="card" style="overflow:hidden">
           ${viewerHead(t, art)}
@@ -1362,12 +1472,19 @@ async function actDecide(btn) {
     ta?.focus();
     return;
   }
+  const box = document.querySelector(`.choice-box[data-choices="${task}/${ap}"]`);
+  const selected = box ? $$('input[type="checkbox"]', box).filter((i) => i.checked).map((i) => i.value) : null;
+  if (box && decision === 'approve' && !selected.length) {
+    toast({ title: '진행할 항목을 하나 이상 선택해주세요', tone: 'orange' });
+    return;
+  }
   if (state.mode !== 'live') {
     const t = state.tasks.get(task);
     const a = t?.approvals.find((x) => x.id === ap);
     const label = DECISION[decision].label;
-    const cmd = `devtrack decide ${task} ${ap} ${decision}${comment ? ' -m ' + shellQuote(comment) : ''}`;
-    const msg = `[DevTrack 결정] ${task} / ${ap} "${a?.title || ''}" → ${label}${comment ? `\n코멘트: ${comment}` : ''}\n\n위 결정을 기록하고(${cmd}) 다음 단계를 진행해 주세요.`;
+    const sel = selected?.length ? selected : null;
+    const cmd = `devtrack decide ${task} ${ap} ${decision}${sel ? ' --select ' + sel.join(' ') : ''}${comment ? ' -m ' + shellQuote(comment) : ''}`;
+    const msg = `[DevTrack 결정] ${task} / ${ap} "${a?.title || ''}" → ${label}${sel ? `\n선택: ${sel.join(', ')}` : ''}${comment ? `\n코멘트: ${comment}` : ''}\n\n위 결정을 기록하고(${cmd}) 다음 단계를 진행해 주세요.`;
     openModal({
       title: `${label} — Claude에게 전달`,
       body: html`<p>이 페이지는 <b>정적 모드(읽기 전용)</b>라 웹에서 직접 저장할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으면 결정이 기록되고 다음 단계가 진행됩니다.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
@@ -1377,7 +1494,7 @@ async function actDecide(btn) {
   const form = btn.closest('.decision-form');
   $$('button', form).forEach((b) => { b.disabled = true; });
   try {
-    await api(`api/tasks/${task}/approvals/${ap}/decision`, { decision, comment });
+    await api(`api/tasks/${task}/approvals/${ap}/decision`, selected ? { decision, comment, selected } : { decision, comment });
     if (ta) ta.value = '';
     toast({ title: `${DECISION[decision].label} 처리했습니다`, meta: `${task} ${ap} — 에이전트에게 전달됩니다`, tone: DECISION[decision].tone });
     await poll({ force: true });
@@ -1425,6 +1542,13 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'choices': {
+      const box = el.closest('.choice-box');
+      $$('input[type="checkbox"]', box).forEach((i) => { i.checked = el.dataset.mode === 'all'; });
+      box.dataset.dirty = '1';
+      syncChoiceCount(box);
+      return;
+    }
     case 'copy': {
       const ok = await copyText(el.dataset.copy || '');
       const prev = el.innerHTML;
@@ -1485,6 +1609,8 @@ function bindEvents() {
   document.addEventListener('change', (ev) => {
     const el = ev.target.closest('[data-change]');
     if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
+    const box = ev.target.closest('.choice-box');
+    if (box) { box.dataset.dirty = '1'; syncChoiceCount(box); }
   });
   document.addEventListener('toggle', (ev) => {
     const d = ev.target;

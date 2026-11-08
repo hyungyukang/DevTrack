@@ -71,6 +71,81 @@ DECISION_LABEL = {"approved": "승인", "rejected": "거절", "changes_requested
 
 USER = "user"  # 사용자가 남긴 기록의 author 값
 
+# 코드 리뷰 검토 항목(findings) — review-pr 스킬의 R1, R2… 와 같은 체계
+FINDING_SEVERITIES = ("blocker", "major", "minor", "nit", "question")
+FINDING_SEV_LABEL = {"blocker": "반드시 수정", "major": "수정 권장", "minor": "개선 제안", "nit": "사소함",
+                     "question": "질문"}
+FINDING_STATUSES = ("open", "fixed", "commented", "dismissed", "na")
+VERDICTS = ("approve", "comment", "request_changes")
+_SEV_ALIAS = {
+    "critical": "blocker", "high": "major", "medium": "minor", "moderate": "minor", "low": "nit",
+    "trivial": "nit", "style": "nit", "q": "question", "info": "question",
+    "반드시 수정": "blocker", "필수": "blocker", "치명": "blocker", "심각": "blocker",
+    "수정 권장": "major", "높음": "major", "중요": "major",
+    "개선 제안": "minor", "보통": "minor", "중간": "minor", "사소함": "nit", "낮음": "nit", "질문": "question",
+}
+_STATUS_ALIAS = {
+    "still open": "open", "still_open": "open", "new": "open", "pending": "open",
+    "resolved": "fixed", "done": "fixed", "addressed": "fixed",
+    "posted": "commented", "comment": "commented",
+    "wontfix": "dismissed", "rejected": "dismissed", "skipped": "dismissed", "skip": "dismissed",
+    "no longer applicable": "na", "not applicable": "na", "not_applicable": "na", "n/a": "na", "obsolete": "na",
+}
+_VERDICT_ALIAS = {"approved": "approve", "lgtm": "approve", "comments": "comment",
+                  "request changes": "request_changes", "request-changes": "request_changes",
+                  "changes": "request_changes", "changes_requested": "request_changes"}
+_PR_KEYS = ("url", "repo", "number", "title", "author", "base", "head", "head_sha", "files", "additions",
+            "deletions", "ci", "draft", "previous_sha")
+
+
+def _norm_finding_id(value, fallback):
+    s = str(value if value is not None else fallback).strip()
+    m = re.match(r"^[A-Za-z]{0,3}\s*-?\s*(\d+)$", s)
+    return "R{}".format(int(m.group(1))) if m else (s or "R{}".format(fallback))
+
+
+def _first(d, *keys):
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def normalize_finding(raw, n, base=None):
+    """review-pr 스킬 JSON 등 다양한 표기를 받아들여 검토 항목 하나로 정리한다.
+    base(같은 ID 의 기존 항목)가 있으면 주어진 필드만 덮어쓴다 — 상태만 갱신하는 것도 가능."""
+    if not isinstance(raw, dict):
+        raw = {"title": str(raw)}
+    f = {"id": _norm_finding_id(_first(raw, "id", "number", "num"), n)}
+    sev = _first(raw, "severity", "level", "priority")
+    if sev is not None:
+        sev = str(sev).strip().lower()
+        f["severity"] = sev if sev in FINDING_SEVERITIES else _SEV_ALIAS.get(sev, "minor")
+    if raw.get("status"):
+        st = str(raw["status"]).strip().lower()
+        f["status"] = st if st in FINDING_STATUSES else _STATUS_ALIAS.get(st, "open")
+    conf = str(raw.get("confidence") or "").strip().lower()
+    if conf in ("high", "medium", "low"):
+        f["confidence"] = conf
+    line = raw.get("line")
+    if raw.get("start_line") and line and str(raw["start_line"]) != str(line):
+        line = "{}-{}".format(raw["start_line"], line)
+    title = _first(raw, "title", "summary", "one_line", "message")
+    f.update({
+        "title": str(title).strip() if title is not None else None,
+        "plain": _first(raw, "plain", "plain_summary", "easy", "simple", "explanation"),
+        "file": _first(raw, "file", "path"),
+        "line": line,
+        "category": _first(raw, "category", "type", "kind"),
+        "url": _first(raw, "url", "link", "permalink"),
+        "comment_url": raw.get("comment_url"),
+    })
+    merged = {"id": f["id"]}
+    merged.update(base or {"severity": "minor", "title": "(제목 없음)", "status": "open"})
+    merged.update({k: v for k, v in f.items() if v not in (None, "")})
+    return merged
+
 _KIND_EXT = {
     "markdown": ("md", "markdown"),
     "pdf": ("pdf",),
@@ -587,9 +662,105 @@ class Store:
         with self.edit(tid) as t:
             return self._add_artifact(t, **kw)
 
+    # ------------------------------------------------------------------ 코드 리뷰 검토 항목
+    def set_review(self, tid, data, author=None):
+        """리뷰 대상 PR 정보 · 종합 의견 · 검토 항목(R1, R2…)을 기록한다. 주어진 키만 갱신."""
+        if isinstance(data, list):
+            data = {"findings": data}
+        if not isinstance(data, dict):
+            raise DevTrackError("검토 결과는 JSON 객체 또는 항목 목록이어야 합니다")
+        with self.edit(tid) as t:
+            rv = dict(t.get("review") or {})
+            prev = {f["id"]: f for f in rv.get("findings", [])}
+            if isinstance(data.get("pr"), dict):
+                pr = {k: data["pr"][k] for k in _PR_KEYS if data["pr"].get(k) not in (None, "")}
+                rv["pr"] = dict(rv.get("pr") or {}, **pr)
+            if data.get("verdict"):
+                v = str(data["verdict"]).strip().lower()
+                v = v if v in VERDICTS else _VERDICT_ALIAS.get(v)
+                if not v:
+                    raise DevTrackError("verdict 는 {} 중 하나여야 합니다".format(", ".join(VERDICTS)))
+                rv["verdict"] = v
+            for key in ("summary", "verdict_reason"):
+                if data.get(key):
+                    rv[key] = str(data[key]).strip()
+            if "findings" in data:
+                items = data["findings"] or []
+                if not isinstance(items, list):
+                    raise DevTrackError("findings 는 목록이어야 합니다")
+                merged = dict(prev)  # 같은 ID 는 갱신, 새 ID 는 뒤에 추가, 언급 안 된 항목은 유지
+                seen = set()
+                for i, raw in enumerate(items):
+                    rid = _norm_finding_id(_first(raw, "id", "number", "num") if isinstance(raw, dict) else None,
+                                           len(prev) + i + 1)
+                    if rid in seen:
+                        raise DevTrackError("검토 항목 ID 가 중복됩니다: {}".format(rid))
+                    seen.add(rid)
+                    merged[rid] = normalize_finding(raw, len(prev) + i + 1, base=prev.get(rid))
+                rv["findings"] = list(merged.values())
+            rv["updated_at"] = now()
+            t["review"] = rv
+            findings = rv.get("findings", [])
+            open_ = [f for f in findings if f["status"] == "open"]
+            by_sev = ["{} {}".format(FINDING_SEV_LABEL[s], n) for s in FINDING_SEVERITIES
+                      for n in [sum(1 for f in open_ if f["severity"] == s)] if n]
+            changed = ["{} {}".format(f["id"], f["status"]) for f in findings
+                       if f["id"] in prev and prev[f["id"]].get("status") != f["status"]]
+            msg = "검토 결과 기록: 항목 {}개".format(len(findings))
+            if by_sev:
+                msg += " — " + " · ".join(by_sev)
+            if changed:
+                msg += " (상태 변경: {})".format(", ".join(changed))
+            self._log(t, msg, kind="info", author=author, meta={"review": True})
+            return rv
+
     # ------------------------------------------------------------------ 승인
+    @staticmethod
+    def _build_choices(t, choices):
+        """choices: [] = 검토 항목 중 열린 것 전체, [ID 또는 {id,label}, ...] = 지정 항목."""
+        findings = {f["id"]: f for f in (t.get("review") or {}).get("findings", [])}
+        if not choices:
+            src = [f for f in findings.values() if f.get("status") == "open"]
+            if not src:
+                raise DevTrackError("선택할 검토 항목이 없습니다. 먼저 devtrack review <TID> --findings FILE 로 기록하세요")
+        else:
+            src = []
+            for c in choices:
+                if isinstance(c, dict):
+                    src.append(dict(c, id=str(c.get("id") or "").strip()))
+                    continue
+                cid = str(c).strip()
+                fid = _norm_finding_id(cid, cid)
+                src.append(findings.get(fid) or findings.get(cid) or {"id": cid, "title": cid})
+        out, seen = [], set()
+        for c in src:
+            if not c.get("id") or c["id"] in seen:
+                raise DevTrackError("선택 항목 ID 가 비었거나 중복됩니다: {}".format(c.get("id")))
+            seen.add(c["id"])
+            item = {"id": c["id"], "label": c.get("label") or c.get("title") or c["id"]}
+            for k in ("severity", "plain", "file", "line"):
+                if c.get(k) not in (None, ""):
+                    item[k] = c[k]
+            item["default"] = bool(c.get("default", c.get("severity") in ("blocker", "major")))
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _match_choices(ap, selected):
+        ids = [c["id"] for c in ap.get("choices") or []]
+        lookup = {i.lower(): i for i in ids}
+        out = []
+        for s in selected:
+            s = str(s).strip()
+            hit = lookup.get(s.lower()) or lookup.get(_norm_finding_id(s, s).lower())
+            if not hit:
+                raise DevTrackError("선택 목록에 없는 항목입니다: {} (가능: {})".format(s, ", ".join(ids)))
+            if hit not in out:
+                out.append(hit)
+        return [i for i in ids if i in out]  # 원래 순서 유지
+
     def request_approval(self, tid, title, description="", kind=None, artifact_ids=None, commit=None,
-                         author=None):
+                         author=None, choices=None, choices_label=None):
         tid = normalize_task_id(tid)
         action = None
         diff_text = None
@@ -645,6 +816,9 @@ class Store:
             }
             if action:
                 approval["action"] = action
+            if choices is not None:
+                approval["choices"] = self._build_choices(t, choices)
+                approval["choices_label"] = (choices_label or "").strip() or "진행할 항목 선택"
             t.setdefault("approvals", []).append(approval)
             if t["status"] != "awaiting_approval":
                 t["status_before_approval"] = t["status"]
@@ -652,18 +826,33 @@ class Store:
             self._log(t, "승인 요청: " + title, kind="approval", author=author, ref=aid, meta={"kind": kind})
             return approval
 
-    def decide(self, tid, aid, decision, comment="", by=USER):
+    def decide(self, tid, aid, decision, comment="", by=USER, selected=None):
         status = DECISIONS.get(str(decision).lower())
         if not status:
             raise DevTrackError("결정은 approve / changes / reject 중 하나여야 합니다")
         aid = normalize_item_id(aid, "A")
+        if isinstance(selected, str):
+            selected = [s for s in re.split(r"[\s,]+", selected) if s]
         with self.edit(tid) as t:
             ap = self._find(t.get("approvals", []), aid, "승인 요청")
             if ap["status"] != "pending":
                 raise DevTrackError("이미 처리된 승인 요청입니다 ({}: {})".format(aid, ap["status"]))
+            picked = None
+            if ap.get("choices"):
+                picked = self._match_choices(ap, selected or [])
+                if status == "approved" and not picked:
+                    raise DevTrackError("승인하려면 항목을 하나 이상 선택하세요 ({})".format(
+                        ", ".join(c["id"] for c in ap["choices"])))
+            elif selected:
+                raise DevTrackError("이 승인 요청에는 선택할 항목이 없습니다")
             ap.update({"status": status, "decided_at": now(), "decided_by": by,
                        "comment": (comment or "").strip(), "agent_ack": False})
-            self._log(t, "{}: {}".format(DECISION_LABEL[status], ap["title"]), kind="decision", author=by,
+            msg = "{}: {}".format(DECISION_LABEL[status], ap["title"])
+            if picked is not None:
+                ap["selected"] = picked
+                if picked:
+                    msg += " (선택: {})".format(", ".join(picked))
+            self._log(t, msg, kind="decision", author=by,
                       ref=aid, detail=ap["comment"] or None, meta={"decision": status})
             if not any(a["status"] == "pending" for a in t["approvals"]):
                 t["status"] = "in_progress" if status == "approved" else "changes_requested"
@@ -738,7 +927,7 @@ class Store:
                     items.append({"type": "decision", "task_id": t["id"], "title": t["title"],
                                   "id": ap["id"], "approval_title": ap["title"], "decision": ap["status"],
                                   "comment": ap.get("comment", ""), "has_action": bool(ap.get("action")),
-                                  "ts": ap.get("decided_at")})
+                                  "selected": ap.get("selected"), "ts": ap.get("decided_at")})
                     to_ack.setdefault(t["id"], []).append(("A", ap["id"]))
         if ack:
             for tid, refs in to_ack.items():
@@ -761,7 +950,7 @@ class Store:
                     "task_id": t["id"], "task_title": t["title"], "id": a["id"], "title": a["title"],
                     "kind": a.get("kind", "general"), "status": a["status"], "created_at": a["created_at"],
                     "decided_at": a.get("decided_at"), "comment": a.get("comment", ""),
-                    "commit": (a.get("applied") or {}).get("commit"),
+                    "commit": (a.get("applied") or {}).get("commit"), "selected": a.get("selected"),
                 })
             open_issues = [i for i in t.get("issues", []) if i.get("status") == "open"]
             pending = [a for a in t.get("approvals", []) if a.get("status") == "pending"]
@@ -780,6 +969,8 @@ class Store:
                 "pending_approvals": len(pending), "artifact_count": len(t.get("artifacts", [])),
                 "last_log": log[-1] if log else None,
             })
+            if t.get("review"):
+                summaries[-1]["review"] = _review_summary(t["review"])
             for a in pending:
                 notifications.append({
                     "task_id": t["id"], "task_title": t["title"], "approval_id": a["id"],
@@ -840,6 +1031,17 @@ class Store:
         mirror_tree(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
         return dest
+
+
+def _review_summary(rv):
+    findings = rv.get("findings", [])
+    open_ = [f for f in findings if f.get("status") == "open"]
+    pr = rv.get("pr") or {}
+    return {
+        "total": len(findings), "open": len(open_),
+        "by_severity": {s: sum(1 for f in open_ if f.get("severity") == s) for s in FINDING_SEVERITIES},
+        "verdict": rv.get("verdict"), "pr": {k: pr.get(k) for k in ("url", "number", "repo") if pr.get(k)},
+    }
 
 
 def _ts_key(ts):

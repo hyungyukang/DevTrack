@@ -578,6 +578,45 @@ table.data .t-prog span { font-size: 12px; color: var(--text-2); font-variant-nu
   .review-list { position: static; max-height: 320px; }
 }
 
+/* 리뷰 결과 한눈에 보기 · 검토 항목(R1, R2…) */
+.fid { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 22px; padding: 0 6px;
+  border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 650; background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--text-2); flex: none; }
+.review-sum .card-body { display: flex; flex-direction: column; gap: 10px; }
+.pr-title { font-weight: 650; font-size: 14.5px; overflow-wrap: anywhere; }
+.pr-title .icon { width: 13px; height: 13px; }
+.pr-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--text-3); }
+.pr-meta > span { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.rv-verdict { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--surface-2); }
+.rv-verdict .rv-v { margin-bottom: 6px; }
+.rv-verdict .markdown-body { font-size: 13.5px; }
+.sev-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+.sev-row .lbl { font-weight: 650; margin-right: 2px; }
+.finding-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.finding { display: flex; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.finding:first-child { border-top: 0; }
+.finding .f-body { min-width: 0; flex: 1; }
+.finding .f-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.finding .f-title { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.finding .f-plain { margin-top: 4px; font-size: 13px; color: var(--text-2); }
+.finding .f-meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--text-3); }
+.finding .f-meta .mono { overflow-wrap: anywhere; }
+.finding:not(.s-open):not(.s-commented) .f-title { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--border-strong, var(--text-3)); }
+
+/* 승인 요청 안의 선택 목록 (예: PR 코멘트를 작성할 항목) */
+.choice-box { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 6px 0 4px; margin: 0 0 10px; min-width: 0; }
+.choice-box legend { font-weight: 650; font-size: 13px; padding: 0 6px; margin-left: 8px; }
+.choice-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px 4px 14px; font-size: 12px; flex-wrap: wrap; }
+.choice-tools .muted { margin-right: auto; }
+.choice { display: flex; gap: 10px; align-items: flex-start; padding: 8px 14px; border-top: 1px solid var(--border); cursor: pointer; }
+.choice:hover { background: var(--surface-2); }
+.choice input { margin-top: 4px; width: 16px; height: 16px; flex: none; accent-color: var(--accent); }
+.choice .c-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.choice .c-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.choice .c-label { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.choice .c-plain { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.decision-result .picked { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
 /* ---------------------------------------------------------------- 결과물 뷰어 */
 .av { min-width: 0; }
 .av-pad { padding: 20px 24px; }

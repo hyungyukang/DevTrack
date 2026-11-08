@@ -24,7 +24,8 @@ Claude 등 AI 에이전트가 수행하는 작업(코드 개발, 코드 리뷰, 
 | `devtrack serve` | 로컬 웹 서버. 웹에서 바로 승인 · 피드백 · 작업 지시 저장 |
 | `devtrack publish` | 웹 + 데이터를 정적 디렉토리(예: Frontier `www`)로 배포 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
-| `templates/review_report.md` | 코드 리뷰 리포트 양식 |
+| `templates/review_report.md` | 코드 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
+| `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`) |
 
 ## 빠른 시작 (로컬에서 예시 화면 보기)
 
@@ -49,7 +50,9 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 - **대시보드** — 진행 중 / 승인 대기 / 열린 문제 / 완료 요약, 확인이 필요한 항목, 진행 중인 작업 카드, 최근 활동
 - **작업 상세** — 지시 내용, 현재 단계와 진행률, 작업 계획 체크리스트, 진행 기록 타임라인, 문제점, 결과물, 승인 요청
 - **승인 요청** — 커밋 diff · 리포트를 펼쳐 보고 **승인 / 수정 요청 / 거절** + 코멘트
-- **코드 리뷰** — 리뷰 리포트(Markdown · PDF) 목록과 뷰어, 리뷰 관련 승인 요청과 의견 보내기
+- **코드 리뷰** — **리뷰 결과 한눈에 보기**(PR 정보, 리뷰 의견, 쉬운 요약, 중요도별 남은 항목, 검토 항목 R1, R2… 와 쉬운 설명 · GitHub 위치 링크),
+  리뷰 리포트(Markdown · PDF) 뷰어, **PR 코멘트를 작성할 항목을 체크해서 진행**, 코멘트 초안 게시 승인, 의견 보내기.
+  Claude Code `/review-pr` 스킬 연동은 [integrations/claude-skills](integrations/claude-skills/README.md)
 - **논문 작성** — 논문(유형 `paper`)별 카드: 원고 구성(작성 계획), **컴파일된 PDF**(최신 빌드 · 경고 · 실패 알림), 원고 파일, 그림, 연결된 데이터 분석, 열린 문제. 논문 결과물(PDF · 원고 · 그림 · 표/데이터) 모아보기
 - **LaTeX 문서 보기** — `.tex` 결과물을 코드 대신 읽기 쉬운 문서로 표시: 절 제목 · 수식(KaTeX) · 표 · 목록 · 각주, `\cite`/`\ref`/`\eqref` 번호 연결, `\includegraphics` 는 같은 이름으로 올라온 그림(같은 작업 또는 연결된 분석 작업)을 찾아 표시. `원본 코드` 로 전환 가능. 번호·레이아웃은 실제 PDF 와 다를 수 있는 미리보기
 - **데이터 분석** — 데이터 분석 · 시각화 작업(유형 `analysis`, `visualization`)과 그림 갤러리, 데이터 · 노트북 · 리포트. `논문용` 필터는 논문 작업에 연결된 분석만 표시
@@ -92,10 +95,10 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
 | `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `issue` / `resolve` | 문제 기록 / 해결 |
-| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 |
+| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록 |
 | `latex` | LaTeX 컴파일 → 성공하면 PDF 를 빌드로 기록(쪽수, 정의 안 된 인용/참조, overfull 경고), 실패하면 오류 위치와 로그 기록. `--pdf` 로 다른 곳에서 만든 PDF 기록 |
-| `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부) / 결정 대기 / 승인된 커밋 실행 |
-| `decide` / `comment` | 사용자 결정 · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
+| `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
+| `decide` / `comment` | 사용자 결정(`--select R1 R3`) · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
 | `inbox` | 처리할 사용자 입력 (`--ack` 로 처리 완료 표시) |
 | `show` / `list` | 작업 상세 / 목록 |
 | `serve` / `publish` / `demo` | 로컬 서버 / 정적 배포 / 예시 데이터 |

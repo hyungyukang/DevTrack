@@ -526,6 +526,148 @@ def _make_repo(root):
 
 
 # ------------------------------------------------------------------ 데모 시나리오
+# ---------------------------------------------------------------------------- 코드 리뷰 예시 (T-0004)
+PR42_FINDINGS = {
+    "pr": {"url": "https://github.com/example/cfd-solver/pull/42", "repo": "example/cfd-solver", "number": 42,
+           "title": "경계조건 모듈 리팩터링", "author": "jlee", "base": "main", "head": "feature/bc-refactor",
+           "head_sha": "3f9c2a1e7b5d4c09a8e6f1b2c3d4e5f60718293a", "files": 14, "additions": 612, "deletions": 430,
+           "ci": "통과"},
+    "verdict": "request_changes",
+    "summary": "코드 정리 방향은 좋지만, **시뮬레이션 결과를 조용히 틀리게 만드는 문제(R1)** 를 고친 뒤 병합하는 것이 좋습니다. "
+               "가로·세로 칸 크기가 다른 격자에서만 드러나는 계산 실수(R2)도 같이 고치기를 권합니다.",
+    "findings": [
+        {"id": "R1", "severity": "blocker", "title": "주기 경계 ghost cell off-by-one",
+         "plain": "오른쪽 끝 값을 왼쪽 바깥 칸으로 복사해야 하는데 한 칸 어긋난 곳을 복사합니다. "
+                  "계산은 멈추지 않고 결과만 조금씩 틀어져서 알아차리기 어렵습니다.",
+         "file": "src/boundary.cpp", "line": 88, "category": "정확성", "confidence": "high"},
+        {"id": "R2", "severity": "major", "title": "Neumann 경계에서 y 방향에 dx 사용",
+         "plain": "세로 방향 경계를 계산하면서 가로 칸 크기를 씁니다. 정사각형 격자에서는 두 값이 같아 티가 나지 않습니다.",
+         "file": "src/boundary.cpp", "line": 141, "category": "정확성", "confidence": "high"},
+        {"id": "R3", "severity": "minor", "title": "BoundaryCondition 가상 소멸자 누락",
+         "plain": "경계 객체를 지울 때 정리 코드가 실행되지 않을 수 있습니다. 지금은 괜찮지만 나중에 메모리 누수의 원인이 됩니다.",
+         "file": "include/bc.h", "line": 22, "category": "안전성", "confidence": "high"},
+        {"id": "R4", "severity": "minor", "title": "비정사각 격자 테스트 없음",
+         "plain": "모든 테스트가 정사각형 격자만 써서 R2 같은 실수를 잡지 못합니다.",
+         "file": "tests/test_bc.cpp", "category": "테스트", "confidence": "high"},
+        {"id": "R5", "severity": "question", "title": "이전 설정 키 bc_type 을 계속 지원하나요?",
+         "plain": "설정 파일에서 쓰던 이름이 바뀌었습니다. 기존 입력 파일이 그대로 동작하는지 확인이 필요합니다.",
+         "file": "src/config.cpp", "line": 57, "category": "호환성", "confidence": "medium"},
+    ],
+}
+
+PR42_REPORT = """# PR #42 코드 리뷰 – example/cfd-solver – {date}
+
+> **한 줄 결론:** 코드 정리 방향은 좋지만, 시뮬레이션 결과를 조용히 틀리게 만드는 문제(R1)를 고친 뒤 병합하는 것이 좋습니다.
+
+| PR | 작성자 | 대상 | 리뷰한 커밋 | 규모 | CI |
+|---|---|---|---|---|---|
+| [경계조건 모듈 리팩터링](https://github.com/example/cfd-solver/pull/42) | jlee | `main` ← `feature/bc-refactor` | `3f9c2a1e` | 14개 파일, +612 −430 | 통과 |
+
+## 1. 한눈에 보기
+
+- **이 PR이 하는 일:** 시뮬레이션 영역의 가장자리(경계)를 처리하는 코드를 정리합니다. 경계 종류마다 흩어져 있던 코드를 한 구조로 모아, 새 경계 조건을 추가하기 쉽게 만듭니다.
+- **리뷰 의견:** 수정 후 다시 확인 — 정리 방향은 좋지만 계산 결과에 영향을 주는 문제가 2개 있습니다.
+- **꼭 고쳐야 할 것:** 2개
+  - **R1** — 주기 경계(한쪽 끝과 반대쪽 끝이 이어진 경계)에서 값을 잘못된 칸에서 복사합니다. 그 결과 흐름이 실제보다 느리게 약해집니다 (테스트에서 11% 차이).
+  - **R2** — 가로·세로 칸 크기가 다른 격자에서 경계의 기울기를 잘못 계산합니다. 정사각형 격자에서는 우연히 맞아서 기존 테스트로는 드러나지 않았습니다.
+- **영향 범위:** 주기 경계 조건(R1), 또는 비정사각 격자에서 Neumann 경계(R2)를 쓰는 모든 계산.
+
+| 중요도 | 뜻 |
+|---|---|
+| 🔴 반드시 수정 (Blocker) | 병합 전에 꼭 고쳐야 함 — 결과가 틀리거나 프로그램이 멈춤 |
+| 🟠 수정 권장 (Major) | 특정 조건에서 동작이나 결과에 영향을 줌 |
+| 🟡 개선 제안 (Minor) | 지금도 동작하지만 고치면 더 안전하거나 읽기 쉬움 |
+| ⚪ 사소함 (Nit) | 이름 · 표기 · 스타일 수준 |
+| 🔵 질문 (Question) | 작성자에게 의도를 확인할 부분 |
+
+## 2. 검토 결과 요약
+
+| # | 중요도 | 쉬운 설명 | 위치 | 분류 | 확신도 |
+|---|---|---|---|---|---|
+| R1 | 🔴 반드시 수정 | 주기 경계 값을 한 칸 어긋난 곳에서 복사해 결과가 틀어짐 | `src/boundary.cpp:88` | 정확성 | 높음 |
+| R2 | 🟠 수정 권장 | 가로·세로 간격이 다르면 경계 기울기가 틀림 | `src/boundary.cpp:141` | 정확성 | 높음 |
+| R3 | 🟡 개선 제안 | 객체를 지울 때 정리 코드가 실행되지 않을 수 있음 | `include/bc.h:22` | 안전성 | 높음 |
+| R4 | 🟡 개선 제안 | R2 같은 실수를 잡아낼 테스트가 없음 | `tests/test_bc.cpp` | 테스트 | 높음 |
+| R5 | 🔵 질문 | 예전 설정 이름(`bc_type`)도 계속 쓸 수 있는지 | `src/config.cpp:57` | 호환성 | 중간 |
+
+## 3. 변경 사항
+
+| 영역 | 파일 | +/− | 변경 내용 |
+|---|---|---|---|
+| 경계조건 구조 | `include/bc.h`, `src/boundary.cpp` | +410 −380 | 경계 종류별 함수를 `BoundaryCondition` 클래스 계층으로 통합 |
+| 설정 | `src/config.cpp` | +62 −31 | 설정 키 `bc_type` → `boundary.kind` |
+| 테스트 | `tests/test_bc.cpp` | +140 −19 | 클래스별 단위 테스트 추가 |
+
+경계 처리를 가상 함수 `apply()` 하나로 통일해 호출하는 쪽 코드가 단순해졌습니다.
+시간 루프 안에서 가상 함수 호출이 늘었지만 경계 칸 수가 적어 성능 영향은 무시할 수준입니다.
+
+## 4. 상세 (개발자용)
+
+### R1. 주기 경계 ghost cell off-by-one — 🔴 반드시 수정
+
+- **쉽게 말하면:** 오른쪽 끝 값을 왼쪽 바깥 칸으로 복사해야 하는데, 한 칸 어긋난 곳을 복사합니다. 계산은 멈추지 않고 결과만 조금씩 틀어져서 알아차리기 어렵습니다.
+- **위치:** [`src/boundary.cpp:88`](https://github.com/example/cfd-solver/blob/3f9c2a1e7b5d4c09a8e6f1b2c3d4e5f60718293a/src/boundary.cpp#L88) (`apply_periodic()`)
+- **문제:** ghost cell `0` 이 반대편 ghost cell `nx-1` 을 복사합니다. 내부 마지막 칸 `nx-2` 를 복사해야 합니다.
+- **왜 중요한가:** 주기 방향 기울기가 0 쪽으로 끌려가, Taylor–Green 와류 테스트에서 운동에너지 감쇠율이 해석해보다 **11%** 느립니다.
+- **제안:**
+
+  ```cpp
+  p[idx(0, j)]      = p[idx(nx - 2, j)];
+  p[idx(nx - 1, j)] = p[idx(1, j)];
+  ```
+
+- **확신도:** 높음 — 코드에서 직접 확인, 테스트로 재현
+
+### R2. Neumann 경계의 격자 간격 — 🟠 수정 권장
+
+- **쉽게 말하면:** 세로 방향 경계를 계산하면서 가로 칸 크기를 씁니다. 정사각형 격자에서는 두 값이 같아 티가 나지 않습니다.
+- **위치:** `src/boundary.cpp:141` (`apply_neumann()`)
+- **문제:** y 방향 플럭스 계산에 `dx` 를 사용합니다.
+- **왜 중요한가:** `dx != dy` 인 격자에서 벽면 플럭스가 `dx/dy` 배만큼 틀립니다.
+- **제안:** y 방향 분기에서 `dx` → `dy`
+- **확신도:** 높음 — 코드에서 직접 확인
+
+### R3. 가상 소멸자 누락 — 🟡 개선 제안
+
+- **쉽게 말하면:** 경계 객체를 지울 때 하위 클래스의 정리 코드가 실행되지 않을 수 있습니다. 지금은 문제가 없지만, 나중에 메모리를 쓰는 경계 조건을 추가하면 누수가 생깁니다.
+- **위치:** `include/bc.h:22`
+- **제안:** `virtual ~BoundaryCondition() = default;`
+- **확신도:** 높음
+
+### R4. 비정사각 격자 테스트 없음 — 🟡 개선 제안
+
+- **쉽게 말하면:** 모든 테스트가 정사각형 격자만 써서 R2 같은 실수를 잡지 못합니다.
+- **위치:** `tests/test_bc.cpp`
+- **제안:** 64×128 격자에서 Neumann · 주기 경계 회귀 테스트 추가
+- **확신도:** 높음
+
+### R5. 이전 설정 키 호환성 — 🔵 질문
+
+- **쉽게 말하면:** 설정 파일에서 쓰던 이름이 바뀌었습니다. 기존 입력 파일이 그대로 동작하는지 확인이 필요합니다.
+- **위치:** `src/config.cpp:57`
+- **질문:** `bc_type` 을 계속 읽을 계획인가요? 아니라면 오류 메시지로 새 이름을 안내하면 좋겠습니다.
+- **확신도:** 중간 — 다른 곳에서 변환하는지 diff 만으로는 확인할 수 없음
+
+## 5. 테스트 · 검증 제안
+
+- R1, R2 수정 후 64×128 격자 회귀 테스트 추가
+- Taylor–Green 와류 감쇠율을 해석해와 비교 (오차 1% 이내 기대)
+
+## 6. 종합 의견
+
+**Request changes** 를 제안합니다. 구조 개선은 병합할 가치가 있지만, R1 은 결과를 조용히 틀리게 만들어 병합 전에 수정이 필요합니다.
+R2 도 같은 PR 에서 고치는 것이 안전합니다. 최종 결정은 사용자가 합니다.
+
+## 용어 풀이
+
+- **경계 조건:** 시뮬레이션 영역의 가장자리에서 값을 어떻게 정할지에 대한 규칙
+- **주기 경계:** 한쪽 끝을 나가면 반대쪽 끝으로 들어오는 경계 (예: 지구를 한 바퀴 도는 방향)
+- **ghost cell:** 경계 계산을 위해 영역 바깥에 덧붙인 가상의 칸
+- **Neumann 경계:** 경계에서 값 자체가 아니라 기울기(변화율)를 정하는 조건
+- **가상 소멸자:** C++ 에서 객체를 지울 때 하위 클래스의 정리 코드까지 실행되게 하는 선언
+"""
+
+
 def build_demo(store, force=False):
     root = store.root
     if os.path.exists(os.path.join(root, "tasks")) and store.task_ids():
@@ -691,79 +833,50 @@ def _scenario(s, clk, tmp):
     clk.at(135)
     s.update_task(tid3, status="blocked", step="OOM 해결 방향 사용자 결정 대기 — 메시지로 선택지를 알려주세요")
 
-    # ---------------------------------------------------------------- T-0004 PR 코드 리뷰 (승인 대기)
+    # ---------------------------------------------------------------- T-0004 PR 코드 리뷰 (항목 선택 대기)
     clk.at(300)
     t4 = s.create_task(
         "PR #42 코드 리뷰: 경계조건 모듈 리팩터링", type="review", agent="Claude",
         repo_url="https://github.com/example/cfd-solver/pull/42",
-        instruction="https://github.com/example/cfd-solver/pull/42 를 리뷰해 주세요. 정확성 버그 위주로, "
-                    "리포트는 markdown 과 PDF 로 남기고 PR 에 코멘트 게시 전에 승인 받으세요.",
-        plan=["PR 변경사항 파악", "정확성 검토", "리뷰 리포트 작성", "PR 코멘트 게시 승인 요청"], tags=["PR-42"])
+        instruction="/review-pr https://github.com/example/cfd-solver/pull/42\n\n"
+                    "정확성 버그 위주로 봐 주세요. 리포트는 개발자가 아닌 사람도 이해할 수 있게 써 주세요.",
+        plan=["PR 정보 · 변경사항 수집", "코드 검토", "리뷰 리포트 작성", "코멘트할 항목 선택 (사용자)",
+              "코멘트 초안 작성 · 게시 승인", "PR 에 게시"], tags=["PR-42"])
     tid4 = t4["id"]
-    clk.at(290); s.update_task(tid4, step="변경 파일 14개, +612 −430 확인 — boundary.cpp 중심", progress=15)
+    clk.at(290); s.update_task(tid4, step="PR 정보 수집: 14개 파일, +612 −430, CI 통과", progress=10)
     clk.at(280); s.check_plan(tid4, [1])
-    clk.at(220); s.update_task(tid4, step="주기 경계조건 인덱스 계산 검토 중")
-    clk.at(200); s.add_issue(tid4, "주기 경계에서 ghost cell 인덱스 off-by-one (nx-1 대신 nx-2 를 복사)",
-                             severity="high", detail="`apply_periodic()` L88: `p[0] = p[nx-2]` 이어야 하는데 `p[nx-1]` 로 바뀜.")
+    clk.at(220); s.update_task(tid4, step="경계조건 코드 검토 중 (boundary.cpp, bc.h)", progress=35)
     clk.at(170); s.check_plan(tid4, [2])
-    review_md = """# 코드 리뷰 리포트 — PR #42 경계조건 모듈 리팩터링
-
-**리뷰어:** Claude · **대상:** `feature/bc-refactor` → `main` · **변경:** 14 files, +612 −430
-
-## 요약
-경계조건 코드를 `BoundaryCondition` 클래스 계층으로 정리한 방향은 좋습니다. 다만 **주기 경계의 인덱스 오류(R1)** 는
-결과를 조용히 틀리게 만드는 버그라 병합 전에 반드시 수정이 필요합니다.
-
-| # | 심각도 | 위치 | 내용 |
-|---|---|---|---|
-| R1 | 🔴 높음 | `src/boundary.cpp:88` | 주기 경계 ghost cell off-by-one |
-| R2 | 🟠 중간 | `src/boundary.cpp:141` | Neumann 경계에서 dx 대신 dy 사용 (정사각 격자에서만 우연히 맞음) |
-| R3 | 🟡 낮음 | `include/bc.h:22` | 가상 소멸자 누락 |
-| R4 | 🟡 낮음 | `tests/test_bc.cpp` | 비정사각 격자 테스트 없음 |
-
-## R1. 주기 경계 ghost cell off-by-one
-```cpp
-// 변경 후 (오류)
-p[idx(0, j)]      = p[idx(nx - 1, j)];
-// 기대
-p[idx(0, j)]      = p[idx(nx - 2, j)];
-p[idx(nx - 1, j)] = p[idx(1, j)];
-```
-ghost cell 이 자기 자신(반대편 ghost)을 복사하므로 주기 방향 기울기가 0으로 수렴합니다.
-Taylor–Green 와류 테스트에서 운동에너지 감쇠율이 해석해 대비 **11%** 느립니다.
-
-## R2. Neumann 경계 격자 간격
-`apply_neumann()` 의 y 방향 처리에서 `dx` 를 사용합니다. `nx != ny` 또는 `dx != dy` 인 경우 플럭스가 틀립니다.
-
-## 권장 사항
-- [ ] R1, R2 수정 후 비정사각 격자(64×128) 회귀 테스트 추가
-- [ ] `BoundaryCondition` 에 `virtual ~BoundaryCondition() = default;`
-- [x] 기존 단위 테스트 전부 통과 확인
-"""
+    clk.at(160); s.update_task(tid4, step="리뷰 리포트 작성 중", progress=60)
+    clk.at(122)
+    s.set_review(tid4, PR42_FINDINGS)
     clk.at(120)
-    rv = s.add_artifact(tid4, path=f("review_PR42.md", review_md), title="PR #42 리뷰 리포트", category="review")
-    s.add_artifact(tid4, path=f("review_PR42.pdf", simple_pdf("Code Review Report - PR #42", [
-        "Reviewer: Claude    Target: feature/bc-refactor -> main    14 files, +612 -430", "",
-        "## Summary",
-        "Refactoring boundary conditions into a class hierarchy is a good direction.",
-        "However R1 (periodic ghost-cell off-by-one) silently produces wrong results",
+    rv = s.add_artifact(tid4, path=f("review-PR-42.md", PR42_REPORT.format(date=_dt.date.today().isoformat())),
+                        title="PR #42 리뷰 리포트", category="review")
+    s.add_artifact(tid4, path=f("review-PR-42.pdf", simple_pdf("Code Review Report - PR #42", [
+        "Reviewer: Claude    Target: main <- feature/bc-refactor    14 files, +612 -430", "",
+        "## Bottom line",
+        "Good refactoring direction, but R1 silently produces wrong results",
         "and must be fixed before merge.", "",
         "## Findings",
-        "R1 [HIGH]   src/boundary.cpp:88   periodic ghost cell copies nx-1 instead of nx-2",
-        "R2 [MEDIUM] src/boundary.cpp:141  Neumann BC uses dx for the y direction",
-        "R3 [LOW]    include/bc.h:22       missing virtual destructor",
-        "R4 [LOW]    tests/test_bc.cpp     no test for non-square grids", "",
+        "R1 [BLOCKER]  src/boundary.cpp:88   periodic ghost cell copies nx-1 instead of nx-2",
+        "R2 [MAJOR]    src/boundary.cpp:141  Neumann BC uses dx for the y direction",
+        "R3 [MINOR]    include/bc.h:22       missing virtual destructor",
+        "R4 [MINOR]    tests/test_bc.cpp     no test for non-square grids",
+        "R5 [QUESTION] src/config.cpp:57     is the old key bc_type still accepted?", "",
         "## Evidence",
         "Taylor-Green vortex: kinetic-energy decay 11% slower than analytic solution.", "",
-        "## Recommendations",
-        "- Fix R1 and R2, add 64x128 regression test",
-        "- Add virtual ~BoundaryCondition() = default;",
+        "## Verdict",
+        "Request changes (fix R1 and R2, add a 64x128 regression test).",
     ]), "wb"), title="PR #42 리뷰 리포트 (PDF)", category="review")
     clk.at(118); s.check_plan(tid4, [3])
     clk.at(40)
-    s.request_approval(tid4, "리뷰 코멘트를 PR #42 에 게시해도 될까요?", kind="review", artifact_ids=[rv["id"]],
-                       description="R1~R4 를 인라인 코멘트 4개 + 요약 코멘트 1개로 게시할 예정입니다. "
-                                   "**Request changes** 상태로 제출합니다.")
+    s.update_task(tid4, step="사용자가 코멘트할 항목을 고르기를 기다리는 중", progress=70)
+    s.request_approval(tid4, "PR #42: 코멘트를 작성할 항목을 골라주세요", kind="review", artifact_ids=[rv["id"]],
+                       choices=[], choices_label="PR 코멘트를 작성할 항목",
+                       description="고른 항목만 GitHub 코멘트 초안을 만들어 **다시 확인받은 뒤** 게시합니다. "
+                                   "아직 PR 에는 아무것도 올리지 않았습니다.\n\n"
+                                   "제안: **R1, R2** (결과에 영향) — 리뷰 의견은 *수정 후 다시 확인* (Request changes)")
 
     # ---------------------------------------------------------------- T-0005 논문 결과 섹션 (진행 중)
     clk.at(250)

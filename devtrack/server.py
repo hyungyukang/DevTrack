@@ -7,7 +7,7 @@ API
   GET  /api/health
   POST /api/tasks                               {title, instruction, type, agent, repo, branch, priority}
   POST /api/tasks/<T>/comments                  {message}
-  POST /api/tasks/<T>/approvals/<A>/decision    {decision: approve|changes|reject, comment}
+  POST /api/tasks/<T>/approvals/<A>/decision    {decision: approve|changes|reject, comment, selected?: [ID]}
 """
 
 import http.server
@@ -120,8 +120,11 @@ def make_handler(store, web_root, verbose=False):
                         return self._json({"ok": True, "entry": e}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/approvals/(A-\d+)/decision$", path)
                     if m:
+                        selected = body.get("selected")
+                        if selected is not None and not isinstance(selected, list):
+                            raise DevTrackError("selected 는 항목 ID 목록이어야 합니다")
                         ap = store.decide(m.group(1), m.group(2), body.get("decision") or "",
-                                          comment=body.get("comment") or "", by=USER)
+                                          comment=body.get("comment") or "", by=USER, selected=selected)
                         return self._json({"ok": True, "approval": ap})
                 return self._json({"error": "not found"}, 404)
             except DevTrackError as e:

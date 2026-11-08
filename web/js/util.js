@@ -128,6 +128,28 @@ export const SEVERITY = {
   high: { label: '높음', tone: 'orange' },
   critical: { label: '심각', tone: 'red' },
 };
+// 코드 리뷰 검토 항목 (review-pr 스킬의 Blocker / Major / Minor / Nit / Question)
+export const FINDING_SEV = {
+  blocker: { label: '반드시 수정', en: 'Blocker', tone: 'red', hint: '병합 전에 꼭 고쳐야 하는 문제' },
+  major: { label: '수정 권장', en: 'Major', tone: 'orange', hint: '결과나 동작에 영향을 줄 수 있는 문제' },
+  minor: { label: '개선 제안', en: 'Minor', tone: 'amber', hint: '고치면 더 좋아지는 부분' },
+  nit: { label: '사소함', en: 'Nit', tone: 'gray', hint: '표기 · 스타일 수준' },
+  question: { label: '질문', en: 'Question', tone: 'blue', hint: '작성자에게 확인이 필요한 부분' },
+};
+export const FINDING_STATUS = {
+  open: { label: '수정 필요', tone: 'orange' },
+  fixed: { label: '해결됨', tone: 'green' },
+  commented: { label: 'PR에 게시', tone: 'violet' },
+  dismissed: { label: '제외', tone: 'gray' },
+  na: { label: '해당 없음', tone: 'gray' },
+};
+export const VERDICT = {
+  approve: { label: '승인해도 됨', tone: 'green', icon: 'check-circle' },
+  comment: { label: '의견만 전달', tone: 'blue', icon: 'message' },
+  request_changes: { label: '수정 후 다시 확인', tone: 'orange', icon: 'edit' },
+};
+export const CONFIDENCE = { high: '높음', medium: '중간', low: '낮음' };
+
 export const ART_KIND = {
   markdown: { label: '문서', icon: 'file-text' },
   pdf: { label: 'PDF', icon: 'file-text' },
