@@ -89,6 +89,7 @@ const VIEWS = {
   artifact: viewArtifact,
   activity: viewActivity,
   new: viewNewTask,
+  guide: viewGuide,
 };
 
 let renderSeq = 0;
@@ -102,7 +103,7 @@ async function render({ keepScroll = false } = {}) {
   updateChrome(route);
   let view;
   try {
-    if (!state.index) view = state.loadError ? viewLoadError(state.loadError) : html`<div class="empty">불러오는 중…</div>`;
+    if (!state.index && route.name !== 'guide') view = state.loadError ? viewLoadError(state.loadError) : html`<div class="empty">불러오는 중…</div>`;
     else view = VIEWS[route.name] ? await VIEWS[route.name](route) : viewNotFound();
   } catch (e) {
     console.error(e);
@@ -134,6 +135,8 @@ function hydrate(root) {
   }
   const form = $('#new-task-form', root);
   if (form) form.addEventListener('submit', submitNewTask);
+  const guide = $('.guide-body', root);
+  if (guide) setupGuide(guide, $('.guide-toc', root));
 }
 
 function mountArtifact(el) {
@@ -179,6 +182,7 @@ function isEditing() {
 function isRelevant(changed, prev, idx) {
   if (!prev) return true;
   const r = parseRoute();
+  if (r.name === 'guide') return false;
   if (r.name === 'task' || r.name === 'artifact') return changed.has(r.rest[0]);
   if (r.name === 'reviews') {
     const ids = (x) => x.reviews.map((v) => v.task_id + v.id).join();
@@ -760,16 +764,96 @@ function viewWelcome() {
       <a class="btn btn-primary" href="#/new">${icon('plus')} 새 작업 지시</a></div>
     <section class="card welcome">
       <h2>아직 기록된 작업이 없습니다</h2>
-      <p class="muted">Claude(또는 다른 AI)가 <code>devtrack</code> 명령으로 작업을 기록하면 이 화면에 실시간으로 표시됩니다.</p>
+      <p class="muted">Claude 에게 일을 맡기면, 무엇을 하고 있는지 · 문제 · 결과물 · 승인 요청이 이 화면에 실시간으로 표시됩니다.</p>
       <ol>
-        <li>작업 시작: <code>devtrack new "작업 제목" -t code --repo ~/project --plan "분석" "구현" "테스트"</code></li>
-        <li>진행 기록: <code>devtrack step T-0001 "지금 하는 일" -p 30</code>, 문제: <code>devtrack issue T-0001 "문제" -s high</code></li>
-        <li>결과물/리뷰: <code>devtrack artifact T-0001 fig.png</code>, <code>devtrack review T-0001 report.md</code></li>
-        <li>승인 요청: <code>devtrack request T-0001 "커밋 승인" --commit -m "메시지"</code> → 웹 알림 → 승인 후 <code>devtrack apply</code></li>
+        <li><b>처음 한 번:</b> Claude 가 DevTrack 에 기록하도록 설정합니다 — <a href="#/guide/s5">사용 방법 5단계</a></li>
+        <li><b>작업 맡기기:</b> Claude 채팅으로 지시하거나, <a href="#/new">새 작업 지시</a> 로 웹에서 지시합니다 — <a href="#/guide/s6">6단계</a></li>
+        <li><b>확인 · 승인:</b> 진행 상황을 보고, 승인 요청에 승인 / 수정 요청 / 거절로 답합니다 — <a href="#/guide/s8">8단계</a></li>
       </ol>
-      <p class="muted">예시 화면을 보려면:</p>
-      <pre>devtrack --data demo-data demo\ndevtrack --data demo-data serve</pre>
+      <div class="welcome-actions">
+        <a class="btn btn-primary" href="#/guide">${icon('book')} 사용 방법 보기 (처음부터 따라 하기)</a>
+        <a class="btn" href="#/new">${icon('plus')} 새 작업 지시</a>
+      </div>
     </section>`;
+}
+
+// ====================================================================== 화면: 사용 방법
+async function viewGuide({ rest }) {
+  if (state.guide == null) {
+    try {
+      const r = await fetch('guide.md', { cache: 'no-cache' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      state.guide = await r.text();
+    } catch (e) {
+      return html`<div class="page-head"><div><h1>사용 방법</h1></div></div>
+        <div class="card empty">${icon('alert')}<p>사용 방법 문서(guide.md)를 불러오지 못했습니다 — ${e.message}</p></div>`;
+    }
+  }
+  const body = state.guide.replace(/^# [^\n]*\n/, ''); // 문서 제목은 페이지 제목으로
+  const modeNote = state.mode === 'live'
+    ? html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body"><b>지금 이 화면은 실시간 · 로컬 서버 모드입니다.</b>
+        <p>웹에서 누른 승인 · 메시지 · 새 작업 지시가 바로 저장됩니다. 대시보드가 이미 실행 중이니(1 · 2 · 4단계 완료), 3단계(PATH)와 5단계부터 확인하세요.</p></div></div>`
+    : html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>지금 이 화면은 정적 · 읽기 전용 모드입니다.</b>
+        <p>버튼을 누르면 Claude 에게 보낼 메시지가 만들어집니다 (10단계 참고).</p></div></div>`;
+  return html`
+    <div class="page-head"><div><h1>사용 방법</h1><p class="sub">처음 쓰는 분을 위한 단계별 안내 — 위에서부터 차례로 따라 하세요</p></div>
+      <a class="btn" href="guide.md" target="_blank" rel="noopener">${icon('file-text')} 원문 (Markdown)</a></div>
+    <div class="guide-layout">
+      <details class="card guide-toc" open><summary>목차</summary><div class="toc-list"></div></details>
+      <div style="min-width:0">
+        ${modeNote}
+        <article class="card guide-body markdown-body" data-target="${rest[0] || ''}">${raw(renderMarkdown(body))}</article>
+      </div>
+    </div>`;
+}
+
+function guideHeadingId(text, used) {
+  const t = text.trim();
+  const m = /^(\d+(?:-\d+)*)\./.exec(t);
+  let id = m ? `s${m[1]}` : `s-${t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')}`;
+  while (used.has(id)) id += '_';
+  used.add(id);
+  return id;
+}
+
+/** 렌더된 사용 방법 문서에 목차 · 명령 복사 버튼 · 외부 링크 처리를 붙인다 */
+function setupGuide(body, toc) {
+  const used = new Set();
+  const items = $$('h2, h3', body).map((h) => {
+    h.id = guideHeadingId(h.textContent, used);
+    return { id: h.id, text: h.textContent.trim(), level: h.tagName === 'H2' ? 2 : 3 };
+  });
+  const list = $('.toc-list', toc);
+  list.innerHTML = String(html`${items.map((it) => html`<a class="toc-l${it.level}" href="#/guide/${it.id}" data-toc="${it.id}">${it.text}</a>`)}`);
+  if (window.matchMedia('(max-width: 900px)').matches) toc.open = false;
+  $$('pre', body).forEach((pre) => {
+    if (pre.querySelector('code.language-text')) return; // 그림 · 흐름도는 복사 버튼 없이
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-sm code-copy';
+    b.dataset.action = 'copy';
+    b.dataset.copy = pre.textContent.replace(/\n+$/, '');
+    b.innerHTML = `${icon('copy')} 복사`;
+    wrap.appendChild(b);
+  });
+  $$('a[href^="http"]', body).forEach((a) => { a.target = '_blank'; a.rel = 'noopener'; });
+  const target = body.dataset.target && document.getElementById(body.dataset.target);
+  // render() 가 끝에 스크롤을 맨 위로 돌리므로 그 다음 프레임에 이동
+  if (target) requestAnimationFrame(() => { target.scrollIntoView({ block: 'start' }); syncGuideToc(); });
+  syncGuideToc();
+}
+
+function syncGuideToc() {
+  const toc = $('.guide-toc');
+  if (!toc) return;
+  const heads = $$('.guide-body h2, .guide-body h3');
+  let cur = heads[0];
+  for (const h of heads) { if (h.getBoundingClientRect().top < 120) cur = h; else break; }
+  $$('[data-toc]', toc).forEach((a) => a.classList.toggle('active', a.dataset.toc === cur?.id));
 }
 
 // ====================================================================== 화면: 작업 목록
@@ -1626,6 +1710,12 @@ function bindEvents() {
     render({ keepScroll: key === state.routeKey });
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  let tocTick = false;
+  window.addEventListener('scroll', () => {
+    if (tocTick || !$('.guide-toc')) return;
+    tocTick = true;
+    requestAnimationFrame(() => { tocTick = false; syncGuideToc(); });
+  }, { passive: true });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeIcon);
   setInterval(() => {
     $$('time[data-ts]').forEach((t) => { if (t.dataset.ts) t.textContent = fmtRel(t.dataset.ts); });

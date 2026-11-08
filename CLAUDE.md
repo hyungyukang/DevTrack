@@ -1,7 +1,7 @@
 # DevTrack 개발 가이드 (이 저장소에서 작업하는 에이전트용)
 
 AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/`)와, 이를 보여주고 승인받는 웹(`web/`)으로 구성된다.
-사용자 문서는 README.md, 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
+사용자 문서는 README.md 와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
 
 ## 반드시 지킬 제약
 - **Python 표준 라이브러리만** (Python 3.7+). Frontier 등 HPC 에서 pip 설치 없이 돌아가야 한다. f-string 대신 `.format` 을 써 온 기존 스타일 유지.
@@ -23,6 +23,6 @@ AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/
 bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serve   # http://localhost:8765
 ```
 - Python 코드를 바꾸면 실행 중인 `serve` 를 재시작해야 반영된다 (웹 파일은 새로고침만).
-- 화면 변경 후: 주요 경로(`#/`, `#/tasks`, `#/task/T-0006/approvals`, `#/reviews`, `#/task/T-0004`, `#/papers`, `#/analysis`, `#/artifacts`, `#/activity`, `#/new`)를 라이트/다크, 390px 폭에서 확인하고 콘솔 오류가 없는지 본다.
+- 화면 변경 후: 주요 경로(`#/`, `#/tasks`, `#/task/T-0006/approvals`, `#/reviews`, `#/task/T-0004`, `#/papers`, `#/analysis`, `#/artifacts`, `#/activity`, `#/new`, `#/guide`)를 라이트/다크, 390px 폭에서 확인하고 콘솔 오류가 없는지 본다.
 - 정적 모드 확인: `bin/devtrack --data demo-data publish --to /tmp/x/devtrack` 후 `python3 -m http.server` 로 열기.
 - CLI 변경 후: 임시 git 저장소로 `new → request --commit → decide → apply` 흐름을 돌려 본다.

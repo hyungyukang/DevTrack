@@ -78,6 +78,8 @@ def make_handler(store, web_root, verbose=False):
         def end_headers(self):
             if self.path.startswith(("/data/", "/api/")):
                 self.send_header("Cache-Control", "no-store")
+            else:  # 웹 화면 파일: 매번 변경 여부를 확인 (업데이트 후 예전 화면이 남지 않게, 바뀌지 않았으면 304)
+                self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
             super().end_headers()
 

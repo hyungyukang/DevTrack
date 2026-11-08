@@ -920,3 +920,34 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .welcome ol { padding-left: 1.3em; color: var(--text-2); }
 .welcome ol li { margin: 6px 0; }
 .welcome pre { background: var(--surface-2); padding: 12px 14px; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------- 사용 방법 */
+.alert-ok { background: var(--green-soft); color: var(--green); }
+.welcome-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.guide-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 18px; align-items: start; }
+.guide-toc { position: sticky; top: calc(var(--topbar-h) + 16px); max-height: calc(100vh - var(--topbar-h) - 32px); overflow-y: auto; padding: 8px 0; }
+.guide-toc summary { list-style: none; padding: 6px 16px 8px; font-size: 12px; font-weight: 650; color: var(--text-3); text-transform: none; cursor: default; }
+.guide-toc summary::-webkit-details-marker { display: none; }
+.guide-toc .toc-list a { display: block; padding: 5px 16px; font-size: 13px; color: var(--text-2); border-left: 2px solid transparent; line-height: 1.4; }
+.guide-toc .toc-list a:hover { background: var(--surface-2); text-decoration: none; color: var(--text); }
+.guide-toc .toc-list a.toc-l3 { padding-left: 30px; font-size: 12.5px; color: var(--text-3); }
+.guide-toc .toc-list a.active { color: var(--accent-text); border-left-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.guide-body { padding: 8px 32px 28px; font-size: 14.5px; line-height: 1.75; }
+.guide-body h2 { scroll-margin-top: calc(var(--topbar-h) + 16px); margin-top: 1.8em; }
+.guide-body h3 { scroll-margin-top: calc(var(--topbar-h) + 16px); margin-top: 1.4em; }
+.guide-body > h2:first-child { margin-top: .8em; }
+.guide-body blockquote { border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text); padding: 8px 14px; border-radius: 0 8px 8px 0; }
+.guide-body blockquote p { margin: 0; }
+.guide-body table { font-size: 13.5px; }
+.code-wrap { position: relative; margin: 0 0 .9em; }
+.code-wrap pre { margin: 0; padding-right: 76px; }
+.code-copy { position: absolute; top: 7px; right: 7px; opacity: .85; }
+.code-copy:hover { opacity: 1; }
+@media (max-width: 900px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); }
+  .guide-toc { position: static; max-height: none; }
+  .guide-toc summary { cursor: pointer; font-size: 13.5px; color: var(--text); }
+  .guide-toc summary::before { content: '▸ '; }
+  .guide-toc[open] summary::before { content: '▾ '; }
+  .guide-body { padding: 4px 18px 20px; }
+}

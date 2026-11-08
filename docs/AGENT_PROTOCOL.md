@@ -152,16 +152,16 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
 ## CLAUDE.md 에 넣을 내용
 
 ```markdown
-## DevTrack 작업 기록 (필수)
-- 모든 작업은 `devtrack` 으로 기록한다. 규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
+## DevTrack 작업 기록
+- 의미 있는 작업(코드 변경, 코드 리뷰, 데이터 분석, 논문, 시각화, 모델 개발)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
+  규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
 - 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다.
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
-- 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면",
-  전문 용어 풀이. 검토 항목은 `devtrack review --findings` 로, 코멘트할 항목은 `request --choices` 로 사용자가 고르게 한다.
-- git commit/push 를 직접 하지 않는다. `devtrack request <TID> "..." --commit -m "..."` 로 승인을 요청하고,
-  승인되면 `devtrack apply <TID> <AID>` 로 반영한다.
+- 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.
+- DevTrack 작업의 결과를 저장소에 반영할 때는 git commit/push 를 직접 하지 않고 `devtrack request <TID> "..." --commit -m "..."` 로
+  승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` 메시지를 보내면
   각각 `devtrack decide` / `devtrack comment` / `devtrack new` 로 먼저 기록한 뒤 진행한다.
 ```
