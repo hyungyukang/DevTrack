@@ -2,6 +2,7 @@
 import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
   FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
+  isUnassigned, aiName, agentLabel,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 
@@ -315,7 +316,7 @@ function updateChrome(route = parseRoute()) {
   } else {
     chip.className = 'mode-chip';
     chip.innerHTML = '<span class="dot"></span><span>정적<span class="label-long"> · 읽기 전용</span></span>';
-    chip.title = '정적 호스팅 모드: 데이터는 자동 갱신되지만, 승인/피드백은 Claude에게 전달할 메시지로 표시됩니다';
+    chip.title = '정적 호스팅 모드: 데이터는 자동 갱신되지만, 승인/피드백은 담당 AI 에게 전달할 메시지로 표시됩니다';
   }
   $('#sync-info').innerHTML = idx
     ? html`데이터 갱신 <b>${ago(idx.generated_at)}</b><br>${POLL_MS / 1000}초마다 자동 확인`.s
@@ -410,7 +411,7 @@ function taskCard(t, { thumbs = false, links = false } = {}) {
     ${figs.length ? html`<div class="tc-thumbs">${figs.map((a) => html`<img src="${artifactUrl(a.task_id, a)}" alt="" loading="lazy" title="${a.title}">`)}</div>` : ''}
     <div class="tc-prog">${progressBar(t)}<span class="pct">${t.progress || 0}%</span></div>
     <div class="tc-meta">
-      <span>${t.agent}</span><span>${ago(t.updated_at)}</span>
+      <span>${agentLabel(t)}</span><span>${ago(t.updated_at)}</span>
       ${t.pending_approvals ? html`<span class="flag amber">${icon('bell')}승인 ${t.pending_approvals}</span>` : ''}
       ${t.open_issues ? html`<span class="flag ${t.max_severity >= 2 ? 'red' : 'orange'}">${icon('alert')}문제 ${t.open_issues}</span>` : ''}
     </div>
@@ -488,13 +489,13 @@ function planList(t) {
     </li>`)}</ol>`;
 }
 
-function feedbackBox(t, title = '에이전트에게 메시지') {
+function feedbackBox(t, title = `${aiName(t)}에게 메시지`) {
   return html`<section class="card feedback-card">
     <div class="card-head"><h2>${icon('message')} ${title}</h2></div>
     <div class="card-body">
       <textarea id="fb-${t.id}" placeholder="추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)"></textarea>
       <div class="actions">
-        <span class="hint">${state.mode === 'live' ? '에이전트가 devtrack inbox 로 확인합니다' : '정적 모드: 보내기를 누르면 Claude에게 전달할 내용이 표시됩니다'}</span>
+        <span class="hint">${state.mode === 'live' ? `${aiName(t)}에게 devtrack inbox 로 전달됩니다` : `정적 모드: 보내기를 누르면 ${aiName(t)}에게 전달할 내용이 표시됩니다`}</span>
         <button class="btn btn-primary" data-action="comment" data-task="${t.id}">${icon('send')} 보내기</button>
       </div>
     </div>
@@ -654,7 +655,7 @@ function decisionForm(t, ap) {
       ${btn('approve', 'btn-approve', 'check', ap.action ? '승인 (커밋·푸시 진행)' : ap.choices?.length ? '선택한 항목으로 진행' : '승인')}
       ${btn('changes', 'btn-changes', 'edit', '수정 요청')}
       ${btn('reject', 'btn-reject', 'x', '거절')}
-      <span class="hint">${state.mode === 'live' ? '결정은 즉시 저장되어 에이전트에게 전달됩니다' : '정적 모드: Claude에게 전달할 메시지가 표시됩니다'}</span>
+      <span class="hint">${state.mode === 'live' ? `결정은 즉시 저장되어 ${aiName(t)}에게 전달됩니다` : `정적 모드: ${aiName(t)}에게 전달할 메시지가 표시됩니다`}</span>
     </div>
   </div>`;
 }
@@ -679,7 +680,7 @@ function decisionResult(ap) {
 function staticBanner() {
   if (state.mode === 'live') return '';
   return html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>정적 모드 (읽기 전용)</b>
-    <p>승인·피드백 버튼을 누르면 Claude 세션에 붙여넣을 메시지가 표시됩니다. 웹에서 바로 저장하려면 <code>devtrack serve</code> 로 실행한 주소로 여세요.</p></div></div>`;
+    <p>승인·피드백 버튼을 누르면 담당 AI(Claude · Codex 등) 세션에 붙여넣을 메시지가 표시됩니다. 웹에서 바로 저장하려면 <code>devtrack serve</code> 로 실행한 주소로 여세요.</p></div></div>`;
 }
 
 function attnApproval(n) {
@@ -764,10 +765,10 @@ function viewWelcome() {
       <a class="btn btn-primary" href="#/new">${icon('plus')} 새 작업 지시</a></div>
     <section class="card welcome">
       <h2>아직 기록된 작업이 없습니다</h2>
-      <p class="muted">Claude 에게 일을 맡기면, 무엇을 하고 있는지 · 문제 · 결과물 · 승인 요청이 이 화면에 실시간으로 표시됩니다.</p>
+      <p class="muted">Claude · Codex 같은 AI 에게 일을 맡기면, 무엇을 하고 있는지 · 문제 · 결과물 · 승인 요청이 이 화면에 실시간으로 표시됩니다.</p>
       <ol>
-        <li><b>처음 한 번:</b> Claude 가 DevTrack 에 기록하도록 설정합니다 — <a href="#/guide/s5">사용 방법 5단계</a></li>
-        <li><b>작업 맡기기:</b> Claude 채팅으로 지시하거나, <a href="#/new">새 작업 지시</a> 로 웹에서 지시합니다 — <a href="#/guide/s6">6단계</a></li>
+        <li><b>처음 한 번:</b> AI 가 DevTrack 에 기록하도록 설정합니다 — <a href="#/guide/s5">사용 방법 5단계</a> (Codex 는 <a href="#/guide/s11">11단계</a>)</li>
+        <li><b>작업 맡기기:</b> AI 채팅으로 지시하거나, <a href="#/new">새 작업 지시</a> 로 웹에서 지시합니다 — <a href="#/guide/s6">6단계</a></li>
         <li><b>확인 · 승인:</b> 진행 상황을 보고, 승인 요청에 승인 / 수정 요청 / 거절로 답합니다 — <a href="#/guide/s8">8단계</a></li>
       </ol>
       <div class="welcome-actions">
@@ -794,7 +795,7 @@ async function viewGuide({ rest }) {
     ? html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body"><b>지금 이 화면은 실시간 · 로컬 서버 모드입니다.</b>
         <p>웹에서 누른 승인 · 메시지 · 새 작업 지시가 바로 저장됩니다. 대시보드가 이미 실행 중이니(1 · 2 · 4단계 완료), 3단계(PATH)와 5단계부터 확인하세요.</p></div></div>`
     : html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>지금 이 화면은 정적 · 읽기 전용 모드입니다.</b>
-        <p>버튼을 누르면 Claude 에게 보낼 메시지가 만들어집니다 (10단계 참고).</p></div></div>`;
+        <p>버튼을 누르면 담당 AI 에게 보낼 메시지가 만들어집니다 (10단계 참고).</p></div></div>`;
   return html`
     <div class="page-head"><div><h1>사용 방법</h1><p class="sub">처음 쓰는 분을 위한 단계별 안내 — 위에서부터 차례로 따라 하세요</p></div>
       <a class="btn" href="guide.md" target="_blank" rel="noopener">${icon('file-text')} 원문 (Markdown)</a></div>
@@ -887,7 +888,7 @@ function viewTasks({ q }) {
       </div>
     </div>
     <div class="toolbar">
-      <label class="search"><span class="sr-only">검색</span>${icon('search')}<input id="task-search" type="search" placeholder="제목, ID, 에이전트 검색"></label>
+      <label class="search"><span class="sr-only">검색</span>${icon('search')}<input id="task-search" type="search" placeholder="제목, ID, 담당 AI 검색"></label>
       <select data-change="type-filter" style="width:auto" aria-label="유형">
         <option value="all">모든 유형</option>
         ${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${type === k ? raw('selected') : ''}>${v.label}</option>`)}
@@ -895,13 +896,13 @@ function viewTasks({ q }) {
       ${q.filter === 'issues' ? html`<a class="chip active" href="${tasksHref({ ...q, filter: '' })}">열린 문제 있음 ${icon('x')}</a>` : ''}
     </div>
     ${tasks.length ? html`<div class="table-wrap"><table class="data">
-      <thead><tr><th>작업</th><th>유형</th><th>상태</th><th>진행률</th><th>에이전트</th><th>확인 필요</th><th>업데이트</th></tr></thead>
-      <tbody>${tasks.map((t) => html`<tr data-href="#/task/${t.id}" data-search="${[t.id, t.title, t.agent, TYPES[t.type]?.label, t.current_step, (t.tags || []).join(' ')].filter(Boolean).join(' ').toLowerCase()}">
+      <thead><tr><th>작업</th><th>유형</th><th>상태</th><th>진행률</th><th>담당 AI</th><th>확인 필요</th><th>업데이트</th></tr></thead>
+      <tbody>${tasks.map((t) => html`<tr data-href="#/task/${t.id}" data-search="${[t.id, t.title, agentLabel(t), TYPES[t.type]?.label, t.current_step, (t.tags || []).join(' ')].filter(Boolean).join(' ').toLowerCase()}">
         <td><div class="t-title"><span class="muted mono" style="font-weight:500;margin-right:6px">${t.id}</span>${t.title}</div><div class="t-step">${taskNow(t).text}</div></td>
         <td class="t-type">${typeBadge(t.type)}</td>
         <td>${statusBadge(t.status)}</td>
         <td><div class="t-prog">${progressBar(t)}<span>${t.progress || 0}%</span></div></td>
-        <td class="nowrap t-agent">${t.agent}</td>
+        <td class="nowrap t-agent">${agentLabel(t)}</td>
         <td class="nowrap">${t.pending_approvals ? html`<span class="flag amber" style="font-weight:600">${icon('bell')} 승인 ${t.pending_approvals}</span> ` : ''}${t.open_issues ? html`<span class="flag ${t.max_severity >= 2 ? 'red' : 'orange'}" style="font-weight:600">${icon('alert')} 문제 ${t.open_issues}</span>` : ''}${!t.pending_approvals && !t.open_issues ? html`<span class="muted">—</span>` : ''}</td>
         <td class="nowrap muted">${ago(t.updated_at)}</td>
       </tr>`)}</tbody></table></div>
@@ -975,7 +976,7 @@ async function viewTask({ rest }) {
       <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${t.priority === 'high' ? html`<span class="badge tone-red">우선순위 높음</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
       <h1><span class="th-id">${t.id}</span>${t.title}</h1>
       <div class="th-meta">
-        <span>${icon('cpu')} ${t.agent}</span>
+        <span title="담당 AI">${icon('cpu')} ${agentLabel(t)}</span>
         ${repo ? html`<span>${icon('folder')} ${repo.href ? html`<a href="${repo.href}" target="_blank" rel="noopener">${repo.text}</a>` : repo.text}</span>` : ''}
         ${t.repo?.branch ? html`<span>${icon('branch')} ${t.repo.branch}</span>` : ''}
         <span>${icon('clock')} 시작 ${fmtAbs(t.created_at)}</span>
@@ -1273,7 +1274,7 @@ function paperCard(t, s) {
         <div class="th-badges">${statusBadge(t.status)}${s.pending_approvals ? html`<span class="badge tone-amber">${icon('bell')}승인 ${s.pending_approvals}</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
         <h3><a href="#/task/${t.id}"><span class="th-id">${t.id}</span>${t.title}</a></h3>
         ${now.text ? html`<div class="wc-now"><span class="lbl">${now.label}</span>${now.text}</div>` : ''}
-        <div class="wc-meta">${t.agent} · 업데이트 ${ago(t.updated_at)}</div>
+        <div class="wc-meta">${agentLabel(t)} · 업데이트 ${ago(t.updated_at)}</div>
       </div>
       <div class="wc-prog"><div class="row"><span>${plan.length ? `작성 계획 ${plan.filter((p) => p.done).length}/${plan.length}` : '진행률'}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
     </div>
@@ -1441,12 +1442,12 @@ function viewNewTask({ q = {} } = {}) {
   return html`
     <div class="crumbs"><a href="#/tasks">작업</a><span>/</span><span>새 작업 지시</span></div>
     <div class="page-head"><div><h1>새 작업 지시</h1><p class="sub">AI 에이전트에게 맡길 작업을 적어주세요. 에이전트는 진행 상황을 기록하고, 확인이 필요하면 알림으로 요청합니다.</p></div></div>
-    ${state.mode !== 'live' ? html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>정적 모드</b><p>등록을 누르면 Claude 세션에 붙여넣을 지시문이 만들어집니다.</p></div></div>` : ''}
+    ${state.mode !== 'live' ? html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>정적 모드</b><p>등록을 누르면 담당 AI 세션에 붙여넣을 지시문이 만들어집니다.</p></div></div>` : ''}
     <form id="new-task-form" class="card card-pad" style="max-width:820px" autocomplete="off">
       <label class="field"><span>작업 제목 *</span><input type="text" name="title" required maxlength="200" placeholder="예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성"></label>
       <div class="field-row">
         <label class="field"><span>작업 유형</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${v.label}</option>`)}</select></label>
-        <label class="field"><span>담당 AI</span><select name="agent"><option>Claude</option><option>Codex</option><option>Gemini</option><option>기타</option></select></label>
+        <label class="field"><span>담당 AI</span><select name="agent">${agentOptions()}</select><small>이 AI 만 이 작업을 가져갑니다</small></label>
         <label class="field"><span>우선순위</span><select name="priority"><option value="normal">보통</option><option value="high">높음</option><option value="low">낮음</option></select></label>
       </div>
       <div class="field-row">
@@ -1466,12 +1467,21 @@ function viewNewTask({ q = {} } = {}) {
     </form>`;
 }
 
+const AGENTS = [['Claude', 'Claude'], ['Codex', 'Codex'], ['Gemini', 'Gemini'], ['누구나', '누구나 (먼저 시작한 AI)']];
+
+function agentOptions() {
+  const last = LS.get('newAgent', 'Claude');
+  return AGENTS.map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${label}</option>`);
+}
+
 async function submitNewTask(ev) {
   ev.preventDefault();
   const form = ev.currentTarget;
   const data = Object.fromEntries(new FormData(form).entries());
   data.title = (data.title || '').trim();
   if (!data.title) return;
+  LS.set('newAgent', data.agent); // 다음 지시에도 같은 AI 를 기본으로
+  const ai = aiName(data);
   const rel = data.related ? state.index.tasks.find((t) => t.id === data.related) : null;
   if (state.mode === 'live') {
     const btn = form.querySelector('button[type="submit"]');
@@ -1479,7 +1489,8 @@ async function submitNewTask(ev) {
     try {
       const r = await api('api/tasks', { ...data, related: data.related ? [data.related] : [] });
       form.reset();
-      toast({ title: '작업 지시를 등록했습니다', meta: `${r.task.id} — 에이전트가 devtrack inbox 로 확인합니다`, tone: 'green' });
+      form.elements.agent.value = data.agent;
+      toast({ title: '작업 지시를 등록했습니다', meta: `${r.task.id} — ${isUnassigned(data.agent) ? '먼저 시작한 AI 가 맡습니다' : `${ai}에게 devtrack inbox 로 전달됩니다`}`, tone: 'green' });
       await poll({ force: true });
       location.hash = `#/task/${r.task.id}`;
     } catch (e) {
@@ -1500,6 +1511,7 @@ async function submitNewTask(ev) {
     '[DevTrack 새 작업 지시]',
     `제목: ${data.title}`,
     `유형: ${typeLabel} (${data.type})`,
+    `담당 AI: ${data.agent}`,
     data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : '',
     data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : '',
     rel ? `관련 작업: ${rel.id} ${rel.title} (devtrack new 에 --related ${rel.id})` : '',
@@ -1509,8 +1521,8 @@ async function submitNewTask(ev) {
     'devtrack 으로 작업을 등록하고, 진행 단계·문제점·결과물을 기록하면서 진행해 주세요. 커밋/푸시 전에는 반드시 승인 요청을 올려 주세요.',
   ].filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
   openModal({
-    title: 'Claude에게 보낼 작업 지시',
-    body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 등록', cmd)}`,
+    title: `${ai}에게 보낼 작업 지시`,
+    body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 ${ai} 세션에 붙여넣으세요.</p>${copyBlock(`${ai}에게 보낼 메시지`, msg)}${copyBlock('또는 터미널에서 직접 등록', cmd)}`,
   });
 }
 
@@ -1575,9 +1587,10 @@ async function actDecide(btn) {
     const sel = selected?.length ? selected : null;
     const cmd = `devtrack decide ${task} ${ap} ${decision}${sel ? ' --select ' + sel.join(' ') : ''}${comment ? ' -m ' + shellQuote(comment) : ''}`;
     const msg = `[DevTrack 결정] ${task} / ${ap} "${a?.title || ''}" → ${label}${sel ? `\n선택: ${sel.join(', ')}` : ''}${comment ? `\n코멘트: ${comment}` : ''}\n\n위 결정을 기록하고(${cmd}) 다음 단계를 진행해 주세요.`;
+    const ai = aiName(t);
     openModal({
-      title: `${label} — Claude에게 전달`,
-      body: html`<p>이 페이지는 <b>정적 모드(읽기 전용)</b>라 웹에서 직접 저장할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으면 결정이 기록되고 다음 단계가 진행됩니다.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
+      title: `${label} — ${ai}에게 전달`,
+      body: html`<p>이 페이지는 <b>정적 모드(읽기 전용)</b>라 웹에서 직접 저장할 수 없습니다. 아래 메시지를 ${ai} 세션에 붙여넣으면 결정이 기록되고 다음 단계가 진행됩니다.</p>${copyBlock(`${ai}에게 보낼 메시지`, msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
     });
     return;
   }
@@ -1586,7 +1599,7 @@ async function actDecide(btn) {
   try {
     await api(`api/tasks/${task}/approvals/${ap}/decision`, selected ? { decision, comment, selected } : { decision, comment });
     if (ta) ta.value = '';
-    toast({ title: `${DECISION[decision].label} 처리했습니다`, meta: `${task} ${ap} — 에이전트에게 전달됩니다`, tone: DECISION[decision].tone });
+    toast({ title: `${DECISION[decision].label} 처리했습니다`, meta: `${task} ${ap} — ${aiName(state.tasks.get(task))}에게 전달됩니다`, tone: DECISION[decision].tone });
     await poll({ force: true });
   } catch (e) {
     toast({ title: '저장하지 못했습니다', meta: e.message, tone: 'red' });
@@ -1605,11 +1618,11 @@ function openCancelTask(id) {
       <ul class="m-list">
         <li>작업 상태가 <b>취소</b>로 바뀌고, 진행 중 목록에서 빠집니다. 기록과 결과물은 그대로 남습니다.</li>
         ${pend ? html`<li>결정을 기다리던 승인 요청 <b>${pend}건</b>은 철회되어 알림에서 사라집니다.</li>` : ''}
-        <li>Claude 에게 이 작업을 중단하라는 알림이 갑니다.</li>
+        <li>${aiName(t)}에게 이 작업을 중단하라는 알림이 갑니다. <code>devtrack watch</code> 로 실행 중이던 작업은 바로 멈춥니다.</li>
       </ul>
       <label class="field"><span>취소 사유 (선택)</span><textarea id="cancel-reason" placeholder="예: 다른 작업(T-0002)으로 대체"></textarea></label>
       <div class="m-actions"><button class="btn btn-reject" data-action="task-cancel-go" data-task="${t.id}">${icon('x-circle')} 작업 취소하기</button>
-        <span class="hint">${state.mode === 'live' ? '' : '정적 모드: Claude 에게 보낼 메시지가 만들어집니다'}</span></div>`,
+        <span class="hint">${state.mode === 'live' ? '' : `정적 모드: ${aiName(t)}에게 보낼 메시지가 만들어집니다`}</span></div>`,
   });
   setTimeout(() => $('#cancel-reason')?.focus(), 0);
 }
@@ -1621,7 +1634,8 @@ async function actCancelTask(btn) {
   if (state.mode !== 'live') {
     const cmd = `devtrack cancel ${id}${reason ? ' -m ' + shellQuote(reason) : ''}`;
     const msg = `[DevTrack 작업 취소] ${id} "${t?.title || ''}"${reason ? `\n사유: ${reason}` : ''}\n\n이 작업을 취소로 기록하고(${cmd}) 진행을 멈춰 주세요.`;
-    openModal({ title: `작업 취소 — Claude에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}` });
+    const ai = aiName(t);
+    openModal({ title: `작업 취소 — ${ai}에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 메시지를 ${ai} 세션에 붙여넣으세요.</p>${copyBlock(`${ai}에게 보낼 메시지`, msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}` });
     return;
   }
   btn.disabled = true;
@@ -1629,7 +1643,7 @@ async function actCancelTask(btn) {
     await api(`api/tasks/${id}/cancel`, { reason });
     closeModal();
     state.tasks.delete(id);
-    toast({ title: `${id} 작업을 취소했습니다`, meta: 'Claude 에게 중단 알림이 전달됩니다', tone: 'green' });
+    toast({ title: `${id} 작업을 취소했습니다`, meta: `${aiName(t)}에게 중단 알림이 전달됩니다`, tone: 'green' });
     await poll({ force: true });
   } catch (e) {
     toast({ title: '취소하지 못했습니다', meta: e.message, tone: 'red' });
@@ -1656,7 +1670,7 @@ function openDeleteTask(id) {
       <label class="field"><span>확인을 위해 작업 ID <b class="mono">${t.id}</b> 를 입력하세요</span>
         <input type="text" id="del-confirm" autocomplete="off" spellcheck="false" placeholder="${t.id}"></label>
       <div class="m-actions"><button class="btn btn-danger" id="del-go" data-action="task-delete-go" data-task="${t.id}" disabled>${icon('trash')} 영구 삭제</button>
-        <span class="hint">${state.mode === 'live' ? '' : '정적 모드: Claude 에게 보낼 메시지가 만들어집니다'}</span></div>`,
+        <span class="hint">${state.mode === 'live' ? '' : `정적 모드: ${aiName(t)}에게 보낼 메시지가 만들어집니다`}</span></div>`,
   });
   setTimeout(() => $('#del-confirm')?.focus(), 0);
 }
@@ -1669,7 +1683,8 @@ async function actDeleteTask(btn) {
   if (state.mode !== 'live') {
     const cmd = `devtrack delete ${id} --yes`;
     const msg = `[DevTrack 작업 삭제] ${id} "${t?.title || ''}"\n사용자가 삭제를 확인했습니다 (되돌릴 수 없음).\n\n이 작업을 삭제하고(${cmd}) 진행 중이었다면 멈춰 주세요.`;
-    openModal({ title: `작업 삭제 — Claude에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 삭제할 수 없습니다. 아래 메시지를 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 실행', cmd)}` });
+    const ai = aiName(t);
+    openModal({ title: `작업 삭제 — ${ai}에게 전달`, body: html`<p>정적 모드에서는 웹에서 직접 삭제할 수 없습니다. 아래 메시지를 ${ai} 세션에 붙여넣으세요.</p>${copyBlock(`${ai}에게 보낼 메시지`, msg)}${copyBlock('또는 터미널에서 직접 실행', cmd)}` });
     return;
   }
   btn.disabled = true;
@@ -1694,9 +1709,10 @@ async function actComment(btn) {
   if (state.mode !== 'live') {
     const cmd = `devtrack comment ${task} ${shellQuote(message)}`;
     const msg = `[DevTrack 메시지] ${task}\n${message}`;
+    const ai = aiName(state.tasks.get(task));
     openModal({
-      title: 'Claude에게 메시지 전달',
-      body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 내용을 Claude 세션에 붙여넣으세요.</p>${copyBlock('Claude에게 보낼 메시지', msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
+      title: `${ai}에게 메시지 전달`,
+      body: html`<p>정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 내용을 ${ai} 세션에 붙여넣으세요.</p>${copyBlock(`${ai}에게 보낼 메시지`, msg)}${copyBlock('또는 터미널에서 직접 기록', cmd)}`,
     });
     return;
   }
@@ -1704,7 +1720,7 @@ async function actComment(btn) {
   try {
     await api(`api/tasks/${task}/comments`, { message });
     ta.value = '';
-    toast({ title: '메시지를 보냈습니다', meta: `${task} — 에이전트가 devtrack inbox 로 확인합니다`, tone: 'green' });
+    toast({ title: '메시지를 보냈습니다', meta: `${task} — ${aiName(state.tasks.get(task))}에게 devtrack inbox 로 전달됩니다`, tone: 'green' });
     await poll({ force: true });
   } catch (e) {
     toast({ title: '보내지 못했습니다', meta: e.message, tone: 'red' });

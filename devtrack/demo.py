@@ -706,7 +706,7 @@ def _scenario(s, clk, tmp):
     # ---------------------------------------------------------------- T-0001 CI 테스트 추가 (완료, 커밋됨)
     clk.at(2900)
     t1 = s.create_task(
-        "CI 파이프라인에 압력 솔버 단위 테스트 추가", type="code", agent="Claude", repo=repo,
+        "CI 파이프라인에 압력 솔버 단위 테스트 추가", type="code", agent="Codex", repo=repo,
         instruction="압력 솔버(CPU 참조 구현)에 대해 **manufactured solution** 기반 단위 테스트를 추가하고 "
                     "GitHub Actions 에서 자동 실행되도록 해주세요.\n\n- 격자 32, 64 두 경우\n- 허용 오차 5e-3",
         plan=["기존 테스트 구조 확인", "manufactured solution 테스트 작성", "CI 워크플로 추가", "커밋 승인 요청"],
@@ -727,7 +727,7 @@ def _scenario(s, clk, tmp):
         clk.at(2760)
         s.decide(tid1, ap["id"], "approve", comment="좋습니다. 커밋해 주세요.")
         clk.at(2755)
-        s.apply_approval(tid1, ap["id"], author="Claude")
+        s.apply_approval(tid1, ap["id"], author="Codex")
     clk.at(2750); s.check_plan(tid1, [4])
     clk.at(2748); s.update_task(tid1, status="done", message="테스트 2개 추가, CI 워크플로 등록 완료")
 
@@ -980,7 +980,7 @@ def _scenario(s, clk, tmp):
     # ---------------------------------------------------------------- T-0007 사용자가 웹에서 지시 (대기)
     clk.at(5)
     s.create_task(
-        "난류 와도장 3D 가시화 (ParaView, Q-criterion)", type="visualization", agent="Claude", status="queued",
+        "난류 와도장 3D 가시화 (ParaView, Q-criterion)", type="visualization", agent="누구나", status="queued",
         created_by=store_mod.USER, priority="normal",
         instruction="`run_042/` 마지막 스냅샷으로 Q-criterion 등위면(Q=0.5) 을 속도 크기로 색칠한 그림을 만들어 주세요.\n\n"
                     "- 4K 해상도 PNG + 회전 애니메이션 mp4\n- 컬러맵: viridis")

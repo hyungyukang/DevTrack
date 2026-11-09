@@ -71,6 +71,22 @@ DECISION_LABEL = {"approved": "승인", "rejected": "거절", "changes_requested
 
 USER = "user"  # 사용자가 남긴 기록의 author 값
 
+# 담당 AI 가 이 값이면 아직 정해지지 않은 작업 — 어느 AI 든 먼저 시작한 쪽이 맡는다
+UNASSIGNED_AGENTS = ("", "누구나", "기타", "any", "*")
+
+
+def agent_key(name):
+    return " ".join(str(name or "").split()).lower()
+
+
+def is_unassigned(name):
+    return agent_key(name) in UNASSIGNED_AGENTS
+
+
+def agent_matches(task_agent, agent):
+    """agent 가 None 이면 모든 작업. 담당 AI 가 정해지지 않은 작업은 모든 AI 에게 해당한다."""
+    return agent is None or is_unassigned(task_agent) or agent_key(task_agent) == agent_key(agent)
+
 # 코드 리뷰 검토 항목(findings) — review-pr 스킬의 R1, R2… 와 같은 체계
 FINDING_SEVERITIES = ("blocker", "major", "minor", "nit", "question")
 FINDING_SEV_LABEL = {"blocker": "반드시 수정", "major": "수정 권장", "minor": "개선 제안", "nit": "사소함",
@@ -468,8 +484,12 @@ class Store:
             return rel
 
     def update_task(self, tid, status=None, progress=None, step=None, message=None, title=None,
-                    author=None, kind="info"):
+                    author=None, kind="info", claim=None, take=False, claim_queued_only=False):
+        """claim: 이 이름의 AI 가 작업을 맡는다 (담당이 다른 AI 면 take=True 일 때만 가져옴).
+        claim_queued_only: 아직 '대기' 인 작업일 때만 담당을 확인한다 (step 으로 시작하는 경우)."""
         with self.edit(tid) as t:
+            if claim and (t["status"] == "queued" or not claim_queued_only):
+                self._claim(t, claim, take)
             if title:
                 t["title"] = title
             if status:
@@ -496,6 +516,22 @@ class Store:
             if message:
                 self._log(t, message, kind=kind, author=author)
             return t
+
+    def _claim(self, t, agent, take=False):
+        cur = t.get("agent")
+        if agent_key(cur) == agent_key(agent):
+            return
+        if is_unassigned(cur):
+            t["agent"] = agent
+            self._log(t, "{} 이(가) 작업을 맡았습니다".format(agent), kind="info", author=agent,
+                      meta={"agent": agent})
+            return
+        if not take:
+            raise DevTrackError("{0} 은(는) {1} 에게 배정된 작업입니다 — {1} 이(가) 처리합니다. "
+                                "대신 맡으려면: devtrack start {0} --take".format(t["id"], cur))
+        t["agent"] = agent
+        self._log(t, "담당 AI 변경: {} → {}".format(cur, agent), kind="info", author=agent,
+                  meta={"agent": agent, "from": cur})
 
     # ------------------------------------------------------------------ 취소 / 삭제
     @property
@@ -550,8 +586,8 @@ class Store:
                     touched.append(other["id"])
             shutil.rmtree(self.task_dir(tid))
             items = [d for d in self.deleted_tasks() if d.get("id") != tid]
-            items.append({"id": tid, "title": t["title"], "type": t["type"], "at": now(), "by": author,
-                          "ack": author != USER})
+            items.append({"id": tid, "title": t["title"], "type": t["type"], "agent": t.get("agent"),
+                          "at": now(), "by": author, "ack": author != USER})
             self._write_json(self.deleted_path, {"deleted": items})
             self.rebuild_index()
         if self.publish_dir:
@@ -1020,53 +1056,73 @@ class Store:
             return ap
 
     # ------------------------------------------------------------------ 받은 편지함 (에이전트용)
-    def inbox(self, ack=False):
-        """에이전트가 처리해야 할 사용자 입력: 새 작업 지시, 사용자 메시지, 승인/수정 결정."""
+    def inbox(self, ack=False, agent=None, task=None):
+        """에이전트가 처리해야 할 사용자 입력: 새 작업 지시, 사용자 메시지, 승인/수정 결정, 취소/삭제 알림.
+
+        agent: 이 AI 에게 배정된 작업(또는 담당이 정해지지 않은 작업)의 입력만 (None 이면 전부)
+        task: 이 작업의 입력만
+        ack: 돌려준 항목을 처리됨으로 표시 (다른 AI · 다른 작업의 항목은 건드리지 않음)"""
+        task = normalize_task_id(task) if task else None
         items = []
-        to_ack = {}
         for t in self.all_tasks():
+            if (task and t["id"] != task) or not agent_matches(t.get("agent"), agent):
+                continue
+            base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent")}
             c = t.get("cancelled") or {}
             if t["status"] == "cancelled" and c.get("agent_ack") is False:
-                items.append({"type": "cancelled", "task_id": t["id"], "title": t["title"],
-                              "reason": c.get("reason", ""), "ts": c.get("at")})
-                to_ack.setdefault(t["id"], []).append(("C", t["id"]))
+                items.append(dict(base, type="cancelled", reason=c.get("reason", ""), ts=c.get("at")))
             if t["status"] == "queued":
-                items.append({"type": "new_task", "task_id": t["id"], "title": t["title"],
-                              "instruction": t.get("instruction", ""), "task_type": t["type"],
-                              "repo": t.get("repo") or {}, "ts": t["created_at"]})
+                items.append(dict(base, type="new_task", instruction=t.get("instruction", ""), task_type=t["type"],
+                                  repo=t.get("repo") or {}, ts=t["created_at"]))
             for e in t.get("log", []):
                 if e.get("author") == USER and e.get("kind") == "user" and e.get("ack") is False:
-                    items.append({"type": "comment", "task_id": t["id"], "title": t["title"],
-                                  "id": e["id"], "message": e["message"], "ts": e["ts"]})
-                    to_ack.setdefault(t["id"], []).append(("L", e["id"]))
+                    items.append(dict(base, type="comment", id=e["id"], message=e["message"], ts=e["ts"]))
             for ap in t.get("approvals", []):
                 if ap["status"] != "pending" and ap.get("agent_ack") is False:
-                    items.append({"type": "decision", "task_id": t["id"], "title": t["title"],
-                                  "id": ap["id"], "approval_title": ap["title"], "decision": ap["status"],
-                                  "comment": ap.get("comment", ""), "has_action": bool(ap.get("action")),
-                                  "selected": ap.get("selected"), "ts": ap.get("decided_at")})
-                    to_ack.setdefault(t["id"], []).append(("A", ap["id"]))
-        deleted = [d for d in self.deleted_tasks() if d.get("ack") is False]
-        for d in deleted:
-            items.append({"type": "deleted", "task_id": d["id"], "title": d.get("title", ""), "ts": d.get("at")})
+                    items.append(dict(base, type="decision", id=ap["id"], approval_title=ap["title"],
+                                      decision=ap["status"], comment=ap.get("comment", ""),
+                                      has_action=bool(ap.get("action")), selected=ap.get("selected"),
+                                      ts=ap.get("decided_at")))
+        for d in self.deleted_tasks():
+            if d.get("ack") is False and (not task or d.get("id") == task) and agent_matches(d.get("agent"), agent):
+                items.append({"type": "deleted", "task_id": d["id"], "title": d.get("title", ""),
+                              "agent": d.get("agent"), "ts": d.get("at")})
         if ack:
-            for tid, refs in to_ack.items():
-                with self.edit(tid) as t:
-                    for typ, rid in refs:
-                        if typ == "L":
-                            self._find(t["log"], rid, "기록")["ack"] = True
-                        elif typ == "C":
-                            t["cancelled"]["agent_ack"] = True
-                        else:
-                            self._find(t["approvals"], rid, "승인 요청")["agent_ack"] = True
-            if deleted:
-                with self.locked():
-                    rest = self.deleted_tasks()
-                    for d in rest:
-                        d["ack"] = True
-                    self._write_json(self.deleted_path, {"deleted": rest})
+            self.ack_inbox(items)
         items.sort(key=lambda x: x.get("ts") or "")
         return items
+
+    def ack_inbox(self, items):
+        """주어진 받은 편지함 항목만 처리됨으로 표시한다 (새 작업은 시작하면 저절로 빠지므로 표시할 것 없음)."""
+        by_task, deleted = {}, set()
+        for it in items:
+            if it["type"] == "deleted":
+                deleted.add(it["task_id"])
+            elif it["type"] != "new_task":
+                by_task.setdefault(it["task_id"], []).append(it)
+        for tid, its in by_task.items():
+            if not os.path.exists(os.path.join(self.tasks_dir, tid, "task.json")):
+                continue  # 그사이 삭제됨
+            with self.edit(tid) as t:
+                for it in its:
+                    if it["type"] == "comment":
+                        e = next((x for x in t.get("log", []) if x.get("id") == it["id"]), None)
+                        if e is not None:
+                            e["ack"] = True
+                    elif it["type"] == "cancelled":
+                        if t.get("cancelled"):
+                            t["cancelled"]["agent_ack"] = True
+                    elif it["type"] == "decision":
+                        ap = next((x for x in t.get("approvals", []) if x.get("id") == it["id"]), None)
+                        if ap is not None:
+                            ap["agent_ack"] = True
+        if deleted:
+            with self.locked():
+                rest = self.deleted_tasks()
+                for d in rest:
+                    if d.get("id") in deleted:
+                        d["ack"] = True
+                self._write_json(self.deleted_path, {"deleted": rest})
 
     # ------------------------------------------------------------------ 받은 편지함 대기 (inbox --wait)
     @staticmethod
@@ -1090,9 +1146,13 @@ class Store:
         except (OSError, ValueError):
             return set()
 
-    def mark_inbox_seen(self, agent, items):
-        """에이전트가 본 항목을 기록한다. 현재 받은 편지함에 남아 있는 항목만 유지."""
-        keys = sorted(self.inbox_key(it) for it in items)
+    def mark_inbox_seen(self, agent, items, merge=False):
+        """에이전트가 본 항목을 기록한다. 현재 받은 편지함에 남아 있는 항목만 유지.
+        merge: 일부(예: 한 작업)만 본 경우 — 기존 기록에 더한다."""
+        keys = {self.inbox_key(it) for it in items}
+        if merge:
+            keys |= self.inbox_seen(agent)
+        keys = sorted(keys)
         self._write_json(self._seen_path(agent), {"agent": agent, "updated_at": now(), "seen": keys})
 
     def change_token(self):

@@ -21,6 +21,13 @@ cp integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKIL
 cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ```
 
+**Codex 에서도** 같은 파일을 씁니다 (Codex 는 `allowed-tools` 를 무시하고, `${CLAUDE_SKILL_DIR}` 는 이 파일이 있는 폴더로 읽습니다).
+
+```bash
+mkdir -p ~/.codex/skills/review-pr
+ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
+```
+
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`
 (`~/bin` 이 PATH 에 있어야 함). 기록 위치는 `$DEVTRACK_DATA` 로 정합니다.
 

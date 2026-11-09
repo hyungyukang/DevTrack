@@ -37,7 +37,7 @@ On HPC/SSH sessions, emailing the report to the configured `PR_REPORT_TO` addres
 
 ## Step 0: Where you are running
 
-Run `python3 ${CLAUDE_SKILL_DIR}/../pr-review-report/scripts/send_report.py --detect`:
+Run `python3 ${CLAUDE_SKILL_DIR}/../pr-review-report/scripts/send_report.py --detect` (`${CLAUDE_SKILL_DIR}` is the folder holding this SKILL.md; where it is not substituted, e.g. in Codex, use that folder — `~/.codex/skills/review-pr`):
 - `local` → deliver the full report in the chat. No email.
 - `remote: ...` (SSH session or HPC login node) → save the report to a file and email it.
 - If the script is missing (`pr-review-report` not installed), treat the session as remote when `$SSH_CONNECTION`, `$SSH_TTY`, `$SLURM_*` or `$LMOD_*` is set, and deliver in chat either way.
@@ -187,7 +187,7 @@ Write the report Markdown the way GitHub renders it (CommonMark + tables): pipe 
      ```
      `--choices` without IDs offers every open finding as a checkbox; Blocker and Major start checked. Then `devtrack step <TID> "사용자가 코멘트할 항목을 고르기를 기다리는 중" -p 70`.
   5. End the chat message with: "DevTrack 웹의 **코드 리뷰** 화면에서 항목을 골라 진행하거나, 여기서 'R1, R3 코멘트 초안 써줘' 라고 하셔도 됩니다."
-  6. If the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web — unless a `devtrack inbox --wait` is already running in the background (web-instruction waiting mode), which also wakes on decisions.
+  6. If `$DEVTRACK_WATCH` is set, this session was started by `devtrack watch` (e.g. Codex): do not wait at all — end the run here; `devtrack watch` starts you again when the user decides. Otherwise, if the harness supports background commands, start `devtrack wait <TID> <AID> --timeout 3600` in the background so you resume when the user decides on the web — unless a `devtrack inbox --wait` is already running in the background (web-instruction waiting mode), which also wakes on decisions.
 
 Then stop and wait.
 
@@ -221,7 +221,7 @@ AID=$(devtrack request <TID> "PR #<n> 에 리뷰를 게시할까요? (<EVENT>, �
       -d "승인하면 이 초안 그대로 GitHub 에 게시합니다. 고칠 점은 '수정 요청' 에 적어주세요.")
 devtrack check <TID> 4
 ```
-Optionally wait in the background as in Phase 3.
+Optionally wait in the background as in Phase 3 (never under `devtrack watch`).
 
 ## Phase 5: Post (only on explicit approval)
 

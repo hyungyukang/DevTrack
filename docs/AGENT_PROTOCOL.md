@@ -1,10 +1,11 @@
 # AI 에이전트 작업 기록 규칙 (DevTrack)
 
-Claude 등 AI 에이전트가 사용자 대신 작업할 때 따르는 규칙입니다.
+Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 규칙입니다.
 사용자는 웹 대시보드에서 진행 상황을 보고, 승인 요청에 답합니다.
 
-> Frontier 에서 Claude 가 이 규칙을 항상 따르게 하려면 아래 [CLAUDE.md 에 넣을 내용](#claudemd-에-넣을-내용)을
+> Claude 가 이 규칙을 항상 따르게 하려면 아래 [CLAUDE.md 에 넣을 내용](#claudemd-에-넣을-내용)을
 > `~/.claude/CLAUDE.md`(모든 프로젝트) 또는 작업 대상 저장소의 `CLAUDE.md` 에 붙여 넣으세요.
+> Codex 는 [AGENTS.md 에 넣을 내용](#agentsmd-에-넣을-내용-codex)을 `~/.codex/AGENTS.md` 에 넣습니다.
 
 ## 원칙
 
@@ -14,6 +15,8 @@ Claude 등 AI 에이전트가 사용자 대신 작업할 때 따르는 규칙입
 3. **문제는 숨기지 않는다.** 막히거나 예상과 다르면 `issue` 로 기록하고, 결정이 필요하면 `status blocked` + 선택지를 남긴다.
 4. **결과물은 웹에서 볼 수 있게 남긴다.** 그림, 리포트, 로그, 노트북, LaTeX, diff 등은 `artifact` 로 첨부한다.
 5. **사용자 입력을 주기적으로 확인한다.** 작업 시작 시, 단계가 끝날 때마다 `devtrack inbox` 를 확인한다.
+6. **내게 배정된 작업만 처리한다.** `devtrack inbox` 에는 나(`$DEVTRACK_AGENT`)에게 배정된 작업과 담당이 정해지지 않은 작업만 보인다.
+   다른 AI 의 작업은 사용자가 맡으라고 할 때만 `devtrack start <TID> --take` 로 가져온다.
 
 ## 작업 흐름
 
@@ -146,6 +149,39 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
 - `--timeout 초` 를 주면 시간 초과 시 exit 3. 승인 결정에도 깨어나므로 이 모드에서는 `devtrack wait` 가 따로 필요 없습니다.
 - 로컬 서버 모드(`devtrack serve`)에서만 웹 입력이 바로 저장됩니다. 정적 모드에서는 웹이 만든 메시지를 채팅에 붙여넣으세요.
 
+## 여러 AI 함께 쓰기 (담당 AI)
+
+작업마다 담당 AI(`agent`)가 있습니다. 웹의 "새 작업 지시" 에서 고르거나 `devtrack new --agent Codex` 로 정합니다.
+
+- **내 이름**: `--as 이름` > `$DEVTRACK_AGENT` > `Claude`. Codex 는 `DEVTRACK_AGENT=Codex` 로 실행합니다
+  (`~/.codex/config.toml` 의 `[shell_environment_policy.set]` 아래에 `DEVTRACK_AGENT = "Codex"`).
+- **받은 편지함**: `devtrack inbox` · `inbox --wait` 는 내게 배정된 작업과 담당 미정(`누구나`) 작업의 입력만 보여 줍니다.
+  `--all-agents` 는 전부, `--task T-0007` 은 그 작업만. `--ack` 는 보여 준 항목만 처리됨으로 표시합니다.
+- **시작할 때 확인**: `devtrack start` (그리고 대기 작업에 대한 첫 `step`)는 담당이 다른 AI 면 거부합니다.
+  담당 미정 작업은 먼저 시작한 AI 가 맡습니다 (동시에 시작하면 한쪽만 성공). 대신 맡기: `devtrack start <TID> --take`.
+- **취소 · 삭제 알림**도 그 작업의 담당 AI 에게만 갑니다.
+
+### Codex: `devtrack watch` 로 웹 지시 받기
+
+Codex 에는 위의 백그라운드 대기 모드를 쓸 수 없으므로, 사용자가 터미널에 실행기를 켜 둡니다.
+
+```bash
+devtrack watch --codex                     # Codex 에게 온 입력이 생길 때마다 codex exec 로 처리
+devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬프트를 마지막 인자로 받는 명령이면 됨
+```
+
+- 작업마다 한 번씩 실행합니다. 실행 폴더는 작업의 저장소 경로(없으면 `--cwd`, 기본 현재 폴더).
+  Codex 는 `codex exec --sandbox workspace-write --skip-git-repo-check -C <폴더> --add-dir <기록 폴더>` 로 실행됩니다
+  (허락을 물을 수 없으므로 인터넷 허용 `-c sandbox_workspace_write.network_access=true` — 막으려면 `--no-network`).
+  Codex CLI 는 `$DEVTRACK_CODEX` > PATH 의 `codex` > 앱(ChatGPT · Codex · VS Code 확장)에 든 CLI 중 가장 새 버전.
+- 실행되는 AI 에게는 `DEVTRACK_AGENT`, `DEVTRACK_DATA`, `DEVTRACK_TASK=<TID>`, `DEVTRACK_WATCH=1` 이 주어지고,
+  그 안에서 `devtrack inbox` 는 그 작업의 입력만 보여 줍니다.
+- **watch 가 실행한 세션의 규칙**: 그 작업만 처리하고, 사용자 결정이 필요하면 `devtrack request` 를 남기고 끝낸다.
+  `devtrack wait` · `inbox --wait` 로 기다리지 않는다 — 결정이 오면 watch 가 다시 실행한다.
+- 성공(exit 0)하면 넘긴 입력을 처리됨으로 표시하고, Codex 의 마지막 메시지를 "실행 요약" 으로 기록합니다.
+  실패하면 경고를 남기고 입력은 그대로 둡니다 (watch 를 다시 켜면 다시 처리).
+- 실행 중에 사용자가 그 작업을 취소 · 삭제하면 실행을 멈춥니다. 같은 AI 의 watch 는 하나만 실행됩니다.
+
 ## 사용자 결정이 도착하는 방법
 
 - **로컬 서버 모드**: 사용자가 웹에서 누르면 즉시 기록됨 → `devtrack wait` / `devtrack inbox` 로 확인
@@ -168,6 +204,30 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
+- 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
+- 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
+- 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.
+- DevTrack 작업의 결과를 저장소에 반영할 때는 git commit/push 를 직접 하지 않고 `devtrack request <TID> "..." --commit -m "..."` 로
+  승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
+- 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
+  각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
+```
+
+## AGENTS.md 에 넣을 내용 (Codex)
+
+`~/.codex/AGENTS.md` 에 붙여 넣습니다. 설정 파일(`~/.codex/config.toml`)과 스킬 설치는 웹의 사용 방법 11단계를 보세요.
+
+```markdown
+## DevTrack 작업 기록 (Codex)
+- DevTrack 에서 나는 "Codex" 다. `devtrack` 은 환경 변수 `DEVTRACK_AGENT=Codex` 로 실행한다
+  (~/.codex/config.toml 의 `shell_environment_policy` 에 설정해 두었으면 따로 붙이지 않는다).
+  `devtrack` 이 PATH 에 없으면 `<DevTrack 저장소>/bin/devtrack` 을 쓴다. 규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
+- 의미 있는 작업(코드 변경, 코드 리뷰, 데이터 분석, 논문, 시각화, 모델 개발)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
+- 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 나에게 배정된 작업의 입력만 보인다.
+- 사용자 결정이 필요하면 `devtrack request` 로 요청을 남기고 사용자에게 알린 뒤 멈춘다. `devtrack wait` · `devtrack inbox --wait` 로 오래 기다리지 않는다
+  (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
+- 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
 - 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.

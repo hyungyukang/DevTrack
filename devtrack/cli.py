@@ -7,13 +7,18 @@
 import argparse
 import json
 import os
+import re
+import shutil
+import signal
+import subprocess
 import sys
+import tempfile
 import time
 
 from . import DevTrackError, __version__, gitops
 from .store import (
     APPROVAL_KINDS, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
-    Store, normalize_item_id, normalize_task_id,
+    Store, is_unassigned, normalize_item_id, normalize_task_id,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,14 +70,16 @@ def cmd_new(store, args):
 
 
 def cmd_start(store, args):
-    t = store.update_task(args.task, status="in_progress", step=args.step, author=args.author)
+    t = store.update_task(args.task, status="in_progress", step=args.step, author=args.author,
+                          claim=args.author, take=args.take)
     _out(args, t, "{} 진행 중".format(t["id"]))
 
 
 def cmd_step(store, args):
     t = store.load(args.task)
     status = "in_progress" if t["status"] in ("queued", "changes_requested", "blocked") else None
-    t = store.update_task(args.task, status=status, step=args.text, progress=args.progress, author=args.author)
+    t = store.update_task(args.task, status=status, step=args.text, progress=args.progress, author=args.author,
+                          claim=args.author if status else None, claim_queued_only=True)
     _out(args, t, "{} [{}%] {}".format(t["id"], t.get("progress", 0), args.text))
 
 
@@ -295,74 +302,375 @@ def cmd_comment(store, args):
     _out(args, e, e["id"])
 
 
-def _print_inbox(items):
+def _format_inbox(items):
+    out = []
     for it in items:
         if it["type"] == "new_task":
-            print("[새 작업] {task_id} {title} ({task_type})".format(**it))
+            who = "담당 미정 — 먼저 시작한 AI 가 맡음" if is_unassigned(it.get("agent")) else "담당 " + it["agent"]
+            out.append("[새 작업] {} {} ({} · {})".format(it["task_id"], it["title"], it["task_type"], who))
             if it.get("instruction"):
-                print(_indent(it["instruction"]))
-            print(_indent("→ devtrack start {task_id}".format(**it)))
+                out.append(_indent(it["instruction"]))
+            out.append(_indent("→ devtrack start {task_id}".format(**it)))
         elif it["type"] == "comment":
-            print("[메시지] {task_id} {id}: {message}".format(**it))
+            out.append("[메시지] {task_id} {id}: {message}".format(**it))
         elif it["type"] == "cancelled":
-            print("[취소] {task_id} {title} — 사용자가 작업을 취소했습니다. 이 작업은 중단하세요.".format(**it))
+            out.append("[취소] {task_id} {title} — 사용자가 작업을 취소했습니다. 이 작업은 중단하세요.".format(**it))
             if it.get("reason"):
-                print(_indent("사유: " + it["reason"]))
+                out.append(_indent("사유: " + it["reason"]))
         elif it["type"] == "deleted":
-            print("[삭제] {task_id} {title} — 사용자가 작업을 삭제했습니다. 이 작업은 중단하고 더 기록하지 마세요.".format(**it))
+            out.append("[삭제] {task_id} {title} — 사용자가 작업을 삭제했습니다. 이 작업은 중단하고 더 기록하지 마세요.".format(**it))
         else:
-            print("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
+            out.append("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
             if it.get("selected"):
-                print(_indent("선택: " + ", ".join(it["selected"])))
+                out.append(_indent("선택: " + ", ".join(it["selected"])))
             if it.get("comment"):
-                print(_indent("코멘트: " + it["comment"]))
+                out.append(_indent("코멘트: " + it["comment"]))
             if it["decision"] == "approved" and it.get("has_action"):
-                print(_indent("→ devtrack apply {task_id} {id}".format(**it)))
+                out.append(_indent("→ devtrack apply {task_id} {id}".format(**it)))
+    return out
+
+
+def _print_inbox(items):
+    for line in _format_inbox(items):
+        print(line)
+
+
+def _inbox_scope(args):
+    """받은 편지함 범위: 기본은 나($DEVTRACK_AGENT / --as)에게 배정된 작업과 담당이 정해지지 않은 작업.
+    devtrack watch 가 실행한 세션은 DEVTRACK_TASK 의 작업만 본다."""
+    agent = None if getattr(args, "all_agents", False) else args.author
+    task = getattr(args, "task", None) or os.environ.get("DEVTRACK_TASK") or None
+    return agent, task
+
+
+def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3):
+    """seen_name 기준으로 아직 보지 않은 입력이 생길 때까지 기다려 그 항목들을 돌려준다 (시간 초과면 None)."""
+    deadline = time.time() + timeout if timeout else None
+    last = object()
+    while True:
+        token = store.change_token()
+        if token != last:
+            last = token
+            items = store.inbox(agent=agent, task=task)
+            seen = store.inbox_seen(seen_name)
+            new = [it for it in items if store.inbox_key(it) not in seen]
+            if new:
+                store.mark_inbox_seen(seen_name, items, merge=bool(task))
+                return new
+        if deadline and time.time() >= deadline:
+            return None
+        time.sleep(max(1, interval))
 
 
 def _inbox_wait(store, args):
     """아직 보지 않은 사용자 입력이 생길 때까지 기다린다 (백그라운드 실행용)."""
     if args.ack:
         raise DevTrackError("--wait 와 --ack 는 함께 쓸 수 없습니다 (처리한 뒤 devtrack inbox --ack)")
-    deadline = time.time() + args.timeout if args.timeout else None
-    _info("새 사용자 입력을 기다리는 중 (웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C")
-    last = object()
-    while True:
-        token = store.change_token()
-        if token != last:
-            last = token
-            items = store.inbox()
-            seen = store.inbox_seen(args.author)
-            new = [it for it in items if store.inbox_key(it) not in seen]
-            if new:
-                store.mark_inbox_seen(args.author, items)
-                if args.json:
-                    _out(args, new)
-                    return 0
-                print("새 사용자 입력 {}건:".format(len(new)))
-                _print_inbox(new)
-                print("\n처리한 뒤 다시 `devtrack inbox --wait` 를 백그라운드로 실행해 다음 입력을 기다리세요.")
-                return 0
-        if deadline and time.time() >= deadline:
-            _out(args, [])
-            _info("시간 초과: 새 입력이 없습니다")
-            return 3
-        time.sleep(max(1, args.interval))
+    agent, task = _inbox_scope(args)
+    scope = task or ("{} 에게 배정된 작업".format(agent) if agent else "모든 AI 의 작업")
+    _info("새 사용자 입력을 기다리는 중 ({} — 웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C".format(scope))
+    new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval)
+    if new is None:
+        _out(args, [])
+        _info("시간 초과: 새 입력이 없습니다")
+        return 3
+    if args.json:
+        _out(args, new)
+        return 0
+    print("새 사용자 입력 {}건:".format(len(new)))
+    _print_inbox(new)
+    print("\n처리한 뒤 다시 `devtrack inbox --wait` 를 백그라운드로 실행해 다음 입력을 기다리세요.")
+    return 0
 
 
 def cmd_inbox(store, args):
     if args.wait:
         return _inbox_wait(store, args)
-    items = store.inbox(ack=args.ack)
-    store.mark_inbox_seen(args.author, items)
+    agent, task = _inbox_scope(args)
+    items = store.inbox(ack=args.ack, agent=agent, task=task)
+    store.mark_inbox_seen(args.author, items, merge=bool(task))
     if args.json:
         _out(args, items)
         return 0
     if not items:
         print("처리할 사용자 입력이 없습니다.")
+        if agent:
+            others = len(store.inbox(task=task))
+            if others:
+                print("(다른 AI 에게 배정된 입력 {}건은 그 AI 가 처리합니다 — 모두 보기: devtrack inbox --all-agents)".format(
+                    others))
         return 0
     _print_inbox(items)
     return 0
+
+
+# ---------------------------------------------------------------------------- watch (AI 실행기)
+# 앱에 들어 있는 Codex CLI 위치 (macOS). 여러 개면 가장 새 버전을 쓴다 — 오래된 CLI 는 새 모델을 못 쓴다
+CODEX_BUNDLED = (
+    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "~/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "/Applications/Codex.app/Contents/Resources/codex",
+    "~/Applications/Codex.app/Contents/Resources/codex",
+    "~/.vscode/extensions/openai.chatgpt-*/bin/*/codex",
+)
+NOTICE_TYPES = ("cancelled", "deleted")
+
+
+def _codex_version(path):
+    try:
+        out = subprocess.run([path, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=10).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def find_codex():
+    """Codex CLI 찾기: $DEVTRACK_CODEX > PATH 의 codex > 앱에 들어 있는 CLI 중 가장 새 버전. (경로, 버전) 을 돌려준다."""
+    for c in (os.environ.get("DEVTRACK_CODEX"), shutil.which("codex")):
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c, _codex_version(c)
+    import glob
+    found = []
+    for pat in CODEX_BUNDLED:
+        for c in sorted(glob.glob(os.path.expanduser(pat))):
+            if os.path.isfile(c) and os.access(c, os.X_OK):
+                found.append((_codex_version(c) or (0,), c))
+    if found:
+        ver, c = max(found)
+        return c, ver if ver != (0,) else None
+    raise DevTrackError("codex 명령을 찾을 수 없습니다 — Codex CLI 를 설치하거나 DEVTRACK_CODEX 에 경로를 지정하세요")
+
+
+def _watch_prompt(agent, tid, items):
+    lines = [
+        "DevTrack 에 {} 에게 온 새 입력이 있습니다. (devtrack watch 가 이 세션을 실행했습니다)".format(agent),
+        "이번 실행에서는 {} 작업만 처리하세요. 기록 규칙은 AGENTS.md 의 DevTrack 규칙"
+        "(또는 DevTrack 저장소의 docs/AGENT_PROTOCOL.md)을 따릅니다.".format(tid),
+        "",
+        "- 작업 내용과 지금까지의 기록: devtrack show {}".format(tid),
+        "- [새 작업] 이면 devtrack start {} 로 시작하고 지시대로 진행합니다. 지시에 /review-pr 같은 스킬 호출이 있으면 "
+        "그 이름의 스킬 지침(Codex: ~/.codex/skills/<이름>/SKILL.md, Claude: ~/.claude/skills/<이름>/SKILL.md)을 "
+        "새로 읽고 따릅니다.".format(tid),
+        "- [메시지] · [결정] 은 내용대로 처리합니다. 승인된 커밋 요청은 devtrack apply 로 반영합니다.",
+        "- 처리한 입력은 devtrack inbox --ack 로 처리됨 표시합니다 (이 실행에서는 {} 의 입력만 보입니다).".format(tid),
+        "- 사용자 결정이 필요하면 devtrack request 로 요청을 남기고 이번 실행을 끝내세요. devtrack wait 나 "
+        "devtrack inbox --wait 로 기다리지 마세요 — 결정이 오면 devtrack watch 가 다시 실행합니다.",
+        "- 마지막에 무엇을 했는지 두세 문장으로 요약해 주세요.",
+        "",
+        "[입력]",
+    ]
+    return "\n".join(lines + _format_inbox(items))
+
+
+def _stop_reason(store, tid):
+    try:
+        t = store.load(tid)
+    except DevTrackError:
+        return "deleted"
+    except (OSError, ValueError):
+        return None
+    return "cancelled" if t.get("status") == "cancelled" else None
+
+
+def _terminate(proc):
+    if proc.poll() is not None:
+        return
+    group = hasattr(os, "killpg")
+    try:
+        os.killpg(proc.pid, signal.SIGTERM) if group else proc.terminate()
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL) if group else proc.kill()
+        except OSError:
+            pass
+        proc.wait()
+    except OSError:
+        pass
+
+
+def _watch_log(store, tid, message, kind="info", detail=None, author=None):
+    try:
+        store.add_log(tid, message, kind=kind, detail=detail, author=author)
+    except DevTrackError:
+        pass  # 그사이 삭제된 작업
+
+
+def _stamp(msg):
+    print("[{}] {}".format(time.strftime("%H:%M:%S"), msg))
+    sys.stdout.flush()
+
+
+def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd):
+    t = store.load(tid)
+    repo = (t.get("repo") or {}).get("path")
+    cwd = repo if repo and os.path.isdir(repo) else default_cwd
+    prompt = _watch_prompt(agent, tid, items)
+    tmpdir = tempfile.mkdtemp(prefix="devtrack-watch-")
+    last_msg = os.path.join(tmpdir, "last-message.txt")
+    if codex:
+        cmd = [codex, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd,
+               "--add-dir", store.root]
+        if store.publish_dir:
+            cmd += ["--add-dir", store.publish_dir]
+        if not args.no_network:  # 대화창이 없어 허락을 물을 수 없으므로 gh · git push 에 필요한 인터넷을 미리 허용
+            cmd += ["-c", "sandbox_workspace_write.network_access=true"]
+        cmd += ["-o", last_msg] + extra + [prompt]
+    else:
+        cmd = extra + [prompt]
+    env = dict(os.environ)
+    env.update({"DEVTRACK_AGENT": agent, "DEVTRACK_DATA": store.root, "DEVTRACK_TASK": tid, "DEVTRACK_WATCH": "1"})
+    env["PATH"] = os.path.join(REPO_ROOT, "bin") + os.pathsep + env.get("PATH", "")
+
+    _stamp("{} 실행 — {} {} (폴더: {})".format(agent, tid, t["title"], cwd))
+    print(_indent("\n".join(_format_inbox(items))))
+    sys.stdout.flush()
+    stopped = None
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        _watch_log(store, tid, "{} 을(를) 실행하지 못했습니다".format(agent), kind="error", detail=str(e),
+                   author=agent)
+        _stamp("실행 실패: {}".format(e))
+        return None
+    try:
+        while True:
+            try:
+                rc = proc.wait(timeout=max(1, args.interval))
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            stopped = _stop_reason(store, tid)
+            if stopped:
+                _terminate(proc)
+                rc = None
+                break
+    except KeyboardInterrupt:
+        _terminate(proc)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+    summary = ""
+    try:
+        with open(last_msg, encoding="utf-8", errors="replace") as fh:
+            summary = fh.read().strip()
+    except OSError:
+        pass
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+    if stopped:
+        # 취소 · 삭제 알림은 실행을 멈춘 것으로 처리됨
+        store.ack_inbox([it for it in store.inbox(agent=agent, task=tid) if it["type"] in NOTICE_TYPES])
+        if stopped == "cancelled":
+            _watch_log(store, tid, "작업이 취소되어 {} 실행을 중단했습니다".format(agent), kind="warning", author=agent)
+        _stamp("{} — 사용자가 작업을 {} {} 실행을 중단했습니다".format(
+            tid, "취소해" if stopped == "cancelled" else "삭제해", agent))
+        return None
+    if rc != 0:
+        _watch_log(store, tid, "{} 실행이 실패했습니다 (종료 코드 {}) — 이번 입력은 처리되지 않은 채 남아 있습니다".format(agent, rc),
+                   kind="warning", detail=summary[:6000] or None, author=agent)
+        _stamp("{} 실행 실패 (종료 코드 {}) — {}".format(agent, rc, tid))
+        return rc
+    try:
+        store.ack_inbox(items)
+    except DevTrackError:
+        pass
+    if summary:
+        _watch_log(store, tid, "{} 실행 요약".format(agent), detail=summary[:6000], author=agent)
+    try:
+        still_queued = store.load(tid).get("status") == "queued"
+    except DevTrackError:
+        still_queued = False
+    if still_queued and any(it["type"] == "new_task" for it in items):
+        _watch_log(store, tid, "{} 실행이 끝났지만 작업이 아직 '대기' 상태입니다 — 시작하지 못한 것 같습니다".format(agent),
+                   kind="warning", author=agent)
+    _stamp("{} 실행 끝 — {}".format(agent, tid))
+    return 0
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # 다른 사용자의 프로세스 등
+    return True
+
+
+def cmd_watch(store, args):
+    agent = (args.agent or ("Codex" if args.codex else args.author) or "").strip()
+    if is_unassigned(agent):
+        raise DevTrackError("--agent 에 AI 이름을 지정하세요 (예: --agent Codex)")
+    extra = list(args.command or [])
+    if extra and extra[0] == "--":
+        extra = extra[1:]
+    codex = None
+    if args.codex:
+        codex, ver = find_codex()
+        _info("Codex CLI: {} ({}) · 인터넷 {}".format(codex, ".".join(map(str, ver)) if ver else "버전 확인 안 됨",
+                                                    "차단 (--no-network)" if args.no_network else "허용"))
+    if not codex and not extra:
+        raise DevTrackError("실행할 AI 를 지정하세요: devtrack watch --codex   또는   "
+                            "devtrack watch --agent 이름 -- 명령 [인자…]")
+    default_cwd = os.path.abspath(os.path.expanduser(args.cwd)) if args.cwd else os.getcwd()
+    if not os.path.isdir(default_cwd):
+        raise DevTrackError("폴더를 찾을 수 없습니다: {}".format(default_cwd))
+    store.ensure()
+    pidfile = os.path.join(store.root, ".agent", "watch-{}.pid".format(re.sub(r"[^A-Za-z0-9._-]+", "_", agent)))
+    try:
+        with open(pidfile) as fh:
+            other = int(fh.read().strip() or 0)
+        if other and other != os.getpid() and _pid_alive(other):
+            raise DevTrackError("{} 의 devtrack watch 가 이미 실행 중입니다 (PID {}) — 한 AI 에 하나만 실행하세요".format(
+                agent, other))
+    except (OSError, ValueError):
+        pass
+    os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+    with open(pidfile, "w") as fh:
+        fh.write(str(os.getpid()))
+
+    seen_name = agent + "@watch"
+    # 켤 때마다 처음부터: 꺼져 있던 동안 쌓인 입력과, 지난번에 실패해 처리되지 않은 입력을 다시 처리한다
+    store.mark_inbox_seen(seen_name, [])
+    _info("devtrack watch — {} 에게 온 입력(새 작업 지시 · 메시지 · 결정)을 기다렸다가 {} 로 처리합니다".format(
+        agent, "codex exec" if codex else extra[0]))
+    _info("데이터: {} · 저장소 경로가 없는 작업의 실행 폴더: {} · 멈추기: Ctrl+C".format(store.root, default_cwd))
+    try:
+        while True:
+            new = _wait_for_new(store, agent, seen_name, timeout=args.timeout, interval=args.interval)
+            if new is None:
+                _info("시간 초과: 새 입력이 없습니다")
+                return 3
+            notices = [it for it in new if it["type"] in NOTICE_TYPES]
+            for line in _format_inbox(notices):
+                _stamp(line)
+            if notices:
+                store.ack_inbox(notices)
+            order = []
+            for it in new:
+                if it["type"] not in NOTICE_TYPES and it["task_id"] not in order:
+                    order.append(it["task_id"])
+            for tid in order:
+                # 다시 확인: 앞선 실행이 이미 처리했을 수 있고, 같은 작업의 남은 입력도 함께 넘긴다
+                pending = [it for it in store.inbox(agent=agent, task=tid) if it["type"] not in NOTICE_TYPES]
+                if pending:
+                    _watch_run(store, args, agent, tid, pending, codex, extra, default_cwd)
+            if args.once:
+                return 0
+            _info("다음 입력을 기다리는 중…")
+    except KeyboardInterrupt:
+        _info("\ndevtrack watch 를 멈췄습니다")
+        return 130
+    finally:
+        try:
+            with open(pidfile) as fh:
+                if fh.read().strip() == str(os.getpid()):
+                    os.remove(pidfile)
+        except OSError:
+            pass
 
 
 def cmd_cancel(store, args):
@@ -520,16 +828,17 @@ def build_parser():
     sp.add_argument("--repo", help="대상 저장소 경로 (git 이면 브랜치/원격 자동 감지)")
     sp.add_argument("--branch")
     sp.add_argument("--url", help="저장소 원격 URL")
-    sp.add_argument("--agent", help="작업 수행 에이전트 이름")
+    sp.add_argument("--agent", help="담당 AI 이름 (기본: 나 = $DEVTRACK_AGENT 또는 Claude, '누구나' = 먼저 시작한 AI)")
     sp.add_argument("--tag", action="append", help="태그 (여러 번 지정 가능)")
     sp.add_argument("--priority", default="normal", choices=PRIORITIES)
     sp.add_argument("--plan", nargs="+", metavar="STEP", help="초기 작업 계획 단계들")
     sp.add_argument("--related", nargs="+", metavar="T-ID", help="관련 작업 (예: 이 분석을 사용할 논문 작업)")
     sp.add_argument("--queued", action="store_true", help="사용자 지시로 '대기' 상태 생성")
 
-    sp = add("start", cmd_start, "대기 중인 작업을 진행 중으로 전환")
+    sp = add("start", cmd_start, "대기 중인 작업을 진행 중으로 전환 (다른 AI 에게 배정된 작업은 --take 로만)")
     sp.add_argument("task")
     sp.add_argument("step", nargs="?", help="시작하며 기록할 현재 단계")
+    sp.add_argument("--take", action="store_true", help="다른 AI 에게 배정된 작업이라도 내가 맡기 (담당 AI 변경)")
 
     sp = add("step", cmd_step, "현재 진행 단계 기록 (지금 무엇을 하는지)")
     sp.add_argument("task")
@@ -667,6 +976,20 @@ def build_parser():
                     help="아직 보지 않은 입력이 생길 때까지 기다렸다가 출력 (에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응)")
     sp.add_argument("--timeout", type=int, default=0, help="--wait 최대 대기 초 (0 = 무제한, 시간 초과 시 exit 3)")
     sp.add_argument("--interval", type=int, default=3, help="--wait 확인 간격 초")
+    sp.add_argument("--task", metavar="T-ID", help="이 작업의 입력만 (기본: $DEVTRACK_TASK)")
+    sp.add_argument("--all-agents", action="store_true", help="다른 AI 에게 배정된 작업의 입력까지 모두 보기")
+
+    sp = add("watch", cmd_watch, "AI 실행기 — 웹에서 온 입력(새 작업 · 메시지 · 결정)마다 AI 를 실행해 처리 (예: Codex)")
+    sp.add_argument("--codex", action="store_true", help="Codex 로 처리 (codex exec 실행, 담당 AI 이름 Codex)")
+    sp.add_argument("--agent", help="담당 AI 이름 — 이 AI 에게 배정된 작업만 처리 (기본: --codex 면 Codex, 아니면 $DEVTRACK_AGENT)")
+    sp.add_argument("--cwd", metavar="DIR", help="저장소 경로가 없는 작업을 실행할 폴더 (기본: 현재 폴더)")
+    sp.add_argument("--no-network", action="store_true",
+                    help="--codex: 실행하는 명령의 인터넷 사용을 막음 (기본은 gh · git push 를 위해 허용)")
+    sp.add_argument("--once", action="store_true", help="들어온 입력을 한 번 처리하고 끝내기")
+    sp.add_argument("--timeout", type=int, default=0, help="새 입력을 기다리는 최대 초 (0 = 무제한, 시간 초과 시 exit 3)")
+    sp.add_argument("--interval", type=int, default=3, help="확인 간격 초")
+    sp.add_argument("command", nargs=argparse.REMAINDER, metavar="-- 명령",
+                    help="실행할 AI 명령 (프롬프트를 마지막 인자로 붙여 실행). --codex 와 함께 쓰면 codex exec 에 더할 옵션")
 
     sp = add("cancel", cmd_cancel, "작업 취소 (기록은 남김, 대기 중인 승인 요청은 철회)")
     sp.add_argument("task")

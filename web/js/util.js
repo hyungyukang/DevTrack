@@ -210,6 +210,14 @@ export function fmtBytes(n) {
 
 export const authorName = (a) => (a === 'user' ? '사용자' : a || '에이전트');
 
+// 담당 AI — '누구나'(정해지지 않음)면 먼저 시작한 AI 가 맡는다 (devtrack/store.py 의 UNASSIGNED_AGENTS 와 같게)
+const UNASSIGNED_AGENTS = ['', '누구나', '기타', 'any', '*'];
+export const isUnassigned = (a) => UNASSIGNED_AGENTS.includes(String(a ?? '').trim().toLowerCase());
+/** 문장에 넣을 담당 AI 이름: 'Codex에게 보낼 메시지' / 정해지지 않았으면 'AI' */
+export const aiName = (t) => (isUnassigned(t?.agent) ? 'AI' : t.agent);
+/** 목록 · 머리글에 보여 줄 담당 AI */
+export const agentLabel = (t) => (isUnassigned(t?.agent) ? '담당 미정' : t.agent);
+
 export function shellQuote(s) {
   s = String(s ?? '');
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(s)) return s;
