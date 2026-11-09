@@ -972,3 +972,12 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 @media (max-width: 700px) { .th-actions { order: -1; width: 100%; justify-content: flex-end; } }
 .viewer-head .versions { font-size: 12px; color: var(--text-3); margin-top: 6px; display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; }
 .viewer-head .versions .icon { width: 13px; height: 13px; }
+
+/* 웹 지시를 기다리는 AI (대기 작업 화면 · 새 작업 지시) */
+.alert-ok .alert-body { color: var(--text); }
+.alert-body .how { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+.alert-body .how li { margin: 4px 0; line-height: 1.75; }
+.alert-body .how .btn { padding: 1px 8px; font-size: 11.5px; vertical-align: 1px; }
+.form-note { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--amber); margin: -4px 0 14px; }
+.form-note.ok { color: var(--green); }
+.form-note .icon { width: 14px; height: 14px; margin-top: 2px; flex: none; }

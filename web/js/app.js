@@ -28,6 +28,7 @@ const state = {
   lastEventTs: 0,
   details: new Map(),
   taskSearch: '',
+  listeners: null, // 웹 입력을 기다리는 AI (로컬 서버 모드만, null = 알 수 없음)
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -193,11 +194,105 @@ function isRelevant(changed, prev, idx) {
   return true;
 }
 
+// ====================================================================== 웹 지시를 기다리는 AI
+// devtrack inbox --wait (대기 모드) · devtrack watch 가 실행 중일 때만 "기다리는 중"으로 본다.
+// 로컬 서버 모드에서만 알 수 있다 (정적 모드 · 이 기능이 없는 서버면 null 이고 아무것도 표시하지 않는다).
+const LISTENER_VIEWS = ['task', 'dashboard', 'new'];
+
+async function refreshListeners() {
+  let next = null;
+  if (state.mode === 'live') {
+    try {
+      const r = await fetch('api/agents', { cache: 'no-store' });
+      if (r.ok) next = (await r.json()).listeners || [];
+    } catch { /* 서버 연결 끊김 */ }
+  }
+  const key = (ls) => (ls ? JSON.stringify(ls.map((l) => [l.kind, l.agent, l.task, l.state, l.running, l.seen_tasks])) : 'null');
+  const changed = key(next) !== key(state.listeners);
+  state.listeners = next;
+  return changed;
+}
+
+const sameAgent = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+
+/** 이 작업을 가져갈 수 있는, 지금 기다리는 AI 목록 (null = 알 수 없음) */
+function listenersFor(t) {
+  if (!state.listeners) return null;
+  return state.listeners.filter((l) => (!l.task || l.task === t.id)
+    && (isUnassigned(t.agent) || !l.agent || sameAgent(l.agent, t.agent)));
+}
+
+function listenerText(l) {
+  const how = l.kind === 'watch' ? '실행기' : '대기 모드';
+  return `${l.agent || '모든 AI'} (${how}${l.state === 'running' && l.running ? `, ${l.running} 처리 중` : ''})`;
+}
+const listenersText = (ls) => ls.map(listenerText).join(', ');
+
+const copyBtn = (text) => html`<button class="btn btn-sm" data-action="copy" data-copy="${text}">${icon('copy')} 복사</button>`;
+
+/** 이 작업의 AI 를 깨우는 방법 */
+function wakeHow(t) {
+  const a = String(t.agent ?? '').trim();
+  const any = isUnassigned(a);
+  const claude = html`<li>${any ? 'Claude: 채팅에서' : 'Claude 채팅에서'} <b>"웹 지시 기다려줘"</b> ${copyBtn('웹 지시 기다려줘')}
+    — 대기 모드를 켜면 앞으로 웹 지시를 바로 받습니다. 한 번만 하려면 <b>"devtrack inbox 확인하고 진행해줘"</b></li>`;
+  const watch = (name, cmd) => html`<li>${name ? `${name}: ` : ''}터미널에서 실행기를 켜 두세요 — <code>${cmd}</code> ${copyBtn(cmd)}
+    (<a href="#/guide/s11">사용 방법 11단계</a>)</li>`;
+  if (any) return html`<ul class="how">${claude}${watch('Codex', 'devtrack watch --codex')}</ul>`;
+  if (sameAgent(a, 'Claude')) return html`<ul class="how">${claude}</ul>`;
+  if (sameAgent(a, 'Codex')) return html`<ul class="how">${watch('', 'devtrack watch --codex')}</ul>`;
+  return html`<ul class="how">${watch('', `devtrack watch --agent ${a} -- <AI 실행 명령>`)}</ul>`;
+}
+
+/** 대기(queued) 작업 화면: 이 작업을 가져갈 AI 가 지금 기다리고 있는지 */
+function waitingBox(t) {
+  const ls = listenersFor(t);
+  if (!ls) return '';
+  const who = aiName(t);
+  if (ls.length) {
+    const mine = ls.find((l) => l.state === 'running' && l.running === t.id);
+    if (mine) {
+      return html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body">
+        <b>${mine.agent} 실행기가 지금 이 작업을 처리하고 있습니다</b><p>곧 진행 기록이 나타납니다.</p></div></div>`;
+    }
+    // 이미 본 지시로는 다시 깨어나지 않는다 (예: 실행기가 실행했지만 시작하지 못한 작업, 확인만 하고 두고 간 작업)
+    const fresh = ls.filter((l) => !(l.seen_tasks || []).includes(t.id));
+    if (fresh.length) {
+      const busy = fresh.every((l) => l.state === 'running');
+      return html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body">
+        <b>${who}가 웹 지시를 기다리고 있습니다</b>
+        <p>${listenersText(fresh)} — ${busy ? '지금 다른 작업을 처리하고 있어, 끝나면 이 작업을 시작합니다.' : '몇 초 안에 이 작업을 시작합니다.'}</p></div></div>`;
+    }
+    const ask = `${t.id} 진행해줘`;
+    return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
+      <b>${who}가 기다리고 있지만, 이 작업은 이미 확인하고 시작하지 않았습니다</b>
+      <p>${listenersText(ls)} — 같은 지시로는 다시 깨어나지 않습니다.</p>
+      <ul class="how">
+        ${ls.some((l) => l.kind === 'wait') ? html`<li>채팅에서 직접 요청하세요 — <b>"${ask}"</b> ${copyBtn(ask)}</li>` : ''}
+        ${ls.some((l) => l.kind === 'watch') ? html`<li>실행기가 실행했지만 시작되지 않았다면 진행 기록의 경고를 확인한 뒤 실행기를 다시 켜세요 — 다시 켜면 남은 지시를 다시 처리합니다</li>` : ''}
+      </ul></div></div>`;
+  }
+  return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
+    <b>지금 웹 지시를 기다리는 ${who}가 없습니다</b>
+    <p>이 작업은 ${who}가 받은 편지함을 확인해야 시작됩니다. 대화 중인 AI 는 작업 단계 사이에만 확인하므로,
+      지금 다른 일을 하고 있지 않다면 직접 깨워 주세요.</p>
+    ${wakeHow(t)}</div></div>`;
+}
+
+/** 새 작업 지시 화면: 지금 기다리는 AI 요약 */
+function listenersSummary() {
+  if (!state.listeners) return '';
+  if (!state.listeners.length) {
+    return html`<p class="form-note">${icon('alert')} 지금 웹 지시를 기다리는 AI 가 없습니다. 등록한 뒤 AI 를 깨워야 시작됩니다 (작업 화면에 방법이 나옵니다).</p>`;
+  }
+  return html`<p class="form-note ok">${icon('check-circle')} 지금 웹 지시를 기다리는 AI: ${listenersText(state.listeners)}</p>`;
+}
+
 // ====================================================================== 폴링 / 알림
 async function poll({ force = false } = {}) {
   const btn = $('#refresh-btn');
   try {
-    const idx = await getJSON('data/index.json');
+    const [idx, listenersChanged] = await Promise.all([getJSON('data/index.json'), refreshListeners()]);
     const prev = state.index;
     const changed = new Set();
     if (prev) {
@@ -218,6 +313,8 @@ async function poll({ force = false } = {}) {
       } else {
         await render({ keepScroll: !!prev });
       }
+    } else if (listenersChanged && LISTENER_VIEWS.includes(parseRoute().name) && !isEditing()) {
+      await render({ keepScroll: true }); // 기다리는 AI 표시만 바뀜 — 입력 중이면 다음 폴링에
     } else {
       updateChrome();
     }
@@ -500,13 +597,21 @@ function planList(t) {
     </li>`)}</ol>`;
 }
 
+function feedbackHint(t) {
+  if (state.mode !== 'live') return `정적 모드: 보내기를 누르면 ${aiName(t)}에게 전달할 내용이 표시됩니다`;
+  const ls = listenersFor(t);
+  if (!ls) return `${aiName(t)}에게 devtrack inbox 로 전달됩니다`;
+  if (ls.length) return `${aiName(t)}가 웹 지시를 기다리는 중 — 바로 전달됩니다`;
+  return `지금 기다리는 ${aiName(t)}가 없어, ${aiName(t)}가 다음에 받은 편지함을 확인할 때 전달됩니다`;
+}
+
 function feedbackBox(t, title = `${aiName(t)}에게 메시지`) {
   return html`<section class="card feedback-card">
     <div class="card-head"><h2>${icon('message')} ${title}</h2></div>
     <div class="card-body">
       <textarea id="fb-${t.id}" placeholder="추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)"></textarea>
       <div class="actions">
-        <span class="hint">${state.mode === 'live' ? `${aiName(t)}에게 devtrack inbox 로 전달됩니다` : `정적 모드: 보내기를 누르면 ${aiName(t)}에게 전달할 내용이 표시됩니다`}</span>
+        <span class="hint">${feedbackHint(t)}</span>
         <button class="btn btn-primary" data-action="comment" data-task="${t.id}">${icon('send')} 보내기</button>
       </div>
     </div>
@@ -729,10 +834,15 @@ function viewDashboard() {
       <span class="ic tone-orange">${icon('alert')}</span>
       <div class="body"><div class="title">${t.title}</div><div class="meta">심각도 높은 문제 ${t.open_issues}건 · ${t.id}</div></div>
       <span class="go">${icon('chev')}</span></a>`),
-    ...tasks.filter((t) => t.status === 'queued').map((t) => html`<a class="attn-item" href="#/task/${t.id}">
-      <span class="ic tone-gray">${icon('inbox')}</span>
-      <div class="body"><div class="title">${t.title}</div><div class="meta">에이전트가 아직 시작하지 않은 지시 · ${t.id} · ${ago(t.created_at)}</div></div>
-      <span class="go">${icon('chev')}</span></a>`),
+    ...tasks.filter((t) => t.status === 'queued').map((t) => {
+      const ls = listenersFor(t);
+      const fresh = ls && ls.filter((l) => !(l.seen_tasks || []).includes(t.id));
+      const wait = !ls ? '' : fresh.length ? ` · ${aiName(t)} 대기 중` : ` · 기다리는 ${aiName(t)} 없음`;
+      return html`<a class="attn-item" href="#/task/${t.id}">
+      <span class="ic tone-${ls && !fresh.length ? 'amber' : 'gray'}">${icon('inbox')}</span>
+      <div class="body"><div class="title">${t.title}</div><div class="meta">에이전트가 아직 시작하지 않은 지시 · ${t.id} · ${ago(t.created_at)}${wait}</div></div>
+      <span class="go">${icon('chev')}</span></a>`;
+    }),
   ];
   const working = active.filter((t) => t.status !== 'queued');
   const recentDone = tasks.filter((t) => t.status === 'done').slice(0, 3);
@@ -1001,6 +1111,7 @@ async function viewTask({ rest }) {
     </div></div>
     ${t.status === 'cancelled' && t.cancelled ? html`<div class="alert alert-gray">${icon('slash')}<div class="alert-body"><b>취소된 작업입니다</b> · ${authorName(t.cancelled.by)} · ${ago(t.cancelled.at)}${t.cancelled.reason ? html`<p>사유: ${t.cancelled.reason}</p>` : ''}</div></div>` : ''}
     ${pend.length && tab !== 'approvals' ? html`<div class="alert alert-amber">${icon('bell')}<div class="alert-body"><b>승인이 필요한 항목 ${pend.length}건</b><p>${pend.map((a) => a.title).join(' · ')}</p></div><a class="btn btn-sm" href="#/task/${t.id}/approvals">확인하기</a></div>` : ''}
+    ${t.status === 'queued' ? waitingBox(t) : ''}
     ${nowCard(t)}
     <nav class="tabs">${tabs.map(([k, label, n, hot]) => html`<a class="${tab === k ? 'active' : ''}" href="#/task/${t.id}${k === 'overview' ? '' : '/' + k}">${label}${n != null ? html`<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`)}</nav>
     ${body}`;
@@ -1503,6 +1614,7 @@ function viewNewTask({ q = {} } = {}) {
         <label class="field"><span>담당 AI</span><select name="agent">${agentOptions()}</select><small>이 AI 만 이 작업을 가져갑니다</small></label>
         <label class="field"><span>우선순위</span><select name="priority"><option value="normal">보통</option><option value="high">높음</option><option value="low">낮음</option></select></label>
       </div>
+      ${listenersSummary()}
       <div class="field-row">
         <label class="field"><span>대상 저장소 경로</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>코드 작업일 때 결과를 커밋할 저장소</small></label>
         <label class="field"><span>브랜치</span><input type="text" name="branch" placeholder="(현재 브랜치)"></label>

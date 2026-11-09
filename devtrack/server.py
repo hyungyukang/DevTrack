@@ -94,6 +94,9 @@ def make_handler(store, web_root, verbose=False):
             path = urllib.parse.urlsplit(self.path).path
             if path == "/api/health":
                 return self._json({"ok": True, "mode": "live", "version": __version__, "data": data_root})
+            if path == "/api/agents":
+                # 지금 웹 입력을 기다리는 AI (devtrack inbox --wait · devtrack watch) — 대기 중인 작업 화면에 표시
+                return self._json({"listeners": store.listeners()})
             if path.startswith("/api/"):
                 return self._json({"error": "not found"}, 404)
             return super().do_GET()

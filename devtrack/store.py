@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -205,6 +206,17 @@ def detect_lang(name):
     if base in _SPECIAL_NAMES:
         return _SPECIAL_NAMES[base]
     return CODE_LANG.get(os.path.splitext(base)[1].lstrip("."))
+
+
+def pid_alive(pid):
+    """이 컴퓨터에서 해당 프로세스가 살아 있는지 (권한 없는 다른 사용자의 프로세스도 살아 있는 것으로 본다)."""
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, ValueError):
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _safe_name(name):
@@ -1207,6 +1219,70 @@ class Store:
                 return {"type": "deleted", "task_id": tid, "title": d.get("title", ""), "reason": "",
                         "at": d.get("at")}
         return None
+
+    # ------------------------------------------------------------------ 웹 입력을 기다리는 AI (inbox --wait · watch)
+    # 기다리는 프로세스가 .agent/listeners/ 에 기록을 남기고 주기적으로 갱신한다. 웹(로컬 서버)은 이것으로
+    # "지금 이 AI 가 웹 지시를 기다리는지"를 보여 준다. 점(.) 디렉토리라 배포 · 웹 서버에는 나가지 않는다.
+    LISTENER_STALE = 120  # 초: 다른 컴퓨터의 기록은 이 시간 안에 갱신되지 않으면 끝난 것으로 본다
+
+    def _listener_path(self, kind, agent, pid):
+        return os.path.join(self.root, ".agent", "listeners",
+                            "{}-{}-{}.json".format(kind, _safe_name(agent or "all"), pid))
+
+    def touch_listener(self, kind, agent, task=None, started_at=None, state="waiting", running=None, seen=None):
+        """이 프로세스가 웹 입력을 기다린다고 적어 둔다 (kind: wait | watch, agent: 빈 값이면 모든 AI).
+        state 는 waiting, 또는 watch 가 AI 를 실행하는 동안 running (running = 그 작업 ID).
+        seen 은 이 프로세스가 '이미 본 입력' 기록 이름 — 본 입력으로는 다시 깨어나지 않으므로 웹이 구분한다."""
+        data = {"kind": kind, "agent": agent or "", "pid": os.getpid(), "host": socket.gethostname(),
+                "task": task or None, "state": state, "running": running, "seen": seen,
+                "started_at": started_at or now(), "updated_at": now()}
+        self._write_json(self._listener_path(kind, agent, os.getpid()), data)
+        return data
+
+    def drop_listener(self, kind, agent):
+        try:
+            os.unlink(self._listener_path(kind, agent, os.getpid()))
+        except OSError:
+            pass
+
+    def listeners(self):
+        """지금 웹 입력을 기다리는 AI 목록. 이 컴퓨터의 기록은 프로세스가 살아 있는지로, 다른 컴퓨터의 기록은
+        마지막 갱신 시각으로 판단하고, 끝난 기록은 지운다."""
+        d = os.path.join(self.root, ".agent", "listeners")
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            return []
+        host, out = socket.gethostname(), []
+        for name in names:
+            if not name.endswith(".json") or name.startswith("."):
+                continue
+            path = os.path.join(d, name)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                age = time.time() - os.path.getmtime(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("host") == host and data.get("pid"):
+                alive = pid_alive(data["pid"]) and age < 86400
+            else:
+                alive = age <= self.LISTENER_STALE
+            if not alive:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                continue
+            item = {k: data.get(k) for k in ("kind", "agent", "task", "state", "running", "started_at",
+                                              "updated_at")}
+            # 이미 본 새 작업 지시: 이 프로세스는 이 지시로는 다시 깨어나지 않는다 (예: 실행했지만 시작하지 못한 작업)
+            seen = self.inbox_seen(data["seen"]) if data.get("seen") else set()
+            item["seen_tasks"] = sorted(k.split(":", 1)[1] for k in seen if k.startswith("task:"))
+            out.append(item)
+        return out
 
     def change_token(self):
         """index.json 은 모든 저장 때 원자적으로 교체되므로 (inode, mtime, size) 로 변경을 감지한다."""

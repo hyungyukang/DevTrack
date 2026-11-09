@@ -19,7 +19,8 @@ import time
 from . import DevTrackError, __version__, gitops
 from .store import (
     APPROVAL_KINDS, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
-    Store, is_unassigned, normalize_item_id, normalize_task_id,
+    Store, is_unassigned, normalize_item_id, normalize_task_id, pid_alive,
+    now as now_iso,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -357,11 +358,61 @@ def _inbox_scope(args):
     return agent, task
 
 
-def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3):
+class _Listening(object):
+    """웹 입력을 기다리는 동안 '기다리는 중' 기록(.agent/listeners/)을 남겨 웹 화면이 보여 주게 한다.
+    기록은 보조 기능이라 실패해도 기다리기는 계속한다. 이 프로세스를 띄운 쪽(예: Claude 대화)이 끝나 부모가
+    바뀌면 깨울 대상이 없으므로 기록만 지운다 (기다리기 자체는 그대로)."""
+    EVERY = 30  # 초: 기록 갱신 간격 (다른 컴퓨터에서 볼 때 끝났는지 판단하는 기준)
+
+    def __init__(self, store, kind, agent, task=None, seen=None):
+        self.store, self.kind, self.agent, self.task, self.seen = store, kind, agent or "", task, seen
+        self.started = None
+        self.last = 0.0
+        self.state, self.running = "waiting", None
+        self.parent = os.getppid()
+        self.orphan = False
+
+    def _write(self):
+        try:
+            self.store.touch_listener(self.kind, self.agent, task=self.task, started_at=self.started,
+                                      state=self.state, running=self.running, seen=self.seen)
+            self.started = self.started or now_iso()
+        except (OSError, DevTrackError):
+            pass
+        self.last = time.time()
+
+    def tick(self):
+        if self.orphan:
+            return
+        if os.getppid() != self.parent:
+            self.orphan = True
+            self.store.drop_listener(self.kind, self.agent)
+            return
+        if time.time() - self.last >= self.EVERY:
+            self._write()
+
+    def set(self, state, running=None):
+        self.state, self.running = state, running
+        if not self.orphan:
+            self._write()
+
+    def __enter__(self):
+        self.started = now_iso()
+        self._write()
+        return self
+
+    def __exit__(self, *exc):
+        self.store.drop_listener(self.kind, self.agent)
+        return False
+
+
+def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_tick=None):
     """seen_name 기준으로 아직 보지 않은 입력이 생길 때까지 기다려 그 항목들을 돌려준다 (시간 초과면 None)."""
     deadline = time.time() + timeout if timeout else None
     last = object()
     while True:
+        if on_tick:
+            on_tick()
         token = store.change_token()
         if token != last:
             last = token
@@ -383,7 +434,9 @@ def _inbox_wait(store, args):
     agent, task = _inbox_scope(args)
     scope = task or ("{} 에게 배정된 작업".format(agent) if agent else "모든 AI 의 작업")
     _info("새 사용자 입력을 기다리는 중 ({} — 웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C".format(scope))
-    new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval)
+    with _Listening(store, "wait", agent, task=task, seen=args.author) as listening:
+        new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval,
+                            on_tick=listening.tick)
     if new is None:
         _out(args, [])
         _info("시간 초과: 새 입력이 없습니다")
@@ -642,7 +695,7 @@ def _stamp(msg):
     sys.stdout.flush()
 
 
-def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd):
+def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd, tick=None):
     t = store.load(tid)
     repo = (t.get("repo") or {}).get("path")
     cwd = repo if repo and os.path.isdir(repo) else default_cwd
@@ -683,6 +736,8 @@ def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd):
                 break
             except subprocess.TimeoutExpired:
                 pass
+            if tick:
+                tick()
             stopped = _stop_reason(store, tid)
             if stopped:
                 _terminate(proc)
@@ -730,14 +785,7 @@ def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd):
     return 0
 
 
-def _pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # 다른 사용자의 프로세스 등
-    return True
+_pid_alive = pid_alive
 
 
 def cmd_watch(store, args):
@@ -778,9 +826,11 @@ def cmd_watch(store, args):
     _info("devtrack watch — {} 에게 온 입력(새 작업 지시 · 메시지 · 결정)을 기다렸다가 {} 로 처리합니다".format(
         agent, "codex exec" if codex else extra[0]))
     _info("데이터: {} · 저장소 경로가 없는 작업의 실행 폴더: {} · 멈추기: Ctrl+C".format(store.root, default_cwd))
+    listening = _Listening(store, "watch", agent, seen=seen_name).__enter__()
     try:
         while True:
-            new = _wait_for_new(store, agent, seen_name, timeout=args.timeout, interval=args.interval)
+            new = _wait_for_new(store, agent, seen_name, timeout=args.timeout, interval=args.interval,
+                                on_tick=listening.tick)
             if new is None:
                 _info("시간 초과: 새 입력이 없습니다")
                 return 3
@@ -797,7 +847,11 @@ def cmd_watch(store, args):
                 # 다시 확인: 앞선 실행이 이미 처리했을 수 있고, 같은 작업의 남은 입력도 함께 넘긴다
                 pending = [it for it in store.inbox(agent=agent, task=tid) if it["type"] not in NOTICE_TYPES]
                 if pending:
-                    _watch_run(store, args, agent, tid, pending, codex, extra, default_cwd)
+                    listening.set("running", tid)
+                    try:
+                        _watch_run(store, args, agent, tid, pending, codex, extra, default_cwd, tick=listening.tick)
+                    finally:
+                        listening.set("waiting")
             if args.once:
                 return 0
             _info("다음 입력을 기다리는 중…")
@@ -805,6 +859,7 @@ def cmd_watch(store, args):
         _info("\ndevtrack watch 를 멈췄습니다")
         return 130
     finally:
+        listening.__exit__()
         try:
             with open(pidfile) as fh:
                 if fh.read().strip() == str(os.getpid()):
