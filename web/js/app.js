@@ -14,8 +14,8 @@ const DECISION = {
   reject: { label: '거절', tone: 'red' },
 };
 // 작업 유형 → 분야 섹션 (사이드바 메뉴)
-const SECTION_OF_TYPE = { paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews' };
-const SECTION_LABEL = { papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', tasks: '작업' };
+const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews' };
+const SECTION_LABEL = { code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', tasks: '작업' };
 const ANALYSIS_TYPES = ['analysis', 'visualization'];
 const FIGURE_KINDS = ['image', 'html'];
 
@@ -83,6 +83,7 @@ const VIEWS = {
   tasks: viewTasks,
   task: viewTask,
   approvals: viewApprovals,
+  code: viewCode,
   reviews: viewReviews,
   papers: viewPapers,
   analysis: viewAnalysis,
@@ -295,6 +296,7 @@ function updateChrome(route = parseRoute()) {
   setCount('#nav-approvals-count', pending);
   // 분야별 메뉴에는 그 분야의 승인 대기 수
   const pendIn = (sec) => (idx ? idx.notifications.filter((n) => sectionOfTask(n.task_id) === sec).length : 0);
+  setCount('#nav-code-count', pendIn('code'));
   setCount('#nav-papers-count', pendIn('papers'));
   setCount('#nav-analysis-count', pendIn('analysis'));
   const seen = LS.get('seenTs', 0);
@@ -368,6 +370,11 @@ function repoLabel(repo = {}) {
   return repo.path ? { text: repo.path, href: null } : null;
 }
 
+const shortPath = (p) => {
+  const s = String(p || '').split('/').filter(Boolean);
+  return s.length > 2 ? `…/${s.slice(-2).join('/')}` : String(p || '');
+};
+
 function commitLink(remoteUrl, sha) {
   const short = (sha || '').slice(0, 8);
   const m = /github\.com[:/](.+?)(?:\.git)?$/.exec(remoteUrl || '');
@@ -399,14 +406,18 @@ function linksOf(id) {
 const artsOf = (id) => (state.index?.artifacts || []).filter((a) => a.task_id === id);
 const figuresOf = (id) => artsOf(id).filter((a) => a.kind === 'image' && a.path);
 
-function taskCard(t, { thumbs = false, links = false } = {}) {
+function taskCard(t, { thumbs = false, links = false, repo = false } = {}) {
   const now = taskNow(t);
+  const rl = repo ? repoLabel(t.repo) : null;
+  // 로컬 경로는 앞부분이 길어 잘리므로 끝의 두 단계만 (전체 경로는 마우스를 올리면)
+  const repoText = rl && !t.repo?.url ? shortPath(rl.text) : rl?.text;
   const figs = thumbs ? figuresOf(t.id).slice(0, 4) : [];
   const papers = links ? linksOf(t.id).filter((x) => x.type === 'paper') : [];
   return html`<a class="task-card" href="#/task/${t.id}">
     <div class="tc-top">${typeBadge(t.type)}${statusBadge(t.status)}<span class="tc-id">${t.id}</span></div>
     <div class="tc-title">${t.title}</div>
     ${papers.length ? html`<div class="tc-link">${icon('book')} 논문용 · ${papers.map((p) => `${p.id} ${p.title}`).join(', ')}</div>` : ''}
+    ${rl ? html`<div class="tc-link tc-repo" title="${rl.text}">${icon('git')} ${repoText}${t.repo?.branch ? ` · ${t.repo.branch}` : ''}</div>` : ''}
     <div class="tc-step">${now.text ? html`<span class="lbl">${now.label}</span>${now.text}` : html`<span class="muted">기록 없음</span>`}</div>
     ${figs.length ? html`<div class="tc-thumbs">${figs.map((a) => html`<img src="${artifactUrl(a.task_id, a)}" alt="" loading="lazy" title="${a.title}">`)}</div>` : ''}
     <div class="tc-prog">${progressBar(t)}<span class="pct">${t.progress || 0}%</span></div>
@@ -1140,7 +1151,7 @@ async function viewReviews({ rest }) {
     </div>`;
 }
 
-// ====================================================================== 화면: 분야 섹션 (논문 작성 / 데이터 분석)
+// ====================================================================== 화면: 분야 섹션 (코드 개발 / 논문 작성 / 데이터 분석)
 function sectionHead(title, sub, newHref) {
   return html`<div class="page-head"><div><h1>${title}</h1><p class="sub">${sub}</p></div>
     <a class="btn btn-primary" href="${newHref}">${icon('plus')} 새 작업 지시</a></div>`;
@@ -1358,6 +1369,48 @@ function viewAnalysis({ q }) {
         ${figs.length ? html`<div class="art-grid gallery">${figs.map(artCard)}</div>` : html`<div class="card empty inline" style="padding:16px 18px">아직 그림이 없습니다</div>`}
         <h2 class="section-title" style="margin-top:24px">데이터 · 노트북 · 리포트 <span class="muted">${others.length}</span></h2>
         ${others.length ? html`<div class="card">${others.map((a) => artRow(a.task_id, a, { showTask: true }))}</div>` : html`<div class="card empty inline" style="padding:16px 18px">아직 결과물이 없습니다</div>`}
+      </div>
+      ${sectionFeed(ids)}
+    </div>`;
+}
+
+// ---------------------------------------------------------------- 코드 개발
+const CODE_ART_KINDS = ['code', 'diff'];
+const CODE_FILTERS = {
+  all: { label: '전체', test: () => true },
+  active: { label: '활성', test: (t) => ACTIVE.includes(t.status) },
+  approval: { label: '승인 대기', test: (t) => t.pending_approvals > 0 },
+  done: { label: '완료', test: (t) => t.status === 'done' },
+};
+
+function viewCode({ q }) {
+  const idx = state.index;
+  const all = idx.tasks.filter((t) => t.type === 'code');
+  const allIds = new Set(all.map((t) => t.id));
+  const f = CODE_FILTERS[q.f] ? q.f : 'all';
+  const tasks = all.filter(CODE_FILTERS[f].test)
+    .sort((a, b) => Number(!ACTIVE.includes(a.status)) - Number(!ACTIVE.includes(b.status)));
+  const ids = new Set(tasks.map((t) => t.id));
+  const arts = idx.artifacts.filter((a) => ids.has(a.task_id));
+  const changes = arts.filter((a) => CODE_ART_KINDS.includes(a.kind));
+  const others = arts.filter((a) => !CODE_ART_KINDS.includes(a.kind));
+  const commits = idx.activity.filter((e) => e.kind === 'commit' && ids.has(e.task_id));
+  const none = (msg) => html`<div class="card empty inline" style="padding:16px 18px">${msg}</div>`;
+  return html`
+    ${sectionHead('코드 개발', '코드 작성 · 수정 작업의 진행 과정, 커밋 승인과 반영된 커밋, 코드 · 변경사항', '#/new?type=code')}
+    ${sectionStats(all, idx.artifacts.filter((a) => allIds.has(a.task_id)))}
+    ${sectionAttention(allIds)}
+    <div class="chips" style="margin-bottom:16px">${Object.entries(CODE_FILTERS).map(([k, v]) => html`<a class="chip ${f === k ? 'active' : ''}" href="#/code${k === 'all' ? '' : '?f=' + k}">${v.label} <span class="n">${all.filter(v.test).length}</span></a>`)}</div>
+    <div class="dash-grid">
+      <div>
+        <h2 class="section-title">코드 작업 <span class="muted">${tasks.length}</span></h2>
+        ${tasks.length ? html`<div class="task-grid">${tasks.map((t) => taskCard(t, { repo: true }))}</div>` : html`<div class="card empty">${icon('code')}<p>해당하는 코드 작업이 없습니다</p><p><a href="#/new?type=code">코드 개발 지시하기</a></p></div>`}
+        <h2 class="section-title" style="margin-top:24px">반영된 커밋 <span class="muted">${commits.length}</span></h2>
+        ${commits.length ? html`<section class="card"><div class="card-body"><ul class="timeline">${commits.map((e) => timelineItem(e, { taskLink: true }))}</ul></div></section>` : none('아직 반영된 커밋이 없습니다 — 커밋 승인 요청을 승인하면 여기에 표시됩니다')}
+        <h2 class="section-title" style="margin-top:24px">코드 · 변경사항 <span class="muted">${changes.length}</span></h2>
+        ${changes.length ? html`<div class="card">${changes.map((a) => artRow(a.task_id, a, { showTask: true }))}</div>` : none('아직 코드 · 변경사항 결과물이 없습니다')}
+        ${others.length ? html`<h2 class="section-title" style="margin-top:24px">리포트 · 기타 결과물 <span class="muted">${others.length}</span></h2>
+        <div class="card">${others.map((a) => artRow(a.task_id, a, { showTask: true }))}</div>` : ''}
       </div>
       ${sectionFeed(ids)}
     </div>`;
