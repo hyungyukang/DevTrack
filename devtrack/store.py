@@ -18,6 +18,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 try:
     import fcntl
@@ -320,6 +321,9 @@ class Store:
         tid = normalize_task_id(tid)
         path = os.path.join(self.tasks_dir, tid, "task.json")
         if not os.path.exists(path):
+            gone = next((d for d in self.deleted_tasks() if d.get("id") == tid), None)
+            if gone:
+                raise DevTrackError("{} ({}) 은(는) 삭제된 작업입니다".format(tid, gone.get("title") or ""))
             raise DevTrackError("작업을 찾을 수 없습니다: {}".format(tid))
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
@@ -555,7 +559,7 @@ class Store:
                            "comment": "작업 취소로 철회", "agent_ack": True})
                 withdrawn.append(ap["id"])
         t["status"] = "cancelled"
-        t["cancelled"] = {"at": now(), "by": author, "reason": reason,
+        t["cancelled"] = {"at": now(), "by": author, "reason": reason, "was": old,
                           "agent_ack": author != USER}  # 사용자가 취소하면 에이전트에게 알린다
         msg = "작업 취소" + (": " + reason if reason else "")
         if withdrawn:
@@ -587,7 +591,7 @@ class Store:
             shutil.rmtree(self.task_dir(tid))
             items = [d for d in self.deleted_tasks() if d.get("id") != tid]
             items.append({"id": tid, "title": t["title"], "type": t["type"], "agent": t.get("agent"),
-                          "at": now(), "by": author, "ack": author != USER})
+                          "status": t["status"], "at": now(), "by": author, "ack": author != USER})
             self._write_json(self.deleted_path, {"deleted": items})
             self.rebuild_index()
         if self.publish_dir:
@@ -1154,6 +1158,55 @@ class Store:
             keys |= self.inbox_seen(agent)
         keys = sorted(keys)
         self._write_json(self._seen_path(agent), {"agent": agent, "updated_at": now(), "seen": keys})
+
+    # ------------------------------------------------------------------ AI 세션 ↔ 작업 (devtrack hook)
+    # 대화형 AI(Claude Code · Codex)는 단계 사이에만 inbox 를 보므로, 작업 도중의 취소 · 삭제를 모른다.
+    # 기록 명령을 실행한 세션을 작업별로 적어 두고, 도구 실행 전 훅이 그 세션의 작업만 확인한다.
+    def _session_path(self, session):
+        return os.path.join(self.root, ".agent", "sessions", _safe_name(session) + ".json")
+
+    def session_tasks(self, session):
+        try:
+            with open(self._session_path(session), encoding="utf-8") as fh:
+                return [t for t in json.load(fh).get("tasks", []) if isinstance(t, str)]
+        except (OSError, ValueError, AttributeError):
+            return []
+
+    def note_session_task(self, session, tid, keep_days=30):
+        """AI 세션이 이 작업을 하고 있다고 적어 둔다. 오래된 세션 기록은 이때 정리한다."""
+        tid = normalize_task_id(tid)
+        tasks = self.session_tasks(session)
+        if tid in tasks:
+            return
+        path = self._session_path(session)
+        self._write_json(path, {"session": session, "updated_at": now(), "tasks": tasks + [tid]})
+        cutoff = time.time() - keep_days * 86400
+        d = os.path.dirname(path)
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            try:
+                if name.endswith(".json") and os.path.getmtime(p) < cutoff:
+                    os.unlink(p)
+            except OSError:
+                pass
+
+    def stop_notice(self, tid):
+        """사용자가 취소 · 삭제했는데 AI 가 아직 확인(inbox --ack)하지 않은 작업이면 그 내용, 아니면 None.
+        이미 끝난(완료) 작업을 지운 경우는 멈출 일이 없으므로 제외한다."""
+        tid = normalize_task_id(tid)
+        path = os.path.join(self.tasks_dir, tid, "task.json")
+        if os.path.exists(path):
+            t = self.load(tid)
+            c = t.get("cancelled") or {}
+            if t.get("status") == "cancelled" and c.get("agent_ack") is False and c.get("was") != "done":
+                return {"type": "cancelled", "task_id": tid, "title": t.get("title", ""),
+                        "reason": c.get("reason") or "", "at": c.get("at")}
+            return None
+        for d in self.deleted_tasks():
+            if d.get("id") == tid and d.get("ack") is False and d.get("status") != "done":
+                return {"type": "deleted", "task_id": tid, "title": d.get("title", ""), "reason": "",
+                        "at": d.get("at")}
+        return None
 
     def change_token(self):
         """index.json 은 모든 저장 때 원자적으로 교체되므로 (inode, mtime, size) 로 변경을 감지한다."""

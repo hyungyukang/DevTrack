@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -65,6 +66,8 @@ def cmd_new(store, args):
         status="queued" if queued else "in_progress", created_by=USER if queued else None, plan=args.plan,
         related=args.related,
     )
+    if not queued:  # AI 가 스스로 만들어 진행하는 작업 — 이 세션이 맡은 작업으로 적어 둔다
+        _note_session(store, t["id"])
     _info("새 작업 생성: {} — {}".format(t["id"], t["title"]))
     _out(args, t, t["id"])
 
@@ -337,9 +340,11 @@ def _print_inbox(items):
 
 def _inbox_scope(args):
     """받은 편지함 범위: 기본은 나($DEVTRACK_AGENT / --as)에게 배정된 작업과 담당이 정해지지 않은 작업.
-    devtrack watch 가 실행한 세션은 DEVTRACK_TASK 의 작업만 본다."""
-    agent = None if getattr(args, "all_agents", False) else args.author
-    task = getattr(args, "task", None) or os.environ.get("DEVTRACK_TASK") or None
+    devtrack watch 가 실행한 세션은 DEVTRACK_TASK 의 작업만 본다.
+    --task 로 작업을 직접 고르면 담당 AI 와 상관없이 그 작업의 입력을 본다 (devtrack hook 이 안내하는 확인 명령)."""
+    explicit = getattr(args, "task", None)
+    agent = None if (getattr(args, "all_agents", False) or explicit) else args.author
+    task = explicit or os.environ.get("DEVTRACK_TASK") or None
     return agent, task
 
 
@@ -401,6 +406,131 @@ def cmd_inbox(store, args):
                     others))
         return 0
     _print_inbox(items)
+    return 0
+
+
+# ---------------------------------------------------------------------------- 취소 · 삭제를 일하는 중인 AI 에 알리기
+# 작업에 기록하는 명령 — 실행한 AI 세션을 그 작업에 적어 두고, 사용자가 취소 · 삭제한 작업이면 거절한다
+TASK_WORK_CMDS = ("start", "step", "status", "link", "log", "plan", "check", "issue", "resolve", "artifact",
+                  "review", "latex", "request", "apply", "done")
+# 훅이 막지 않는 명령: devtrack 과 출력을 다듬는 정도만 (확인 기록 · 상태 보기는 할 수 있게)
+HOOK_SAFE_CMDS = ("devtrack", "echo", "printf", "true", "cd", "head", "tail", "grep", "cat")
+_SHELL_SEPARATORS = (";", "&&", "||", "|", "|&", "&", ";;")
+_SHELL_REDIRECTS = (">", ">>", "<", "<<", "<<<", ">&", "<&", "&>", "&>>", ">|")
+
+
+SESSION_ENV = ("DEVTRACK_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
+
+
+def _session_id():
+    """지금 이 명령을 실행한 AI 세션 (Claude Code · Codex 가 명령 환경에 넣어 준다)."""
+    for name in SESSION_ENV:
+        if os.environ.get(name):
+            return os.environ[name]
+    return None
+
+
+def _note_session(store, tid):
+    sid = _session_id()
+    if not sid:
+        return
+    try:
+        store.note_session_task(sid, tid)
+    except (OSError, DevTrackError):
+        pass  # 세션 기록은 보조 기능 — 실패해도 본래 명령은 진행
+
+
+def _stop_text(n):
+    what = "취소" if n["type"] == "cancelled" else "삭제"
+    return "{} ({}) 은(는) 사용자가 {}한 작업입니다{} — 이 작업은 지금 멈추고 더 진행하지 마세요. " \
+           "확인 기록: devtrack inbox --task {} --ack".format(
+               n["task_id"], n["title"], what, " (사유: {})".format(n["reason"]) if n.get("reason") else "",
+               n["task_id"])
+
+
+def _guard_task(store, args):
+    """작업에 기록하기 전: 사용자가 취소 · 삭제했는데 아직 확인하지 않았으면 거절, 아니면 이 세션의 작업으로 적어 둔다."""
+    n = store.stop_notice(args.task)
+    if n:
+        raise DevTrackError(_stop_text(n))
+    _note_session(store, args.task)
+
+
+def _shell_command(tool_input):
+    """훅 입력에서 셸 명령 문자열 (Claude: tool_input.command, Codex: command 문자열 또는 [셸, -lc, 명령])."""
+    if not isinstance(tool_input, dict):
+        return None
+    cmd = tool_input.get("command", tool_input.get("cmd"))
+    if isinstance(cmd, list):
+        cmd = cmd[-1] if len(cmd) >= 3 and cmd[-2] in ("-c", "-lc") else " ".join(str(x) for x in cmd)
+    return cmd if isinstance(cmd, str) else None
+
+
+def _devtrack_only(command):
+    """devtrack (과 출력을 다듬는 명령) 만 실행하는 셸 명령인가 — 멈춘 뒤 확인을 기록할 수 있게 훅이 통과시킨다."""
+    if not command or "devtrack" not in command:
+        return False
+    try:
+        lex = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return False
+    expect_cmd, skip, seen = True, False, False
+    for tok in tokens:
+        if skip:
+            skip = False
+        elif tok in _SHELL_SEPARATORS:
+            expect_cmd = True
+        elif tok in _SHELL_REDIRECTS:
+            skip = True
+        elif expect_cmd:
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok):
+                continue  # 앞에 붙인 환경변수 (DEVTRACK_AGENT=Codex devtrack ...)
+            name = os.path.basename(tok)
+            if name not in HOOK_SAFE_CMDS:
+                return False
+            seen = seen or name == "devtrack"
+            expect_cmd = False
+    return seen
+
+
+def _hook_reason(notices):
+    lines = ["⛔ DevTrack: 사용자가 이 세션이 맡은 작업을 멈추게 했습니다."]
+    for n in notices:
+        lines.append("- {} 「{}」 — 사용자가 {}했습니다{}".format(
+            n["task_id"], n["title"], "취소" if n["type"] == "cancelled" else "삭제",
+            " (사유: {})".format(n["reason"]) if n.get("reason") else ""))
+    acks = " ; ".join("devtrack inbox --task {} --ack".format(n["task_id"]) for n in notices)
+    lines += [
+        "이 작업을 하던 중이면 지금 바로 멈추세요. 파일을 고치거나 다른 명령을 더 실행하지 마세요.",
+        "1) 다른 명령을 붙이지 말고 `{}` 만 실행해 확인을 기록하세요. 확인을 기록하기 전에는 devtrack 명령만 실행됩니다.".format(acks),
+        "2) 사용자에게 멈췄다고 짧게 알리세요. 웹 지시 대기 모드였다면 다시 `devtrack inbox --wait` 를 백그라운드로 실행합니다.",
+        "다른 작업을 하던 중이었다면 확인만 기록하고 그 작업을 계속하세요.",
+    ]
+    return "\n".join(lines)
+
+
+def cmd_hook(store, args):
+    """Claude Code · Codex 의 PreToolUse 훅. 이 세션이 맡은 작업을 사용자가 취소 · 삭제했으면 도구 실행을 막고 멈추라고
+    알린다 (devtrack 명령만 통과). 훅 오류로 AI 작업이 막히면 안 되므로 문제가 생기면 그냥 통과시킨다."""
+    try:
+        raw = sys.stdin.read()
+        data = json.loads(raw) if raw.strip() else {}
+        if not isinstance(data, dict) or data.get("hook_event_name", "PreToolUse") != "PreToolUse":
+            return 0
+        sid = data.get("session_id") or _session_id()
+        tids = store.session_tasks(sid) if sid else []
+        if not tids:
+            return 0
+        notices = [n for n in (store.stop_notice(t) for t in tids) if n]
+        if not notices or _devtrack_only(_shell_command(data.get("tool_input"))):
+            return 0
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": _hook_reason(notices)}}, ensure_ascii=False))
+    except Exception:  # noqa: BLE001 — 어떤 오류든 AI 를 막지 않는다
+        return 0
     return 0
 
 
@@ -520,7 +650,8 @@ def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd):
         cmd += ["-o", last_msg] + extra + [prompt]
     else:
         cmd = extra + [prompt]
-    env = dict(os.environ)
+    # watch 를 실행한 쪽(예: Claude 대화)의 세션 ID 가 넘어가면 실행한 AI 의 작업이 그 세션 것으로 적힌다
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}
     env.update({"DEVTRACK_AGENT": agent, "DEVTRACK_DATA": store.root, "DEVTRACK_TASK": tid, "DEVTRACK_WATCH": "1"})
     env["PATH"] = os.path.join(REPO_ROOT, "bin") + os.pathsep + env.get("PATH", "")
 
@@ -976,8 +1107,11 @@ def build_parser():
                     help="아직 보지 않은 입력이 생길 때까지 기다렸다가 출력 (에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응)")
     sp.add_argument("--timeout", type=int, default=0, help="--wait 최대 대기 초 (0 = 무제한, 시간 초과 시 exit 3)")
     sp.add_argument("--interval", type=int, default=3, help="--wait 확인 간격 초")
-    sp.add_argument("--task", metavar="T-ID", help="이 작업의 입력만 (기본: $DEVTRACK_TASK)")
+    sp.add_argument("--task", metavar="T-ID", help="이 작업의 입력만, 담당 AI 와 상관없이 (기본: $DEVTRACK_TASK)")
     sp.add_argument("--all-agents", action="store_true", help="다른 AI 에게 배정된 작업의 입력까지 모두 보기")
+
+    add("hook", cmd_hook, "AI 도구 실행 전 확인 (Claude Code · Codex 의 PreToolUse 훅) — 하던 작업을 사용자가 "
+                          "취소 · 삭제했으면 멈추게 한다. 훅 입력(JSON)을 표준입력으로 받는다")
 
     sp = add("watch", cmd_watch, "AI 실행기 — 웹에서 온 입력(새 작업 · 메시지 · 결정)마다 AI 를 실행해 처리 (예: Codex)")
     sp.add_argument("--codex", action="store_true", help="Codex 로 처리 (codex exec 실행, 담당 AI 이름 Codex)")
@@ -1038,6 +1172,8 @@ def main(argv=None):
     publish_dir = os.environ.get("DEVTRACK_PUBLISH_DIR") if args.cmd not in ("publish", "demo") else None
     store = Store(args.data, publish_dir=publish_dir)
     try:
+        if args.cmd in TASK_WORK_CMDS:
+            _guard_task(store, args)
         rc = args.func(store, args)
         return rc or 0
     except DevTrackError as e:

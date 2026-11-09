@@ -1618,7 +1618,8 @@ function openCancelTask(id) {
       <ul class="m-list">
         <li>작업 상태가 <b>취소</b>로 바뀌고, 진행 중 목록에서 빠집니다. 기록과 결과물은 그대로 남습니다.</li>
         ${pend ? html`<li>결정을 기다리던 승인 요청 <b>${pend}건</b>은 철회되어 알림에서 사라집니다.</li>` : ''}
-        <li>${aiName(t)}에게 이 작업을 중단하라는 알림이 갑니다. <code>devtrack watch</code> 로 실행 중이던 작업은 바로 멈춥니다.</li>
+        <li>${aiName(t)}에게 이 작업을 중단하라는 알림이 갑니다. <code>devtrack watch</code> 로 실행 중이면 바로,
+          대화 중인 AI 는 다음 명령을 실행하기 전에 멈춥니다 (훅 설치 시 — <a href="#/guide/s8">사용 방법 8단계</a>).</li>
       </ul>
       <label class="field"><span>취소 사유 (선택)</span><textarea id="cancel-reason" placeholder="예: 다른 작업(T-0002)으로 대체"></textarea></label>
       <div class="m-actions"><button class="btn btn-reject" data-action="task-cancel-go" data-task="${t.id}">${icon('x-circle')} 작업 취소하기</button>
@@ -1667,6 +1668,7 @@ function openDeleteTask(id) {
         <li>승인 요청 ${t.approvals.length}건${pend ? ` (결정 대기 ${pend}건)` : ''}</li>
         ${links.length ? html`<li>관련 작업 연결 ${links.map((l) => l.id).join(', ')} 해제</li>` : ''}
       </ul>
+      <p class="hint">${aiName(t)}에게 이 작업을 중단하라는 알림이 갑니다 (작업 취소와 같은 방식으로 멈춥니다).</p>
       <label class="field"><span>확인을 위해 작업 ID <b class="mono">${t.id}</b> 를 입력하세요</span>
         <input type="text" id="del-confirm" autocomplete="off" spellcheck="false" placeholder="${t.id}"></label>
       <div class="m-actions"><button class="btn btn-danger" id="del-go" data-action="task-delete-go" data-task="${t.id}" disabled>${icon('trash')} 영구 삭제</button>

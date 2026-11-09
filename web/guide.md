@@ -92,7 +92,8 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
   승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
   각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
-- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오거나 도구 실행이 `⛔ DevTrack` 메시지로 막히면 그 작업은 즉시 멈추고, 안내대로 확인만 기록한 뒤
+  (`devtrack inbox --task <TID> --ack`) 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
 ```
 
 > 설정은 **새로 연 Claude 대화부터** 적용됩니다. 이미 열려 있는 대화는 새로 시작하세요.
@@ -114,6 +115,34 @@ ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills
 
 Claude 가 `devtrack` 명령을 실행할 때마다 확인 창이 뜨면, Claude Code 에서 `/permissions` 를 열어 허용 규칙
 `Bash(devtrack:*)` 를 추가하세요. `devtrack` 은 기록만 하고, 커밋 · 푸시는 웹에서 승인된 요청만 실행합니다.
+
+### 5-4. 작업 취소를 바로 전달하기 (권장)
+
+Claude 는 작업 단계가 끝날 때만 DevTrack 을 확인합니다. 그래서 작업 도중에 웹에서 취소 · 삭제해도 그 단계가 끝날 때까지
+계속 일할 수 있습니다. **훅**을 설치하면 Claude 가 명령을 실행하거나 파일을 고치기 **직전마다** DevTrack 이 "이 작업이
+취소됐는지" 확인하고, 취소됐으면 그 동작을 막고 멈추게 합니다.
+
+`~/.claude/settings.json` 에 추가합니다. 파일이 없으면 새로 만들고, 이미 `"hooks"` 가 있으면 그 안의 `"PreToolUse"` 목록에
+항목만 더합니다. `/Users/me/devtrack` 은 2단계에서 받은 위치의 **전체 경로**로 바꿉니다.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/Users/me/devtrack/bin/devtrack-hook", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- 훅은 **그 대화가 맡은 작업만** 확인합니다 (한 번에 0.05초 정도). 다른 대화 · 다른 작업에는 영향이 없습니다.
+- `devtrack-hook` 은 `devtrack hook` 을 실행하되 문제가 생겨도 Claude 를 막지 않게 만든 실행 파일입니다.
+- 막힌 Claude 는 `devtrack inbox --task T-0003 --ack` 로 확인을 기록하고 멈춥니다. 그 뒤로는 평소처럼 동작합니다.
+- 설정은 **새로 연 Claude 대화부터** 적용됩니다. Codex 는 11단계 ⑤ 를 보세요.
 
 ## 6. 첫 작업 맡기기
 
@@ -190,7 +219,11 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
 | **삭제** | 기록, 결과물 파일, 승인 요청까지 **모두 지웁니다.** 다른 작업과의 연결도 풀립니다 | 불가능 |
 
 - 삭제 버튼을 누르면 **확인 창**이 뜨고, 작업 ID(예: `T-0003`)를 그대로 입력해야 **영구 삭제** 버튼이 눌립니다.
-- 어느 쪽이든 Claude 에게 "이 작업을 멈추라"는 알림이 갑니다 (대기 모드라면 바로 멈춥니다).
+- 어느 쪽이든 담당 AI 에게 "이 작업을 멈추라"는 알림이 갑니다. 언제 멈추는지는 AI 가 일하는 방식에 따라 다릅니다.
+  - `devtrack watch` 로 실행 중인 작업: **바로** 멈춥니다 (실행 중인 AI 를 종료).
+  - 대화 중인 Claude · Codex: 훅(5-4, 11단계 ⑤)을 설치했으면 **다음 명령 · 파일 수정 직전에** 멈춥니다.
+    훅이 없으면 지금 단계가 끝나고 inbox 를 확인할 때 멈춥니다.
+  - AI 가 명령 없이 긴 답을 쓰는 동안에는 끼어들 수 없습니다. 급하면 대화 창의 중지 버튼을 누르세요.
 - 보통은 **취소**를 쓰고, 잘못 만든 작업이나 테스트 작업만 **삭제**하세요. 지운 작업 번호는 다시 쓰이지 않습니다.
 - 정적 모드에서는 두 버튼 모두 Claude 에게 보낼 메시지를 만들어 줍니다.
 - 터미널에서는 `devtrack cancel T-0003 -m "사유"`, `devtrack delete T-0003` (작업 ID 를 다시 입력해 확인).
@@ -281,7 +314,8 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
   승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
   각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
-- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오거나 도구 실행이 `⛔ DevTrack` 메시지로 막히면 그 작업은 즉시 멈추고, 안내대로 확인만 기록한 뒤
+  (`devtrack inbox --task <TID> --ack`) 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
 ```
 
 **② Codex 설정 파일** — `~/.codex/config.toml` 맨 아래에 추가합니다. `/Users/me/devtrack/data` 는 기록 폴더
@@ -312,6 +346,28 @@ ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/
 **④ `codex` 명령** — 웹 지시를 받는 `devtrack watch` 가 Codex CLI 를 씁니다. 터미널의 `codex` 가 없으면 ChatGPT · Codex 앱,
 VS Code 확장에 들어 있는 CLI 중 **가장 새 버전**을 자동으로 찾습니다 (오래된 CLI 는 새 모델을 쓰지 못합니다).
 다른 것을 쓰려면 `export DEVTRACK_CODEX=<codex 경로>`. 어떤 CLI 를 쓰는지는 `devtrack watch` 를 켤 때 첫 줄에 표시됩니다.
+
+**⑤ 작업 취소 바로 전달 (훅, 권장)** — Claude 의 5-4 와 같습니다. Codex 앱 · VS Code 에서 대화하며 일하는 Codex 가 작업 도중에
+취소 · 삭제를 알 수 있게 합니다. `~/.codex/hooks.json` 을 만듭니다 (이미 있으면 `"PreToolUse"` 목록에 항목만 더하고,
+`/Users/me/devtrack` 은 DevTrack 의 전체 경로로 바꿉니다).
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/Users/me/devtrack/bin/devtrack-hook", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Codex 는 처음 보는 훅을 **사용자가 확인한 뒤에만** 실행합니다. Codex 앱의 **설정 → Hooks**(터미널 `codex` 에서는 `/hooks`)에서
+  이 훅을 확인하고 신뢰로 표시하세요. 훅 내용을 바꾸면 다시 확인해야 합니다.
+- `devtrack watch` 로 실행되는 Codex 는 훅 없이도 취소하면 바로 멈춥니다.
 
 > 설정은 **새로 연 Codex 대화부터** 적용됩니다.
 
@@ -344,6 +400,11 @@ Claude 는 대화에서 말을 걸어야 움직입니다. 대기 모드("웹 지
 **Claude(또는 Codex)가 웹에서 지시한 작업을 가져가지 않아요.**
 작업의 **담당 AI** 가 다른 AI 로 되어 있는지 보세요 (작업 화면 제목 아래 표시). AI 는 자기에게 배정된 작업만 가져갑니다.
 `devtrack inbox --all-agents` 로 모든 AI 의 입력을 볼 수 있고, 대신 맡기려면 `devtrack start <작업 ID> --take` 입니다.
+
+**웹에서 작업을 취소했는데 AI 가 계속 일해요.**
+대화 중인 AI 는 작업 단계가 끝날 때만 DevTrack 을 확인합니다. 훅(Claude 5-4, Codex 11단계 ⑤)을 설치하면 다음 명령 · 파일 수정
+직전에 멈춥니다. 훅을 설치했는데도 계속하면 ① 훅을 설치한 뒤 **새로 연 대화**인지, ② Codex 라면 훅을 **신뢰로 표시**했는지 확인하세요.
+AI 가 명령 없이 긴 답을 쓰는 동안에는 끼어들 수 없으니, 급하면 대화 창에서 직접 중지하세요.
 
 **버튼을 누르면 메시지 복사 창이 떠요.**
 정적 모드(오른쪽 위 "정적 · 읽기 전용")입니다. 메시지를 Claude 대화에 붙여 넣거나, 로컬에서는 `devtrack serve` 로 연 주소를 쓰세요.
@@ -390,5 +451,5 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 
 Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 일 · `issue` 문제 · `artifact` 결과물 · `review` 리뷰 리포트 ·
 `request` 승인 요청 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
-`start --take` 다른 AI 의 작업 가져오기 · `done` 완료.
+`start --take` 다른 AI 의 작업 가져오기 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
 전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/AI_Dev_Progress_Checker/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.

@@ -104,7 +104,8 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `latex` | LaTeX 컴파일 → 성공하면 PDF 를 빌드로 기록(쪽수, 정의 안 된 인용/참조, overfull 경고), 실패하면 오류 위치와 로그 기록. `--pdf` 로 다른 곳에서 만든 PDF 기록 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
 | `decide` / `comment` | 사용자 결정(`--select R1 R3`) · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
-| `inbox` | 처리할 사용자 입력 — 내게 배정된 작업만 (`--ack` 로 처리 완료 표시, `--wait` 로 새 입력이 올 때까지 대기 — 에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응, `--all-agents` 모든 AI) |
+| `inbox` | 처리할 사용자 입력 — 내게 배정된 작업만 (`--ack` 로 처리 완료 표시, `--wait` 로 새 입력이 올 때까지 대기 — 에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응, `--all-agents` 모든 AI, `--task` 한 작업만) |
+| `hook` | Claude Code · Codex 의 PreToolUse 훅 — 그 세션이 맡은 작업을 사용자가 취소 · 삭제했으면 다음 도구 실행을 막고 멈추게 함. 훅에는 항상 0 으로 끝나는 `bin/devtrack-hook` 을 건다 (설정: 웹의 사용 방법 5-4 · 11단계 ⑤) |
 | `watch` | AI 실행기: 웹에서 그 AI 에게 온 입력마다 AI 를 실행해 처리 (`--codex` = `codex exec`, 또는 `-- 명령`) — Codex 처럼 대기 모드가 없는 AI 용 |
 | `show` / `list` | 작업 상세 / 목록 |
 | `serve` / `publish` / `demo` | 로컬 서버 / 정적 배포 / 예시 데이터 |

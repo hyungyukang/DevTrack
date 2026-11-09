@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Claude Code · Codex 의 PreToolUse 훅으로 거는 명령 — `devtrack hook` 을 실행한다.
+
+훅이 종료 코드 2 로 끝나면 AI 의 모든 도구 실행이 막히므로 (argparse 오류도 2), 어떤 경우에도 0 으로 끝낸다.
+멈추게 할 때는 표준출력의 JSON(permissionDecision: deny)으로만 알린다. 설정 방법: 웹의 사용 방법 5-4 · 11단계 ⑤.
+"""
+import os
+import sys
+
+try:
+    if sys.version_info >= (3, 7):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+        from devtrack.cli import main  # noqa: E402
+
+        main(["hook"] + sys.argv[1:])
+except BaseException:  # noqa: BLE001 — SystemExit 포함, 훅 문제로 AI 를 막지 않는다
+    pass
+sys.exit(0)

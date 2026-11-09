@@ -194,6 +194,21 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
 - `[DevTrack 작업 삭제]` → 사용자가 웹에서 작업 ID 를 입력해 확인한 것이므로 `devtrack delete <TID> --yes` 후 그 작업 중단
 - 웹(로컬 서버)에서 취소 · 삭제하면 `devtrack inbox` 에 `[취소]` · `[삭제]` 로 표시된다 → 그 작업을 바로 멈춘다
 
+### 작업 도중에 온 취소 · 삭제 (`devtrack hook`)
+
+대화형 AI 는 단계 사이에만 inbox 를 보므로 작업 도중의 취소 · 삭제를 모른다. 이를 위해:
+
+- 작업에 기록하는 명령(`new` · `start` · `step` · `artifact` · `request` · `done` 등)은 실행한 AI 세션을 그 작업에 적어 둔다
+  (`CLAUDE_CODE_SESSION_ID` · `CODEX_THREAD_ID`, 다른 AI 는 `DEVTRACK_SESSION`).
+- PreToolUse 훅으로 `bin/devtrack-hook`(= `devtrack hook`, 항상 종료 코드 0)을 걸어 두면(웹의 사용 방법 5-4 · 11단계 ⑤), 도구를 실행하기 직전마다 그 세션이 맡은 작업 중
+  사용자가 취소 · 삭제했는데 아직 확인하지 않은 것이 있는지 본다. 있으면 그 도구 실행을 막고 `⛔ DevTrack: …` 안내를 AI 에게 준다.
+  devtrack 명령(과 `echo` · `head` · `tail` · `grep` 같은 출력 정리)만 있는 셸 명령은 통과한다.
+- 안내를 받으면: 그 작업을 하던 중이면 즉시 멈추고, 다른 명령을 붙이지 말고 `devtrack inbox --task <TID> --ack` 만 실행해
+  확인을 기록한 뒤 사용자에게 멈췄다고 알린다 (대기 모드라면 다시 `devtrack inbox --wait` 를 백그라운드로).
+  다른 작업을 하던 중이었다면 확인만 기록하고 그 작업을 계속한다.
+- 확인하기 전에는 그 작업에 기록하려 해도(`step` · `artifact` …) 같은 안내와 함께 거절된다. 완료된 작업을 지운 경우는 알리지 않는다.
+- 훅은 어떤 오류에도 도구 실행을 막지 않는다 (입력이 이상하거나 데이터 폴더가 없으면 그냥 통과).
+
 ## CLAUDE.md 에 넣을 내용
 
 ```markdown
@@ -211,7 +226,8 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
   승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
   각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
-- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오거나 도구 실행이 `⛔ DevTrack` 메시지로 막히면 그 작업은 즉시 멈추고, 안내대로 확인만 기록한 뒤
+  (`devtrack inbox --task <TID> --ack`) 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
 ```
 
 ## AGENTS.md 에 넣을 내용 (Codex)
@@ -235,5 +251,6 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
   승인을 요청하고, 승인되면 `devtrack apply <TID> <AID>` 로 반영한다. 단, 사용자가 채팅에서 직접 커밋 · 푸시를 지시하면 따른다.
 - 사용자가 `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]` 메시지를 보내면
   각각 `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack cancel` / `devtrack delete --yes` 로 먼저 기록한 뒤 진행한다.
-- inbox 에 `[취소]` · `[삭제]` 가 오면 그 작업은 즉시 멈추고 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
+- inbox 에 `[취소]` · `[삭제]` 가 오거나 도구 실행이 `⛔ DevTrack` 메시지로 막히면 그 작업은 즉시 멈추고, 안내대로 확인만 기록한 뒤
+  (`devtrack inbox --task <TID> --ack`) 더 기록하지 않는다. 작업 삭제는 사용자가 요청하고 확인했을 때만 한다.
 ```
