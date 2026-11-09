@@ -333,9 +333,18 @@ def _format_inbox(items):
     return out
 
 
-def _print_inbox(items):
+def _print_inbox(items, hint=True):
     for line in _format_inbox(items):
         print(line)
+    # 웹에서 온 새 작업 · 메시지는 그 자체가 사용자의 지시 — 다른 일을 하던 AI 가 다시 묻지 않고 진행하도록 알려 준다
+    # (--ack 로 처리 표시할 때는 이미 처리한 것이므로 생략)
+    if hint and any(it["type"] in ("new_task", "comment") for it in items):
+        tids = sorted(set(it["task_id"] for it in items if it["type"] == "comment"))
+        print("→ 새 작업 · 메시지는 사용자에게 다시 묻지 말고 진행하세요. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤, "
+              "새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로.")
+        if tids:
+            print(_indent("메시지의 답은 그 작업에 기록하고 처리 표시: " + " · ".join(
+                "devtrack inbox --task {} --ack".format(t) for t in tids)))
 
 
 def _inbox_scope(args):
@@ -405,7 +414,7 @@ def cmd_inbox(store, args):
                 print("(다른 AI 에게 배정된 입력 {}건은 그 AI 가 처리합니다 — 모두 보기: devtrack inbox --all-agents)".format(
                     others))
         return 0
-    _print_inbox(items)
+    _print_inbox(items, hint=not args.ack)
     return 0
 
 
