@@ -562,14 +562,20 @@ class Store:
         except (OSError, ValueError):
             return []
 
-    def _apply_cancel(self, t, reason, author):
-        old = t["status"]
+    @staticmethod
+    def _withdraw_pending(t, author, comment):
+        """결정을 기다리던 승인 요청을 철회한다 (작업을 취소하거나 완료로 처리할 때). 철회한 ID 목록을 돌려준다."""
         withdrawn = []
         for ap in t.get("approvals", []):
             if ap["status"] == "pending":
                 ap.update({"status": "withdrawn", "decided_at": now(), "decided_by": author,
-                           "comment": "작업 취소로 철회", "agent_ack": True})
+                           "comment": comment, "agent_ack": True})
                 withdrawn.append(ap["id"])
+        return withdrawn
+
+    def _apply_cancel(self, t, reason, author):
+        old = t["status"]
+        withdrawn = self._withdraw_pending(t, author, "작업 취소로 철회")
         t["status"] = "cancelled"
         t["cancelled"] = {"at": now(), "by": author, "reason": reason, "was": old,
                           "agent_ack": author != USER}  # 사용자가 취소하면 에이전트에게 알린다
@@ -584,6 +590,32 @@ class Store:
             if t["status"] == "cancelled":
                 raise DevTrackError("이미 취소된 작업입니다: {}".format(t["id"]))
             self._apply_cancel(t, (reason or "").strip(), author)
+            return t
+
+    def complete_task(self, tid, note="", author=None, by_user=False):
+        """끝나지 않은 작업이라도 사용자가 완료로 처리한다. 결정을 기다리던 승인 요청은 철회하고, 사용자가 웹에서
+        처리하면 담당 AI 에게 멈추라고 알린다 (받은 편지함 · 훅 · watch — 취소와 같은 방식). 아직 '대기' 였어도 알린다:
+        AI 가 막 가져가 시작하기 직전일 수 있다.
+        by_user: 사용자의 요청을 AI 가 대신 기록하는 경우 (정적 모드의 '[DevTrack 작업 완료]' 메시지) — 이미 아는 AI 가
+        기록하므로 따로 알리지 않는다."""
+        with self.edit(tid) as t:
+            old = t["status"]
+            if old == "done":
+                raise DevTrackError("이미 완료된 작업입니다: {}".format(t["id"]))
+            note = (note or "").strip()
+            withdrawn = self._withdraw_pending(t, author, "작업 완료 처리로 철회")
+            t["status"] = "done"
+            t["progress"] = 100
+            t["current_step"] = ""
+            t["completed_at"] = now()
+            user = author == USER or by_user
+            t["completed"] = {"at": t["completed_at"], "by": author, "by_user": user, "note": note, "was": old,
+                              "agent_ack": author != USER}
+            msg = ("사용자가 완료로 처리" if user else "완료 처리") + (": " + note if note else "")
+            if withdrawn:
+                msg += " (승인 요청 {} 철회)".format(", ".join(withdrawn))
+            self._log(t, msg, kind="status", author=author,
+                      meta={"from": old, "to": "done", "withdrawn": withdrawn, "by_user": user})
             return t
 
     def delete_task(self, tid, author=None):
@@ -1073,7 +1105,7 @@ class Store:
 
     # ------------------------------------------------------------------ 받은 편지함 (에이전트용)
     def inbox(self, ack=False, agent=None, task=None):
-        """에이전트가 처리해야 할 사용자 입력: 새 작업 지시, 사용자 메시지, 승인/수정 결정, 취소/삭제 알림.
+        """에이전트가 처리해야 할 사용자 입력: 새 작업 지시, 사용자 메시지, 승인/수정 결정, 취소/삭제/완료 처리 알림.
 
         agent: 이 AI 에게 배정된 작업(또는 담당이 정해지지 않은 작업)의 입력만 (None 이면 전부)
         task: 이 작업의 입력만
@@ -1087,6 +1119,9 @@ class Store:
             c = t.get("cancelled") or {}
             if t["status"] == "cancelled" and c.get("agent_ack") is False:
                 items.append(dict(base, type="cancelled", reason=c.get("reason", ""), ts=c.get("at")))
+            d = t.get("completed") or {}
+            if t["status"] == "done" and d.get("agent_ack") is False:
+                items.append(dict(base, type="completed", reason=d.get("note", ""), ts=d.get("at")))
             if t["status"] == "queued":
                 items.append(dict(base, type="new_task", instruction=t.get("instruction", ""), task_type=t["type"],
                                   repo=t.get("repo") or {}, ts=t["created_at"]))
@@ -1128,6 +1163,9 @@ class Store:
                     elif it["type"] == "cancelled":
                         if t.get("cancelled"):
                             t["cancelled"]["agent_ack"] = True
+                    elif it["type"] == "completed":
+                        if t.get("completed"):
+                            t["completed"]["agent_ack"] = True
                     elif it["type"] == "decision":
                         ap = next((x for x in t.get("approvals", []) if x.get("id") == it["id"]), None)
                         if ap is not None:
@@ -1147,7 +1185,7 @@ class Store:
             return "task:" + it["task_id"]
         if it["type"] == "comment":
             return "comment:{}:{}".format(it["task_id"], it["id"])
-        if it["type"] in ("cancelled", "deleted"):
+        if it["type"] in ("cancelled", "deleted", "completed"):
             return "{}:{}:{}".format(it["type"], it["task_id"], it.get("ts") or "")
         return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
 
@@ -1203,7 +1241,7 @@ class Store:
                 pass
 
     def stop_notice(self, tid):
-        """사용자가 취소 · 삭제했는데 AI 가 아직 확인(inbox --ack)하지 않은 작업이면 그 내용, 아니면 None.
+        """사용자가 취소 · 삭제 · 완료 처리했는데 AI 가 아직 확인(inbox --ack)하지 않은 작업이면 그 내용, 아니면 None.
         이미 끝난(완료) 작업을 지운 경우는 멈출 일이 없으므로 제외한다."""
         tid = normalize_task_id(tid)
         path = os.path.join(self.tasks_dir, tid, "task.json")
@@ -1213,6 +1251,10 @@ class Store:
             if t.get("status") == "cancelled" and c.get("agent_ack") is False and c.get("was") != "done":
                 return {"type": "cancelled", "task_id": tid, "title": t.get("title", ""),
                         "reason": c.get("reason") or "", "at": c.get("at")}
+            d = t.get("completed") or {}
+            if t.get("status") == "done" and d.get("agent_ack") is False:
+                return {"type": "completed", "task_id": tid, "title": t.get("title", ""),
+                        "reason": d.get("note") or "", "at": d.get("at")}
             return None
         for d in self.deleted_tasks():
             if d.get("id") == tid and d.get("ack") is False and d.get("status") != "done":

@@ -101,7 +101,7 @@ export const APPROVAL_STATUS = translated({
   approved: { label: '승인됨', tone: 'green', icon: 'check-circle' },
   changes_requested: { label: '수정 요청됨', tone: 'orange', icon: 'edit' },
   rejected: { label: '거절됨', tone: 'red', icon: 'x-circle' },
-  withdrawn: { label: '철회됨 (작업 취소)', tone: 'gray', icon: 'slash' },
+  withdrawn: { label: '철회됨', tone: 'gray', icon: 'slash' }, // 작업 취소 · 완료 처리로 — 이유는 comment 에
 });
 export const APPROVAL_KIND = translated({
   commit: { label: '커밋 · 푸시', icon: 'git' },

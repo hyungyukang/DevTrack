@@ -323,6 +323,10 @@ def _format_inbox(items):
                 out.append(_indent("사유: " + it["reason"]))
         elif it["type"] == "deleted":
             out.append("[삭제] {task_id} {title} — 사용자가 작업을 삭제했습니다. 이 작업은 중단하고 더 기록하지 마세요.".format(**it))
+        elif it["type"] == "completed":
+            out.append("[완료 처리] {task_id} {title} — 사용자가 작업을 완료로 처리했습니다. 이 작업은 여기서 멈추세요.".format(**it))
+            if it.get("reason"):
+                out.append(_indent("메모: " + it["reason"]))
         else:
             out.append("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
             if it.get("selected"):
@@ -502,12 +506,19 @@ def _note_session(store, tid):
         pass  # 세션 기록은 보조 기능 — 실패해도 본래 명령은 진행
 
 
+# 사용자가 작업을 멈추게 한 방식: 알림 종류 → (한 일, 사유를 부르는 말)
+STOP_WORDS = {"cancelled": ("취소", "사유"), "deleted": ("삭제", "사유"), "completed": ("완료로 처리", "메모")}
+
+
+def _stop_why(n):
+    what, label = STOP_WORDS.get(n["type"], ("멈추게", "사유"))
+    return what, " ({}: {})".format(label, n["reason"]) if n.get("reason") else ""
+
+
 def _stop_text(n):
-    what = "취소" if n["type"] == "cancelled" else "삭제"
+    what, why = _stop_why(n)
     return "{} ({}) 은(는) 사용자가 {}한 작업입니다{} — 이 작업은 지금 멈추고 더 진행하지 마세요. " \
-           "확인 기록: devtrack inbox --task {} --ack".format(
-               n["task_id"], n["title"], what, " (사유: {})".format(n["reason"]) if n.get("reason") else "",
-               n["task_id"])
+           "확인 기록: devtrack inbox --task {} --ack".format(n["task_id"], n["title"], what, why, n["task_id"])
 
 
 def _guard_task(store, args):
@@ -560,9 +571,8 @@ def _devtrack_only(command):
 def _hook_reason(notices):
     lines = ["⛔ DevTrack: 사용자가 이 세션이 맡은 작업을 멈추게 했습니다."]
     for n in notices:
-        lines.append("- {} 「{}」 — 사용자가 {}했습니다{}".format(
-            n["task_id"], n["title"], "취소" if n["type"] == "cancelled" else "삭제",
-            " (사유: {})".format(n["reason"]) if n.get("reason") else ""))
+        what, why = _stop_why(n)
+        lines.append("- {} 「{}」 — 사용자가 {}했습니다{}".format(n["task_id"], n["title"], what, why))
     acks = " ; ".join("devtrack inbox --task {} --ack".format(n["task_id"]) for n in notices)
     lines += [
         "이 작업을 하던 중이면 지금 바로 멈추세요. 파일을 고치거나 다른 명령을 더 실행하지 마세요.",
@@ -605,7 +615,7 @@ CODEX_BUNDLED = (
     "~/Applications/Codex.app/Contents/Resources/codex",
     "~/.vscode/extensions/openai.chatgpt-*/bin/*/codex",
 )
-NOTICE_TYPES = ("cancelled", "deleted")
+NOTICE_TYPES = ("cancelled", "deleted", "completed")
 
 
 def _codex_version(path):
@@ -663,7 +673,11 @@ def _stop_reason(store, tid):
         return "deleted"
     except (OSError, ValueError):
         return None
-    return "cancelled" if t.get("status") == "cancelled" else None
+    if t.get("status") == "cancelled":
+        return "cancelled"
+    if t.get("status") == "done" and (t.get("completed") or {}).get("agent_ack") is False:
+        return "completed"
+    return None
 
 
 def _terminate(proc):
@@ -758,10 +772,11 @@ def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd, tick=N
     if stopped:
         # 취소 · 삭제 알림은 실행을 멈춘 것으로 처리됨
         store.ack_inbox([it for it in store.inbox(agent=agent, task=tid) if it["type"] in NOTICE_TYPES])
-        if stopped == "cancelled":
-            _watch_log(store, tid, "작업이 취소되어 {} 실행을 중단했습니다".format(agent), kind="warning", author=agent)
+        if stopped in ("cancelled", "completed"):
+            _watch_log(store, tid, "작업이 {} {} 실행을 중단했습니다".format(
+                "취소되어" if stopped == "cancelled" else "완료로 처리되어", agent), kind="warning", author=agent)
         _stamp("{} — 사용자가 작업을 {} {} 실행을 중단했습니다".format(
-            tid, "취소해" if stopped == "cancelled" else "삭제해", agent))
+            tid, {"cancelled": "취소해", "completed": "완료로 처리해"}.get(stopped, "삭제해"), agent))
         return None
     if rc != 0:
         _watch_log(store, tid, "{} 실행이 실패했습니다 (종료 코드 {}) — 이번 입력은 처리되지 않은 채 남아 있습니다".format(agent, rc),
@@ -898,6 +913,11 @@ def cmd_delete(store, args):
 
 
 def cmd_done(store, args):
+    if args.by_user:
+        t = store.complete_task(args.task, note=args.message or "", author=args.author, by_user=True)
+        n = len((t["log"][-1].get("meta") or {}).get("withdrawn") or [])
+        _out(args, t, "{} 완료 (사용자 요청){}".format(t["id"], " — 승인 요청 {}건 철회".format(n) if n else ""))
+        return
     t = store.update_task(args.task, status="done", message=args.message, author=args.author)
     _out(args, t, "{} 완료".format(t["id"]))
 
@@ -1199,7 +1219,10 @@ def build_parser():
 
     sp = add("done", cmd_done, "작업 완료")
     sp.add_argument("task")
-    sp.add_argument("-m", "--message", help="완료 요약")
+    sp.add_argument("-m", "--message", help="완료 요약 (--by-user 이면 사용자의 메모)")
+    sp.add_argument("--by-user", action="store_true",
+                    help="사용자가 끝나지 않은 작업을 완료로 처리한 것을 기록 ('[DevTrack 작업 완료]' 메시지) — "
+                         "결정을 기다리던 승인 요청은 철회")
 
     sp = add("show", cmd_show, "작업 상세 보기")
     sp.add_argument("task")

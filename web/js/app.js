@@ -1129,9 +1129,11 @@ async function viewTask({ rest }) {
       ${links.length ? html`<div class="th-links">${icon('link')} ${L('관련 작업')} ${links.map((l) => html`<a class="link-chip" href="#/task/${l.id}"><span class="sdot tone-${pick(STATUS, l.status, 'queued').tone}"></span>${l.id} · ${pick(TYPES, l.type).label} · ${l.title}</a>`)}</div>` : ''}
     </div>
     <div class="th-actions">
-      ${ACTIVE.includes(t.status) ? html`<button class="btn btn-sm" data-action="task-cancel" data-task="${t.id}">${icon('x-circle')} ${L('작업 취소')}</button>` : ''}
+      ${ACTIVE.includes(t.status) ? html`<button class="btn btn-sm" data-action="task-complete" data-task="${t.id}" title="${L('끝나지 않았어도 이 작업을 완료로 넘깁니다')}">${icon('check-circle')} ${L('완료로 처리')}</button>
+        <button class="btn btn-sm" data-action="task-cancel" data-task="${t.id}">${icon('x-circle')} ${L('작업 취소')}</button>` : ''}
       <button class="btn btn-sm btn-ghost btn-danger-ghost" data-action="task-delete" data-task="${t.id}">${icon('trash')} ${L('삭제')}</button>
     </div></div>
+    ${t.status === 'done' && t.completed?.by_user ? html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body"><b>${L('사용자가 완료로 처리한 작업입니다')}</b> · ${authorName(t.completed.by)} · ${ago(t.completed.at)}${t.completed.was && STATUS[t.completed.was] ? ` · ${L('처리 전 상태')}: ${STATUS[t.completed.was].label}` : ''}${t.completed.note ? html`<p>${L('메모')}: ${t.completed.note}</p>` : ''}</div></div>` : ''}
     ${t.status === 'cancelled' && t.cancelled ? html`<div class="alert alert-gray">${icon('slash')}<div class="alert-body"><b>${L('취소된 작업입니다')}</b> · ${authorName(t.cancelled.by)} · ${ago(t.cancelled.at)}${t.cancelled.reason ? html`<p>${L('사유')}: ${t.cancelled.reason}</p>` : ''}</div></div>` : ''}
     ${pend.length && tab !== 'approvals' ? html`<div class="alert alert-amber">${icon('bell')}<div class="alert-body"><b>${L('승인이 필요한 항목 {n}건', { n: pend.length })}</b><p>${pend.map((a) => a.title).join(' · ')}</p></div><a class="btn btn-sm" href="#/task/${t.id}/approvals">${L('확인하기')}</a></div>` : ''}
     ${t.status === 'queued' ? waitingBox(t) : ''}
@@ -1839,6 +1841,50 @@ async function actCancelTask(btn) {
   }
 }
 
+function openCompleteTask(id) {
+  const t = state.tasks.get(id);
+  if (!t) return;
+  const pend = t.approvals.filter((a) => a.status === 'pending').length;
+  openModal({
+    title: `${L('완료로 처리')} — ${t.id}`,
+    body: html`<p>${LH('<b>{task}</b> 을(를) 지금 완료로 처리할까요?', { task: `${t.id} · ${t.title}` })}</p>
+      <ul class="m-list">
+        <li>${LH('끝나지 않았더라도 상태가 <b>완료</b>(진행률 100%)로 바뀌고, 진행 중 목록에서 빠집니다. 기록과 결과물은 그대로 남습니다.')}</li>
+        ${pend ? html`<li>${LH('결정을 기다리던 승인 요청 <b>{n}건</b>은 철회되어 알림에서 사라집니다. 커밋 요청이었다면 커밋되지 않습니다.', { n: pend })}</li>` : ''}
+        <li>${LH('{ai}에게 이 작업을 멈추라는 알림이 갑니다. <code>devtrack watch</code> 로 실행 중이면 바로, 대화 중인 AI 는 다음 명령을 실행하기 전에 멈춥니다 (훅 설치 시 — <a href="#/guide/s8">사용 방법 8단계</a>).', { ai: aiName(t) })}</li>
+      </ul>
+      <label class="field"><span>${L('메모 (선택)')}</span><textarea id="complete-note" placeholder="${L('예: 남은 부분은 직접 마무리함')}"></textarea></label>
+      <div class="m-actions"><button class="btn btn-approve" data-action="task-complete-go" data-task="${t.id}">${icon('check-circle')} ${L('완료로 처리하기')}</button>
+        <span class="hint">${state.mode === 'live' ? '' : L('정적 모드: {ai}에게 보낼 메시지가 만들어집니다', { ai: aiName(t) })}</span></div>`,
+  });
+  setTimeout(() => $('#complete-note')?.focus(), 0);
+}
+
+async function actCompleteTask(btn) {
+  const id = btn.dataset.task;
+  const t = state.tasks.get(id);
+  const note = $('#complete-note')?.value.trim() || '';
+  if (state.mode !== 'live') {
+    // AI 에게 보내는 메시지는 한국어로 (AI 규칙의 '[DevTrack 작업 완료]')
+    const cmd = `devtrack done ${id} --by-user${note ? ' -m ' + shellQuote(note) : ''}`;
+    const msg = `[DevTrack 작업 완료] ${id} "${t?.title || ''}"${note ? `\n메모: ${note}` : ''}\n\n사용자가 이 작업을 완료로 처리했습니다. 완료로 기록하고(${cmd}) 진행 중이었다면 멈춰 주세요.`;
+    const ai = aiName(t);
+    openModal({ title: `${L('완료로 처리')} — ${L('{ai}에게 전달', { ai })}`, body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 메시지를 {ai} 세션에 붙여넣으세요.', { ai })}</p>${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 기록'), cmd)}` });
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`api/tasks/${id}/complete`, { note });
+    closeModal();
+    state.tasks.delete(id);
+    toast({ title: L('{id} 작업을 완료로 처리했습니다', { id }), meta: L('{ai}에게 멈추라는 알림이 전달됩니다', { ai: aiName(t) }), tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: L('완료로 처리하지 못했습니다'), meta: e.message, tone: 'red' });
+    btn.disabled = false;
+  }
+}
+
 function openDeleteTask(id) {
   const t = state.tasks.get(id);
   if (!t) return;
@@ -1937,6 +1983,8 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'task-complete': return openCompleteTask(el.dataset.task);
+    case 'task-complete-go': return actCompleteTask(el);
     case 'task-cancel': return openCancelTask(el.dataset.task);
     case 'task-cancel-go': return actCancelTask(el);
     case 'task-delete': return openDeleteTask(el.dataset.task);

@@ -9,6 +9,7 @@ API
   POST /api/tasks/<T>/comments                  {message}
   POST /api/tasks/<T>/approvals/<A>/decision    {decision: approve|changes|reject, comment, selected?: [ID]}
   POST /api/tasks/<T>/cancel                     {reason}
+  POST /api/tasks/<T>/complete                   {note}   끝나지 않은 작업을 사용자가 완료로 처리
   POST /api/tasks/<T>/delete                     {confirm: "<작업 ID>"}  (ID 가 일치해야 삭제)
 """
 
@@ -128,6 +129,10 @@ def make_handler(store, web_root, verbose=False):
                     m = re.match(r"^/api/tasks/(T-\d+)/cancel$", path)
                     if m:
                         t = store.cancel_task(m.group(1), reason=body.get("reason") or "", author=USER)
+                        return self._json({"ok": True, "task": {"id": t["id"], "status": t["status"]}})
+                    m = re.match(r"^/api/tasks/(T-\d+)/complete$", path)
+                    if m:
+                        t = store.complete_task(m.group(1), note=body.get("note") or "", author=USER)
                         return self._json({"ok": True, "task": {"id": t["id"], "status": t["status"]}})
                     m = re.match(r"^/api/tasks/(T-\d+)/delete$", path)
                     if m:
