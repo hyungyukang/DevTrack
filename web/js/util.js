@@ -1,4 +1,5 @@
 // 공통 유틸리티: 안전한 HTML 템플릿, 아이콘, 라벨, 시간 형식
+import { L, translated, translatedStrings, locale } from './i18n.js';
 
 class Raw {
   constructor(s) { this.s = s; }
@@ -77,16 +78,16 @@ export const icon = (name, cls = '') =>
   raw(`<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.circle}</svg>`);
 
 // ------------------------------------------------------------------ 라벨
-export const STATUS = {
+export const STATUS = translated({
   queued: { label: '대기', tone: 'gray', icon: 'clock' },
   in_progress: { label: '진행 중', tone: 'blue', icon: 'play' },
   awaiting_approval: { label: '승인 대기', tone: 'amber', icon: 'bell' },
-  changes_requested: { label: '수정 요청', tone: 'orange', icon: 'edit' },
+  changes_requested: { label: '수정 요청§상태', tone: 'orange', icon: 'edit' },
   blocked: { label: '막힘', tone: 'red', icon: 'slash' },
   done: { label: '완료', tone: 'green', icon: 'check-circle' },
-  cancelled: { label: '취소', tone: 'gray', icon: 'x-circle' },
-};
-export const TYPES = {
+  cancelled: { label: '취소§상태', tone: 'gray', icon: 'x-circle' },
+});
+export const TYPES = translated({
   code: { label: '코드 개발', icon: 'code', tone: 'blue' },
   review: { label: '코드 리뷰', icon: 'eye', tone: 'violet' },
   paper: { label: '논문 작성', icon: 'book', tone: 'teal' },
@@ -94,23 +95,23 @@ export const TYPES = {
   visualization: { label: '시각화', icon: 'image', tone: 'pink' },
   model: { label: 'AI 모델', icon: 'cpu', tone: 'accent' },
   other: { label: '기타', icon: 'file', tone: 'gray' },
-};
-export const APPROVAL_STATUS = {
+});
+export const APPROVAL_STATUS = translated({
   pending: { label: '결정 대기', tone: 'amber', icon: 'clock' },
   approved: { label: '승인됨', tone: 'green', icon: 'check-circle' },
   changes_requested: { label: '수정 요청됨', tone: 'orange', icon: 'edit' },
   rejected: { label: '거절됨', tone: 'red', icon: 'x-circle' },
   withdrawn: { label: '철회됨 (작업 취소)', tone: 'gray', icon: 'slash' },
-};
-export const APPROVAL_KIND = {
+});
+export const APPROVAL_KIND = translated({
   commit: { label: '커밋 · 푸시', icon: 'git' },
   plan: { label: '작업 계획', icon: 'list' },
   review: { label: '리뷰 확인', icon: 'eye' },
   result: { label: '결과물 확인', icon: 'package' },
   merge: { label: '병합', icon: 'branch' },
   general: { label: '일반', icon: 'check-circle' },
-};
-export const LOG_KIND = {
+});
+export const LOG_KIND = translated({
   info: { label: '정보', icon: 'info', tone: 'gray' },
   step: { label: '진행', icon: 'arrow', tone: 'blue' },
   success: { label: '완료', icon: 'check', tone: 'green' },
@@ -118,44 +119,44 @@ export const LOG_KIND = {
   error: { label: '오류', icon: 'x-circle', tone: 'red' },
   issue: { label: '문제', icon: 'alert', tone: 'orange' },
   user: { label: '사용자', icon: 'message', tone: 'accent' },
-  approval: { label: '승인 요청', icon: 'bell', tone: 'amber' },
+  approval: { label: '승인 요청§하나', icon: 'bell', tone: 'amber' },
   decision: { label: '결정', icon: 'check-circle', tone: 'green' },
   commit: { label: '커밋', icon: 'git', tone: 'violet' },
   artifact: { label: '결과물', icon: 'package', tone: 'teal' },
   status: { label: '상태', icon: 'circle', tone: 'gray' },
-};
-export const SEVERITY = {
+});
+export const SEVERITY = translated({
   low: { label: '낮음', tone: 'gray' },
-  medium: { label: '보통', tone: 'amber' },
+  medium: { label: '보통§심각도', tone: 'amber' },
   high: { label: '높음', tone: 'orange' },
   critical: { label: '심각', tone: 'red' },
-};
+});
 // 코드 리뷰 검토 항목 (review-pr 스킬의 Blocker / Major / Minor / Nit / Question)
-export const FINDING_SEV = {
+export const FINDING_SEV = translated({
   blocker: { label: '반드시 수정', en: 'Blocker', tone: 'red', hint: '병합 전에 꼭 고쳐야 하는 문제' },
   major: { label: '수정 권장', en: 'Major', tone: 'orange', hint: '결과나 동작에 영향을 줄 수 있는 문제' },
   minor: { label: '개선 제안', en: 'Minor', tone: 'amber', hint: '고치면 더 좋아지는 부분' },
   nit: { label: '사소함', en: 'Nit', tone: 'gray', hint: '표기 · 스타일 수준' },
   question: { label: '질문', en: 'Question', tone: 'blue', hint: '작성자에게 확인이 필요한 부분' },
-};
-export const FINDING_STATUS = {
+});
+export const FINDING_STATUS = translated({
   open: { label: '수정 필요', tone: 'orange' },
   fixed: { label: '해결됨', tone: 'green' },
   commented: { label: 'PR에 게시', tone: 'violet' },
   dismissed: { label: '제외', tone: 'gray' },
   na: { label: '해당 없음', tone: 'gray' },
-};
-export const VERDICT = {
+});
+export const VERDICT = translated({
   approve: { label: '승인해도 됨', tone: 'green', icon: 'check-circle' },
   comment: { label: '의견만 전달', tone: 'blue', icon: 'message' },
   request_changes: { label: '수정 후 다시 확인', tone: 'orange', icon: 'edit' },
-};
-export const CONFIDENCE = { high: '높음', medium: '중간', low: '낮음' };
+});
+export const CONFIDENCE = translatedStrings({ high: '높음', medium: '중간', low: '낮음' });
 
-export const ART_KIND = {
-  markdown: { label: '문서', icon: 'file-text' },
+export const ART_KIND = translated({
+  markdown: { label: '문서§종류', icon: 'file-text' },
   pdf: { label: 'PDF', icon: 'file-text' },
-  image: { label: '그림', icon: 'image' },
+  image: { label: '그림§종류', icon: 'image' },
   diff: { label: '변경사항', icon: 'git' },
   code: { label: '코드', icon: 'code' },
   latex: { label: 'LaTeX', icon: 'book' },
@@ -165,7 +166,7 @@ export const ART_KIND = {
   text: { label: '텍스트', icon: 'file' },
   link: { label: '링크', icon: 'link' },
   file: { label: '파일', icon: 'file' },
-};
+});
 
 export const pick = (map, key, fallback = 'other') => map[key] || map[fallback] || { label: key, tone: 'gray', icon: 'circle' };
 
@@ -175,14 +176,25 @@ export function badge(map, key, { withIcon = false, dot = false } = {}) {
 }
 
 // ------------------------------------------------------------------ 시간 / 크기
-const rtf = typeof Intl !== 'undefined' && Intl.RelativeTimeFormat ? new Intl.RelativeTimeFormat('ko', { numeric: 'auto' }) : null;
-const dtf = new Intl.DateTimeFormat('ko', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-const df = new Intl.DateTimeFormat('ko', { month: 'short', day: 'numeric' });
+// 화면 언어(i18n.js)에 맞춘 날짜 · 시간 형식 — 언어마다 한 번만 만든다
+const FORMATS = {};
+function fmt(kind) {
+  const loc = locale();
+  const key = `${loc}:${kind}`;
+  if (!(key in FORMATS)) {
+    FORMATS[key] = kind === 'rel'
+      ? (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat ? new Intl.RelativeTimeFormat(loc, { numeric: 'auto' }) : null)
+      : kind === 'abs'
+        ? new Intl.DateTimeFormat(loc, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+        : new Intl.DateTimeFormat(loc, { month: 'short', day: 'numeric' });
+  }
+  return FORMATS[key];
+}
 
 export function fmtAbs(iso) {
   if (!iso) return '';
   const d = new Date(iso);
-  return isNaN(d) ? String(iso) : dtf.format(d);
+  return isNaN(d) ? String(iso) : fmt('abs').format(d);
 }
 export function fmtRel(iso) {
   if (!iso) return '';
@@ -190,12 +202,13 @@ export function fmtRel(iso) {
   if (isNaN(d)) return String(iso);
   const s = (d.getTime() - Date.now()) / 1000;
   const a = Math.abs(s);
+  const rtf = fmt('rel');
   if (!rtf) return fmtAbs(iso);
-  if (a < 45) return '방금 전';
+  if (a < 45) return L('방금 전');
   if (a < 3600) return rtf.format(Math.round(s / 60), 'minute');
   if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour');
   if (a < 86400 * 7) return rtf.format(Math.round(s / 86400), 'day');
-  return df.format(d);
+  return fmt('day').format(d);
 }
 /** 상대 시간 <time> (주기적으로 갱신됨) */
 export const ago = (iso) => html`<time data-ts="${iso || ''}" title="${fmtAbs(iso)}">${fmtRel(iso)}</time>`;
@@ -208,7 +221,7 @@ export function fmtBytes(n) {
   return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
 }
 
-export const authorName = (a) => (a === 'user' ? '사용자' : a || '에이전트');
+export const authorName = (a) => (a === 'user' ? L('사용자') : a || L('에이전트'));
 
 // 담당 AI — '누구나'(정해지지 않음)면 먼저 시작한 AI 가 맡는다 (devtrack/store.py 의 UNASSIGNED_AGENTS 와 같게)
 const UNASSIGNED_AGENTS = ['', '누구나', '기타', 'any', '*'];
@@ -216,7 +229,7 @@ export const isUnassigned = (a) => UNASSIGNED_AGENTS.includes(String(a ?? '').tr
 /** 문장에 넣을 담당 AI 이름: 'Codex에게 보낼 메시지' / 정해지지 않았으면 'AI' */
 export const aiName = (t) => (isUnassigned(t?.agent) ? 'AI' : t.agent);
 /** 목록 · 머리글에 보여 줄 담당 AI */
-export const agentLabel = (t) => (isUnassigned(t?.agent) ? '담당 미정' : t.agent);
+export const agentLabel = (t) => (isUnassigned(t?.agent) ? L('담당 미정') : t.agent);
 
 export function shellQuote(s) {
   s = String(s ?? '');

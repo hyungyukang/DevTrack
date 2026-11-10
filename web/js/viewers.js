@@ -1,6 +1,7 @@
 // 결과물 뷰어: markdown, pdf, 이미지, diff, 코드/LaTeX, CSV, Jupyter 노트북, HTML, 링크
 import { esc, html, raw, icon, fmtBytes, LS } from './util.js';
 import { latexToHtml } from './latex.js';
+import { L } from './i18n.js';
 
 const MAX_TEXT = 2 * 1024 * 1024;     // 2MB 이상 텍스트는 잘라서 표시
 const MAX_HL_LINES = 6000;            // 이보다 긴 diff 는 하이라이트 생략
@@ -57,7 +58,7 @@ async function fetchText(url) {
   return { text, truncated };
 }
 
-const truncNote = (t) => (t ? `<div class="av-note">파일이 커서 앞부분 ${fmtBytes(MAX_TEXT)}만 표시합니다. 전체는 다운로드해서 확인하세요.</div>` : '');
+const truncNote = (t) => (t ? `<div class="av-note">${L('파일이 커서 앞부분 {size}만 표시합니다. 전체는 다운로드해서 확인하세요.', { size: fmtBytes(MAX_TEXT) })}</div>` : '');
 
 /**
  * LaTeX 원고: '문서 보기'(HTML 미리보기)와 '원본 코드' 전환.
@@ -75,24 +76,24 @@ function renderTexView(el, text, truncated, opts) {
   if (!doc) mode = 'src';
   const st = doc?.stats || {};
   const facts = [
-    st.figures ? `그림 ${st.figures}` : '', st.tables ? `표 ${st.tables}` : '', st.equations ? `수식 ${st.equations}` : '',
-    st.citations ? `인용 ${st.citations}` : '',
+    st.figures ? `${L('그림')} ${st.figures}` : '', st.tables ? `${L('표')} ${st.tables}` : '', st.equations ? `${L('수식')} ${st.equations}` : '',
+    st.citations ? `${L('인용')} ${st.citations}` : '',
   ].filter(Boolean).join(' · ');
   const warns = [
-    st.missingRefs ? `해결 안 된 참조 ${st.missingRefs}` : '', st.missingFigs ? `찾지 못한 그림 ${st.missingFigs}` : '',
+    st.missingRefs ? `${L('해결 안 된 참조')} ${st.missingRefs}` : '', st.missingFigs ? `${L('찾지 못한 그림')} ${st.missingFigs}` : '',
   ].filter(Boolean).join(' · ');
   el.innerHTML = `${truncNote(truncated)}
     <div class="tex-bar">
       <div class="seg" role="tablist">
-        <button type="button" data-tex="doc" class="${mode === 'doc' ? 'on' : ''}" ${doc ? '' : 'disabled'}>${icon('book')} 문서 보기</button>
-        <button type="button" data-tex="src" class="${mode === 'src' ? 'on' : ''}">${icon('code')} 원본 코드</button>
+        <button type="button" data-tex="doc" class="${mode === 'doc' ? 'on' : ''}" ${doc ? '' : 'disabled'}>${icon('book')} ${L('문서 보기')}</button>
+        <button type="button" data-tex="src" class="${mode === 'src' ? 'on' : ''}">${icon('code')} ${L('원본 코드')}</button>
       </div>
       <span class="tex-facts">${esc(facts)}${warns ? ` <span class="tex-warn">${esc(warns)}</span>` : ''}</span>
-      ${opts.pdfHref ? `<a class="btn btn-sm" href="${esc(opts.pdfHref)}">${icon('file-text')} 컴파일된 PDF</a>` : ''}
+      ${opts.pdfHref ? `<a class="btn btn-sm" href="${esc(opts.pdfHref)}">${icon('file-text')} ${L('컴파일된 PDF')}</a>` : ''}
     </div>
     <div class="tex-pane" data-pane="doc" ${mode === 'doc' ? '' : 'hidden'}>
       ${doc ? `<div class="tex-paper"><article class="tex-doc">${doc.html}</article></div>
-      <div class="tex-note">LaTeX 미리보기입니다 — 그림·표·수식 번호와 레이아웃은 컴파일된 PDF 와 다를 수 있습니다.</div>` : ''}
+      <div class="tex-note">${L('LaTeX 미리보기입니다 — 그림·표·수식 번호와 레이아웃은 컴파일된 PDF 와 다를 수 있습니다.')}</div>` : ''}
     </div>
     <div class="tex-pane" data-pane="src" ${mode === 'src' ? '' : 'hidden'}>${renderCode(text, 'latex')}</div>`;
   el.addEventListener('click', (ev) => {
@@ -122,10 +123,10 @@ export async function renderArtifactInto(el, taskId, art, opts = {}) {
   const url = artifactUrl(taskId, art);
   el.classList.add('av', `av-${art.kind}`);
   if (!url) {
-    el.innerHTML = html`<div class="av-external">${icon('folder')} 웹으로 복사되지 않은 외부 파일입니다: <code>${art.external_path || '-'}</code></div>`.s;
+    el.innerHTML = html`<div class="av-external">${icon('folder')} ${L('웹으로 복사되지 않은 외부 파일입니다')}: <code>${art.external_path || '-'}</code></div>`.s;
     return;
   }
-  el.innerHTML = '<div class="av-loading">불러오는 중…</div>';
+  el.innerHTML = `<div class="av-loading">${L('불러오는 중…')}</div>`;
   try {
     switch (art.kind) {
       case 'image':
@@ -179,10 +180,10 @@ export async function renderArtifactInto(el, taskId, art, opts = {}) {
         break;
       }
       default:
-        el.innerHTML = html`<div class="link-card">${icon('file')}<div>미리보기를 지원하지 않는 형식입니다. <a href="${url}" download>다운로드</a>${art.size ? ` (${fmtBytes(art.size)})` : ''}</div></div>`.s;
+        el.innerHTML = html`<div class="link-card">${icon('file')}<div>${L('미리보기를 지원하지 않는 형식입니다.')} <a href="${url}" download>${L('다운로드')}</a>${art.size ? ` (${fmtBytes(art.size)})` : ''}</div></div>`.s;
     }
   } catch (e) {
-    el.innerHTML = html`<div class="av-error">${icon('alert')} 결과물을 불러오지 못했습니다: ${e.message}</div>`.s;
+    el.innerHTML = html`<div class="av-error">${icon('alert')} ${L('결과물을 불러오지 못했습니다')}: ${e.message}</div>`.s;
   }
 }
 
@@ -265,13 +266,13 @@ export function renderDiff(text) {
   const del = files.reduce((s, f) => s + f.del, 0);
   const totalLines = files.reduce((s, f) => s + f.hunks.reduce((a, h) => a + h.lines.length, 0), 0);
   const doHL = totalLines <= MAX_HL_LINES;
-  let out = `<div class="diff-summary"><b>${files.length}개 파일</b> 변경 <span class="add">+${add}</span> <span class="del">−${del}</span></div>`;
+  let out = `<div class="diff-summary"><b>${L('{n}개 파일', { n: files.length })}</b> ${L('변경')} <span class="add">+${add}</span> <span class="del">−${del}</span></div>`;
   for (const f of files) {
     const lang = doHL ? langOf(f.name) : null;
-    const tag = f.isNew ? '<span class="badge tone-green">새 파일</span>' : f.isDeleted ? '<span class="badge tone-red">삭제</span>' : f.binary ? '<span class="badge">바이너리</span>' : '';
-    out += `<details class="diff-file" open data-key="diff:${esc(f.name)}"><summary><svg class="icon chev" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg><span class="name">${esc(f.name || '(이름 없음)')}</span>${tag}<span class="stat"><span class="add">+${f.add}</span> <span class="del">−${f.del}</span></span></summary>`;
+    const tag = f.isNew ? `<span class="badge tone-green">${L('새 파일')}</span>` : f.isDeleted ? `<span class="badge tone-red">${L('삭제')}</span>` : f.binary ? `<span class="badge">${L('바이너리')}</span>` : '';
+    out += `<details class="diff-file" open data-key="diff:${esc(f.name)}"><summary><svg class="icon chev" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg><span class="name">${esc(f.name || L('(이름 없음)'))}</span>${tag}<span class="stat"><span class="add">+${f.add}</span> <span class="del">−${f.del}</span></span></summary>`;
     if (!f.hunks.length) {
-      out += `<div class="diff-meta">${esc(f.meta.join('\n') || '내용 변경 없음')}</div></details>`;
+      out += `<div class="diff-meta">${esc(f.meta.join('\n') || L('내용 변경 없음'))}</div></details>`;
       continue;
     }
     out += '<div class="diff-table-wrap"><table class="diff"><tbody>';
@@ -308,11 +309,11 @@ function parseCSV(text, delim) {
 
 export function renderCSV(text, delim = ',') {
   const rows = parseCSV(text, delim);
-  if (!rows.length) return '<div class="empty">빈 파일</div>';
+  if (!rows.length) return `<div class="empty">${L('빈 파일')}</div>`;
   const [head, ...body] = rows;
   const shown = body.slice(0, 2000);
   const isNum = (v) => v !== '' && !isNaN(Number(v));
-  let out = `<div class="diff-summary"><b>${body.length >= 2000 ? '2000+' : body.length}행</b> × ${head.length}열</div><div class="csv-wrap"><table class="csv"><thead><tr><th class="rn">#</th>`;
+  let out = `<div class="diff-summary"><b>${L('{n}행', { n: body.length >= 2000 ? '2000+' : body.length })}</b> × ${L('{n}열', { n: head.length })}</div><div class="csv-wrap"><table class="csv"><thead><tr><th class="rn">#</th>`;
   out += head.map((h) => `<th>${esc(h)}</th>`).join('') + '</tr></thead><tbody>';
   shown.forEach((r, i) => {
     out += `<tr><td class="rn">${i + 1}</td>` + head.map((_, j) => `<td class="${isNum(r[j] ?? '') ? 'num' : ''}">${esc(r[j] ?? '')}</td>`).join('') + '</tr>';
@@ -340,7 +341,7 @@ function renderOutput(o) {
 export function renderNotebook(nb) {
   const lang = nb?.metadata?.kernelspec?.language || nb?.metadata?.language_info?.name || 'python';
   const cells = nb?.cells || [];
-  if (!cells.length) return '<div class="empty">빈 노트북</div>';
+  if (!cells.length) return `<div class="empty">${L('빈 노트북')}</div>`;
   return '<div class="nb">' + cells.map((c) => {
     const src = joinSrc(c.source);
     if (c.cell_type === 'markdown') return `<div class="nb-cell"><div class="markdown-body">${renderMarkdown(src, { breaks: false })}</div></div>`;
