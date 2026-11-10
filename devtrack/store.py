@@ -44,6 +44,7 @@ TASK_TYPES = {
     "analysis": "데이터 분석",
     "visualization": "시각화",
     "model": "AI 모델 개발",
+    "brainstorm": "브레인스토밍",
     "other": "기타",
 }
 
@@ -913,7 +914,8 @@ class Store:
     # ------------------------------------------------------------------ 승인
     @staticmethod
     def _build_choices(t, choices):
-        """choices: [] = 검토 항목 중 열린 것 전체, [ID 또는 {id,label}, ...] = 지정 항목."""
+        """choices: [] = 검토 항목 중 열린 것 전체, [ID · "ID=설명" · {id,label}, ...] = 지정 항목.
+        "ID=설명" 은 검토 항목이 아닌 선택지(예: 브레인스토밍 아이디어)에 이름을 붙인다."""
         findings = {f["id"]: f for f in (t.get("review") or {}).get("findings", [])}
         if not choices:
             src = [f for f in findings.values() if f.get("status") == "open"]
@@ -926,8 +928,15 @@ class Store:
                     src.append(dict(c, id=str(c.get("id") or "").strip()))
                     continue
                 cid = str(c).strip()
+                label = None
+                if "=" in cid:
+                    cid, label = (x.strip() for x in cid.split("=", 1))
                 fid = _norm_finding_id(cid, cid)
-                src.append(findings.get(fid) or findings.get(cid) or {"id": cid, "title": cid})
+                hit = findings.get(fid) or findings.get(cid)
+                if label:
+                    src.append(dict(hit or {}, id=hit["id"] if hit else cid, label=label))
+                else:
+                    src.append(hit or {"id": cid, "title": cid})
         out, seen = [], set()
         for c in src:
             if not c.get("id") or c["id"] in seen:
@@ -1133,7 +1142,7 @@ class Store:
                     items.append(dict(base, type="decision", id=ap["id"], approval_title=ap["title"],
                                       decision=ap["status"], comment=ap.get("comment", ""),
                                       has_action=bool(ap.get("action")), selected=ap.get("selected"),
-                                      ts=ap.get("decided_at")))
+                                      selected_labels=_choice_labels(ap), ts=ap.get("decided_at")))
         for d in self.deleted_tasks():
             if d.get("ack") is False and (not task or d.get("id") == task) and agent_matches(d.get("agent"), agent):
                 items.append({"type": "deleted", "task_id": d["id"], "title": d.get("title", ""),
@@ -1426,6 +1435,12 @@ class Store:
         mirror_tree(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
         return dest
+
+
+def _choice_labels(ap):
+    """고른 항목의 이름 (ID 와 다른 것만) — inbox 에 'I1 — 격자 민감도 실험' 처럼 보여 준다."""
+    names = {c["id"]: c.get("label") for c in ap.get("choices") or []}
+    return [[i, names[i]] for i in ap.get("selected") or [] if names.get(i) and names[i] != i]
 
 
 def _review_summary(rv):

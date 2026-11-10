@@ -20,7 +20,7 @@ from . import DevTrackError, __version__, gitops
 from .store import (
     APPROVAL_KINDS, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     Store, is_unassigned, normalize_item_id, normalize_task_id, pid_alive,
-    now as now_iso,
+    now as now_iso, _choice_labels,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -278,6 +278,7 @@ def cmd_wait(store, args):
             lines = [ap["status"]]
             if ap.get("selected") is not None:
                 lines.append("선택: " + (", ".join(ap["selected"]) or "(없음)"))
+                lines.extend(_choice_label_lines(_choice_labels(ap)))
             if ap.get("comment"):
                 lines.append("코멘트: " + ap["comment"])
             _out(args, ap, "\n".join(lines))
@@ -331,6 +332,7 @@ def _format_inbox(items):
             out.append("[결정] {task_id} {id} '{approval_title}' → {decision}".format(**it))
             if it.get("selected"):
                 out.append(_indent("선택: " + ", ".join(it["selected"])))
+                out.extend(_indent(x) for x in _choice_label_lines(it.get("selected_labels")))
             if it.get("comment"):
                 out.append(_indent("코멘트: " + it["comment"]))
             if it["decision"] == "approved" and it.get("has_action"):
@@ -1009,6 +1011,11 @@ def cmd_demo(store, args):
     _out(args, {"data": store.root}, "데모 데이터 생성 완료: {}\n  devtrack --data {} serve".format(store.root, store.root))
 
 
+def _choice_label_lines(labels):
+    """고른 항목의 이름: ['  I1 — 격자 민감도 실험', ...]"""
+    return ["  {} — {}".format(i, name) for i, name in labels or []]
+
+
 def _indent(text, n=4):
     pad = " " * n
     return "\n".join(pad + line for line in str(text).splitlines())
@@ -1150,7 +1157,8 @@ def build_parser():
     sp.add_argument("-a", "--artifact", nargs="+", metavar="F-ID", help="함께 검토할 결과물 ID")
     sp.add_argument("--choices", nargs="*", metavar="ID",
                     help="사용자가 웹에서 체크해 고를 항목. 값 없이 쓰면 검토 항목(findings) 중 열린 것 전체 "
-                         "(예: PR 코멘트를 작성할 리뷰 항목)")
+                         "(예: PR 코멘트를 작성할 리뷰 항목). 'ID=설명' 으로 이름을 붙일 수 있음 "
+                         "(예: 브레인스토밍 아이디어 \"I1=격자 민감도 실험\")")
     sp.add_argument("--choices-label", metavar="TEXT", help="선택 목록 제목 (기본: 진행할 항목 선택)")
     sp.add_argument("--commit", action="store_true", help="승인되면 commit/push 할 변경사항 (diff 자동 첨부)")
     sp.add_argument("--repo", help="커밋할 저장소 (기본: 작업의 저장소)")

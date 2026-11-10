@@ -18,8 +18,8 @@ const DECISION = translated({
   reject: { label: '거절', tone: 'red' },
 });
 // 작업 유형 → 분야 섹션 (사이드바 메뉴)
-const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews' };
-const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', tasks: '작업' });
+const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews', brainstorm: 'brainstorm' };
+const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', brainstorm: '브레인스토밍', tasks: '작업' });
 const ANALYSIS_TYPES = ['analysis', 'visualization'];
 const FIGURE_KINDS = ['image', 'html'];
 
@@ -93,6 +93,7 @@ const VIEWS = {
   reviews: viewReviews,
   papers: viewPapers,
   analysis: viewAnalysis,
+  brainstorm: viewBrainstorm,
   artifacts: viewArtifacts,
   artifact: viewArtifact,
   activity: viewActivity,
@@ -381,6 +382,12 @@ function toast({ title, meta, tone = '', href, sticky = false }) {
 }
 
 // ====================================================================== 상단바 / 사이드바
+/** 작업이 속한 분야 화면 주소 (브레인스토밍은 그 작업을 고른 채로) */
+function sectionHref(t) {
+  const sec = SECTION_OF_TYPE[t.type] || 'tasks';
+  return sec === 'brainstorm' ? `#/brainstorm/${t.id}` : `#/${sec}`;
+}
+
 function sectionOfTask(id) {
   const t = state.index?.tasks.find((x) => x.id === id);
   return t ? SECTION_OF_TYPE[t.type] : null;
@@ -400,6 +407,7 @@ function updateChrome(route = parseRoute()) {
   setCount('#nav-code-count', pendIn('code'));
   setCount('#nav-papers-count', pendIn('papers'));
   setCount('#nav-analysis-count', pendIn('analysis'));
+  setCount('#nav-brainstorm-count', pendIn('brainstorm'));
   const seen = LS.get('seenTs', 0);
   const unseen = idx ? idx.events.filter((e) => e.kind !== 'approval' && tsNum(e.ts) > seen).length : 0;
   $('#bell-count').textContent = pending;
@@ -1129,7 +1137,7 @@ async function viewTask({ rest }) {
   const sec = SECTION_OF_TYPE[t.type] || 'tasks';
   const links = linksOf(t.id);
   return html`
-    <div class="crumbs"><a href="#/${sec}">${SECTION_LABEL[sec]}</a><span>/</span><span class="mono">${t.id}</span></div>
+    <div class="crumbs"><a href="${sectionHref(t)}">${SECTION_LABEL[sec]}</a><span>/</span><span class="mono">${t.id}</span></div>
     <div class="task-head"><div style="min-width:0;flex:1">
       <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${t.priority === 'high' ? html`<span class="badge tone-red">${L('우선순위 높음')}</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
       <h1><span class="th-id">${t.id}</span>${t.title}</h1>
@@ -1524,6 +1532,101 @@ function viewAnalysis({ q }) {
     </div>`;
 }
 
+// ---------------------------------------------------------------- 브레인스토밍
+// 아이디어 노트(문서 결과물)를 읽고, AI 가 올린 선택지(--choices "I1=…")에서 이어갈 아이디어를 고르고,
+// 의견을 보내고, 고른 아이디어로 새 작업을 지시하는 곳
+const NOTE_KINDS = ['markdown', 'text', 'html', 'pdf'];
+
+function bsListItem(t, sel) {
+  const now = taskNow(t);
+  return html`<a class="review-item ${t.id === sel ? 'active' : ''}" href="#/brainstorm/${t.id}">
+    <div class="title">${t.title}</div>
+    <div class="meta">${statusBadge(t.status)}<span>${t.id}</span>${ago(t.updated_at)}
+      ${t.pending_approvals ? html`<span class="flag amber">${icon('bell')}${L('승인§개수')} ${t.pending_approvals}</span>` : ''}</div>
+    ${now.text ? html`<div class="meta bs-now">${now.text}</div>` : ''}
+  </a>`;
+}
+
+/** 지금까지 고른 아이디어 (결정된 선택 요청, 최근 것부터) */
+function bsPicked(t) {
+  const rounds = t.approvals.filter((a) => a.status === 'approved' && a.choices?.length && a.selected?.length).reverse();
+  if (!rounds.length) return '';
+  return html`<section class="card">
+    <div class="card-head"><h2>${icon('check-circle')} ${L('고른 아이디어')}</h2></div>
+    <div class="card-body bs-picked">${rounds.map((a) => {
+      const byId = new Map(a.choices.map((c) => [c.id, c]));
+      return html`<div class="bs-round">
+        <div class="bs-round-head"><span>${a.title}</span><span class="muted">${ago(a.decided_at)}</span></div>
+        <ul>${a.selected.map((id) => html`<li><span class="fid">${id}</span><span>${byId.get(id)?.label || id}</span></li>`)}</ul>
+        ${a.comment ? html`<div class="bs-comment">${icon('message')}<span>${a.comment}</span></div>` : ''}
+      </div>`;
+    })}</div>
+  </section>`;
+}
+
+async function viewBrainstorm({ rest }) {
+  const idx = state.index;
+  const head = sectionHead(L('브레인스토밍'), L('AI 와 함께 아이디어 · 연구 방향 · 실험 설계를 정리하고, 고른 아이디어를 실제 작업으로 이어 갑니다'), '#/new?type=brainstorm');
+  const all = idx.tasks.filter((t) => t.type === 'brainstorm')
+    .sort((a, b) => Number(!ACTIVE.includes(a.status)) - Number(!ACTIVE.includes(b.status)) || tsNum(b.updated_at) - tsNum(a.updated_at));
+  if (!all.length) {
+    return html`${head}<div class="card empty">${icon('bulb')}<p>${L('아직 브레인스토밍이 없습니다')}</p>
+      <p class="muted">${L('주제와 조건을 적어 지시하면, AI 가 아이디어를 정리해 올리고 이어갈 아이디어를 웹에서 고를 수 있게 합니다.')}</p>
+      <p><a href="#/new?type=brainstorm">${L('브레인스토밍 시작하기')}</a></p></div>`;
+  }
+  const [tid, fid] = rest;
+  const sel = all.find((t) => t.id === tid) || all[0];
+  const t = await loadTask(sel.id);
+  const notes = t.artifacts.filter((a) => NOTE_KINDS.includes(a.kind)).reverse();
+  const note = notes.find((a) => a.id === fid) || notes[0];
+  const pending = t.approvals.filter((a) => a.status === 'pending');
+  const links = linksOf(t.id);
+  const figs = t.artifacts.filter((a) => a.kind === 'image' && a.path);
+  const now = taskNow(sel);
+  const sdot = (st) => html`<span class="sdot tone-${pick(STATUS, st, 'queued').tone}"></span>`;
+  const allIds = new Set(all.map((x) => x.id));
+  return html`${head}
+    ${sectionStats(all, idx.artifacts.filter((a) => allIds.has(a.task_id)))}
+    <div class="review-layout">
+      <aside class="card review-list">${all.map((x) => bsListItem(x, sel.id))}</aside>
+      <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
+        <article class="card work-card" style="margin-bottom:0">
+          <div class="wc-head">
+            <div class="wc-title">
+              <div class="th-badges">${statusBadge(t.status)}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
+              <h3><a href="#/task/${t.id}"><span class="th-id">${t.id}</span>${t.title}</a></h3>
+              ${now.text ? html`<div class="wc-now"><span class="lbl">${now.label}</span>${now.text}</div>` : ''}
+              <div class="wc-meta">${agentLabel(t)} · ${L('업데이트')} ${ago(t.updated_at)}</div>
+            </div>
+            <div class="wc-prog"><div class="row"><span>${L('진행률')}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
+          </div>
+          <div class="wc-body">
+            <div>
+              <div class="wc-label"><span>${L('주제 · 조건')}</span><a href="#/task/${t.id}">${L('작업 화면')}</a></div>
+              ${t.instruction ? html`<div class="markdown-body compact">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted mini-empty">${L('지시 내용이 기록되지 않았습니다')}</div>`}
+            </div>
+            <div>
+              <div class="wc-label"><span>${L('진행 계획')}</span></div>
+              ${planList(t)}
+              <div class="wc-label"><span>${L('연결된 작업')}</span><a href="#/new?related=${t.id}">${icon('plus')} ${L('이 아이디어로 작업 지시')}</a></div>
+              ${links.length ? html`<div>${links.map((l) => html`<a class="link-chip" href="#/task/${l.id}" title="${pick(STATUS, l.status, 'queued').label}">${sdot(l.status)}${l.id} ${l.title}</a>`)}</div>` : html`<div class="muted mini-empty">${L('고른 아이디어로 새 작업을 지시하면 여기에 연결됩니다')}</div>`}
+            </div>
+          </div>
+        </article>
+        ${pending.map((a) => approvalCard(t, a, { skip: note ? [note.id] : [] }))}
+        ${bsPicked(t)}
+        ${note ? html`<section class="card" style="overflow:hidden">
+          ${notes.length > 1 ? html`<div class="chips bs-notes">${notes.map((a) => html`<a class="chip ${a === note ? 'active' : ''}" href="#/brainstorm/${t.id}/${a.id}">${a.title}</a>`)}</div>` : ''}
+          ${viewerHead(t, note)}
+          <div data-av="${t.id}/${note.id}"></div>
+        </section>` : html`<div class="card empty inline" style="padding:16px 18px">${L('아직 아이디어 노트가 없습니다')}</div>`}
+        ${figs.length ? html`<section class="card"><div class="card-head"><h2>${icon('image')} ${L('그림')} ${figs.length}</h2></div>
+          <div class="card-body"><div class="thumbs">${figs.slice(0, 12).map((a) => html`<a class="thumb-sm" href="#/artifact/${t.id}/${a.id}" title="${a.title}"><img src="${artifactUrl(t.id, a)}" alt="${a.title}" loading="lazy"></a>`)}</div></div></section>` : ''}
+        ${feedbackBox(t, L('아이디어 · 의견 보내기'))}
+      </div>
+    </div>`;
+}
+
 // ---------------------------------------------------------------- 코드 개발
 const CODE_ART_KINDS = ['code', 'diff'];
 const CODE_FILTERS = translated({
@@ -1594,7 +1697,7 @@ async function viewArtifact({ rest }) {
   if (!art) return viewNotFound();
   const linked = t.approvals.filter((a) => (a.artifacts || []).includes(art.id));
   return html`
-    <div class="crumbs"><a href="#/${SECTION_OF_TYPE[t.type] || 'tasks'}">${SECTION_LABEL[SECTION_OF_TYPE[t.type] || 'tasks']}</a><span>/</span><a href="#/task/${t.id}">${t.id}</a><span>/</span><a href="#/task/${t.id}/artifacts">${L('결과물')}</a><span>/</span><span class="mono">${art.id}</span></div>
+    <div class="crumbs"><a href="${sectionHref(t)}">${SECTION_LABEL[SECTION_OF_TYPE[t.type] || 'tasks']}</a><span>/</span><a href="#/task/${t.id}">${t.id}</a><span>/</span><a href="#/task/${t.id}/artifacts">${L('결과물')}</a><span>/</span><span class="mono">${art.id}</span></div>
     <section class="card" style="overflow:hidden">
       ${viewerHead(t, art)}
       ${art.build ? buildPanel(t, art.build) : ''}

@@ -79,7 +79,7 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 
 ```markdown
 ## DevTrack work records
-- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development) with `devtrack`. Do not record simple questions or explanations.
+- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
   Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
 - Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`.
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
@@ -175,7 +175,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    | Field | What to enter |
    |---|---|
    | Title | A one-line summary (e.g. `Code review of PR #42`) |
-   | Type | Code development · Code review · Paper writing · Data analysis · Visualization · AI model · Other — decides which menu (work area) shows it |
+   | Type | Code development · Code review · Paper writing · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
    | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
    | Repository path · Branch | The repository to change (optional) |
    | Related tasks | e.g. the paper task that will use this analysis (optional) |
@@ -285,6 +285,18 @@ Use the buttons at the top right of the task detail page.
 1. Give the instruction with type **Data analysis** or **Visualization**. Say where the data is and what you want to know.
 2. The **Data analysis** menu shows a figure gallery, tables (CSV), notebooks and summary reports. The **For paper** filter shows only analyses linked to a paper.
 3. Results that need interpretation are posted by Claude as approval requests (result checks).
+
+### Brainstorming
+
+1. Give the instruction with type **Brainstorming**. Describe the topic and constraints (time frame · data and computing resources you can use · scope),
+   and what you want to know about each idea (what it needs · risks · expected benefit, etc.). You can also say "brainstorm ○○ with me" in the chat.
+2. Look at it in the **Brainstorming** menu.
+   - Pick a brainstorm in the list on the left to see its topic, plan and the **idea notes** Claude wrote. If there are several notes, switch with the buttons above the note.
+   - When Claude posts a request such as "pick the ideas to work out further", check them right on this page and click **Proceed with selected**.
+     The ideas you pick collect under **Chosen ideas**, and Claude works out only those.
+   - Send new thoughts or changed constraints with the **Send ideas or comments** box below.
+3. Once you know which idea to try, click **New task from these ideas**. The new task (code development · data analysis · paper writing, etc.)
+   is linked to this brainstorm and shows up under **Linked tasks**.
 
 ## 10. Using DevTrack on Frontier
 
@@ -406,7 +418,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 - In DevTrack I am "Codex". Run `devtrack` with the environment variable `DEVTRACK_AGENT=Codex`
   (no need to add it if it is set in `shell_environment_policy` in ~/.codex/config.toml).
   If `devtrack` is not on PATH, use `~/devtrack/bin/devtrack`. Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
-- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development) with `devtrack`. Do not record simple questions or explanations.
+- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
 - Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`. Only input for tasks assigned to me is shown.
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
