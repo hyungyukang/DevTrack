@@ -1,7 +1,8 @@
 # DevTrack 개발 가이드 (이 저장소에서 작업하는 에이전트용)
 
 AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/`)와, 이를 보여주고 승인받는 웹(`web/`)으로 구성된다.
-사용자 문서는 README.md 와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
+사용자 문서는 README.md 와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신) · web/guide.en.md(영어 화면의 같은 문서 —
+guide.md 를 고치면 같은 절 번호로 함께 고친다), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
 
 ## 반드시 지킬 제약
 - **Python 표준 라이브러리만** (Python 3.7+). Frontier 등 HPC 에서 pip 설치 없이 돌아가야 한다. f-string 대신 `.format` 을 써 온 기존 스타일 유지.
@@ -12,7 +13,8 @@ AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/
 - **삭제는 확인 후에만** — `devtrack delete` 의 ID 재입력 확인, 서버 `api/tasks/<T>/delete` 의 `confirm` 검사를 약화시키지 말 것. 지운 ID 는 `.deleted.json` 으로 재사용을 막는다.
 - UI 문구는 한국어. 화면 틀 문구(메뉴 · 머리말 · 버튼 · 라벨 · 안내)는 `L('한국어')` 로 감싸고 `web/js/i18n.js` 의 EN 표에 영어를 넣는다
   (영어 화면 전환). 같은 한국어가 자리마다 다른 영어가 되면 `L('취소§상태')` 처럼 `§` 뒤에 쓰임새를 붙인다.
-  작업 내용 · 결과물 · 사용 방법 문서 · AI 에게 보내는 메시지(`[DevTrack 결정]` 등)는 번역하지 않는다.
+  사용 방법 문서는 영어판 `web/guide.en.md` 를 따로 둔다 (절 번호 = 목차 ID `#/guide/s5` 가 두 판에서 같아야 한다).
+  작업 내용 · 결과물 · AI 에게 보내는 메시지(`[DevTrack 결정]` 등)는 번역하지 않는다.
 
 ## 구조
 - `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화)

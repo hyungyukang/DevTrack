@@ -1,0 +1,564 @@
+# DevTrack Guide
+
+A step-by-step manual for first-time users: **follow it from the top** and you are ready to go.
+Steps 1–5 are one-time setup; from step 6 on is how you use DevTrack every day.
+
+## 0. What is DevTrack?
+
+You give work to an AI such as Claude, and DevTrack shows on the web **what it is doing, where it is stuck, and what it has produced**.
+Things that are hard to undo, such as committing to a repository or commenting on a PR, go ahead **only after you approve them on the web**.
+
+```text
+ ① You: give a task  ──▶  ② Claude: works and records in DevTrack
+                              (current step · issues · artifacts · approval requests)
+ ④ You: approve / request changes  ◀──  ③ Web dashboard: progress · notifications
+          │
+          └──▶ ⑤ Claude: commits · pushes · posts only what you approved
+```
+
+Common terms:
+
+| Term | Meaning |
+|---|---|
+| Task (`T-0001`) | One piece of work. The instruction, plan, progress log, issues, artifacts and approval requests all live here |
+| Step · progress | Updated each time Claude records "what I am doing now" |
+| Issue (`I-1`) | A problem or blocker found during the work |
+| Artifact (`F-1`) | A report, figure, code change (diff), paper PDF, notebook, etc. — you can open it right on the web |
+| Approval request (`A-1`) | Claude asks you to check before moving on. You answer with **Approve · Request changes · Reject** |
+
+## 1. Check the prerequisites
+
+Make sure these commands run in a terminal.
+
+```bash
+python3 --version      # 3.7 or later (Frontier: module load cray-python)
+git --version
+```
+
+- **Claude Code** — the VS Code extension or the `claude` command for the terminal. This is where the AI works.
+- **GitHub CLI (`gh`)** — needed only for code reviews. Check that you are logged in with `gh auth status`.
+
+DevTrack uses only the Python standard library, so there is nothing to install with `pip`.
+
+## 2. Download DevTrack
+
+```bash
+git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+```
+
+The rest of this guide assumes you cloned it to `~/devtrack`. If you used another location, change the path accordingly.
+
+## 3. Add the `devtrack` command to PATH
+
+Add the path to your shell startup file so that you — **and Claude** — can run `devtrack` from any folder.
+
+```bash
+echo 'export PATH="$HOME/devtrack/bin:$PATH"' >> ~/.zshrc     # for bash, use ~/.bashrc
+source ~/.zshrc
+devtrack --version                                           # → devtrack 0.1.0
+```
+
+Records are saved in `~/devtrack/data/` by default. To keep them elsewhere, add `export DEVTRACK_DATA=~/devtrack-data` to the same file.
+
+## 4. Open the web dashboard
+
+```bash
+devtrack serve --open          # → http://localhost:8765
+```
+
+- **Keep this terminal window open.** Closing it stops the web server.
+- If the top right of the page shows **Live · local server**, everything is working. In this mode, approvals and instructions you click on the web are saved immediately.
+- At first there are no tasks, so the page is empty. To see an example first → "See an example first" in [12. FAQ](#/guide/s12).
+
+## 5. Set up Claude to use DevTrack (once)
+
+### 5-1. Tell Claude the recording rules
+
+Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversation. Paste the text below into that file
+(create it if it does not exist). Replace `~/devtrack` with the location from step 2.
+
+```markdown
+## DevTrack work records
+- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development) with `devtrack`. Do not record simple questions or explanations.
+  Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
+- Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`.
+- Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
+  handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
+  Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
+- When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
+- If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
+  (do not reuse what was loaded earlier in the same conversation).
+- At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
+- Record issues with `devtrack issue`, artifacts with `devtrack artifact`, and review reports with `devtrack review`.
+- Write code review reports so that non-developers can follow them: a one-line conclusion, an "at a glance" part for non-developers, a plain-language explanation per item, and a glossary.
+- To apply a DevTrack task's result to a repository, do not run git commit/push yourself: request approval with `devtrack request <TID> "..." --commit -m "..."`,
+  and once approved, apply it with `devtrack apply <TID> <AID>`. If the user directly asks for a commit or push in the chat, do as asked.
+- When the user sends a `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 완료]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]`
+  message, first record it with `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack done --by-user` / `devtrack cancel` /
+  `devtrack delete --yes` respectively, then continue.
+- If the inbox shows `[완료 처리]` · `[취소]` · `[삭제]`, or a tool call is blocked with a `⛔ DevTrack` message, stop that task immediately, record only the acknowledgement as instructed
+  (`devtrack inbox --task <TID> --ack`), and record nothing more for it. Delete a task only when the user asked for it and confirmed.
+```
+
+> The settings take effect **from the next new Claude conversation**. Restart any conversation that is already open.
+>
+> The bracketed tags (`[DevTrack 결정]`, `[완료 처리]` and so on) stay in Korean: they are exactly what DevTrack prints, and Claude understands them either way.
+
+### 5-2. Install the code review skill (if you will ask for code reviews)
+
+The `/review-pr` skill posts review results to DevTrack and lets you pick on the web which items to comment on.
+
+```bash
+mkdir -p ~/.claude/skills/review-pr
+ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
+```
+
+Linking instead of copying means `git pull` keeps the skill up to date too.
+To receive review reports by email, the `pr-review-report` skill must also be installed
+([details](https://github.com/hyungyukang/AI_Dev_Progress_Checker/tree/main/integrations/claude-skills)).
+
+### 5-3. Fewer permission prompts (optional)
+
+If a confirmation prompt appears every time Claude runs `devtrack`, open `/permissions` in Claude Code and add the allow rule
+`Bash(devtrack:*)`. `devtrack` only records; commits and pushes run only for requests you approved on the web.
+
+### 5-4. Deliver cancellations right away (recommended)
+
+Claude checks DevTrack only at the end of each work step. So if you cancel or delete a task on the web mid-step, Claude may keep working
+until that step ends. With the **hook** installed, DevTrack checks "has this task been cancelled?" **right before** every command Claude runs
+or file it edits, and if so, blocks that action and makes Claude stop.
+
+Add this to `~/.claude/settings.json`. Create the file if it does not exist; if it already has `"hooks"`, just add the entry to its
+`"PreToolUse"` list. Replace `/Users/me/devtrack` with the **full path** of the location from step 2.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/Users/me/devtrack/bin/devtrack-hook", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- The hook checks **only the tasks of that conversation** (about 0.05 s each time). Other conversations and tasks are not affected.
+- `devtrack-hook` runs `devtrack hook`, but is built so that it never blocks Claude when something goes wrong.
+- A blocked Claude records the acknowledgement with `devtrack inbox --task T-0003 --ack` and stops. After that it works as usual.
+- The settings take effect **from the next new Claude conversation**. For Codex, see step 11 ⑤.
+
+## 6. Give your first task
+
+There are two ways. Use whichever is convenient; the result appears on the web the same way.
+
+### Option A — Instruct in the Claude chat
+
+Give the instruction in the Claude chat in VS Code as usual.
+
+```
+Port the pressure solver in ~/project to HIP. Verify it too, and get my approval before committing.
+```
+
+Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. It shows up on the web dashboard right away.
+
+### Option B — Instruct from the web (waiting mode)
+
+1. Say this once in the Claude chat, and keep that conversation (VS Code window) open.
+   ```
+   wait for web instructions
+   ```
+2. Click **New task** at the top left of the web page and fill it in.
+
+   | Field | What to enter |
+   |---|---|
+   | Title | A one-line summary (e.g. `Code review of PR #42`) |
+   | Type | Code development · Code review · Paper writing · Data analysis · Visualization · AI model · Other — decides which menu (work area) shows it |
+   | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
+   | Repository path · Branch | The repository to change (optional) |
+   | Related tasks | e.g. the paper task that will use this analysis (optional) |
+   | Instruction | Goal, references, definition of done, when approval is needed — the more specific, the better |
+
+3. Click **Submit task**, and Claude starts the task automatically within a few seconds.
+   The top of the task page shows whether the assigned AI is currently waiting for web instructions (local server mode).
+   - **Claude is waiting for web instructions** (green): Claude in waiting mode or `devtrack watch` will pick it up shortly.
+   - **No Claude is waiting for web instructions** (yellow): wake it up as shown. Copy the text shown and paste it into the chat.
+   - **…has already seen this task and did not start it** (yellow): the waiting AI has already seen this instruction, so it will not wake up for it again.
+     Ask directly in the chat, e.g. "go ahead with T-0007", or restart the runner.
+
+> If waiting mode is not on, give the instruction on the web and then say once in the Claude chat: "check devtrack inbox and go ahead".
+>
+> If the AI is busy with another task, it continues without asking — messages and follow-up questions sent from a task page are handled after the current step,
+> and new tasks start once the current task is finished or waiting for approval.
+
+## 7. Follow the progress
+
+- **Dashboard** — counts of tasks in progress, awaiting approval, open issues and done; items that need your attention; cards for tasks in progress; recent activity.
+- **Tasks** — the full task list. Click a task to open its detail page.
+- **Task detail** — "what I am doing now" and the progress bar at the top, with tabs below.
+  - Overview: instruction, plan checklist, recent records, open issues, artifacts
+  - Progress log · Issues · Artifacts · Approvals (paper tasks also get a Builds tab)
+- **Notifications** — the bell icon at the top right shows how many approvals are waiting, and a notice pops up in a corner of the page for new approval requests, issues and completions.
+  In the bell menu, turn on **Desktop notifications** to be notified even while you are looking at another window.
+- The page **refreshes automatically every 10 seconds**. To see changes right away, click the refresh button at the top right.
+- **How artifacts are shown** — the button at the top right of the **Artifacts** page and of a task's **Artifacts** tab switches between **cards** (a grid) and a **list** (one row each).
+  The list shows full titles together with the task number, kind, time and size, and figures get a small preview. Your choice is remembered in the browser.
+- **Display language (한국어 / English)** — click **EN** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to English;
+  click **한** to switch back to Korean. Task titles, instructions, progress logs, artifacts and review reports stay in the language they were written in (usually Korean).
+  Messages for the AI (the paste-in text in static mode) are also generated in Korean.
+
+## 8. Approve · request changes · reject
+
+When Claude reaches a point that needs your check, it shows up in the **Approvals** menu and on the bell icon.
+
+1. Open a request to see its description and what to review (a code diff, report, figures, etc.).
+2. Add a comment if needed and click a button.
+
+   | Button | Result |
+   |---|---|
+   | **Approve** | Claude moves on to the next step. For a commit request, it commits and pushes exactly that content |
+   | **Request changes** | Claude makes the changes in your comment (required) and posts a new approval request |
+   | **Reject** | That content does not go ahead |
+
+3. For requests where you pick from a list (e.g. "pick the items to comment on"), only the checked items go ahead.
+
+Safeguard: a commit request **does not run if the actual change differs even slightly from the diff you approved.** If the code changes after your approval, Claude posts a new request.
+
+If you want to tell Claude something during the work, write it in the **Message to Claude** box on the task detail page and send it. Claude picks it up at its next step.
+
+### Mark as done · Cancel task · Delete
+
+Use the buttons at the top right of the task detail page.
+
+| Button | Result | Undo |
+|---|---|---|
+| **Mark as done** | Sets the status to 'Done' (100 %) even if the work is unfinished. Use it when you finished the rest yourself or no more work is needed. Records and artifacts stay, and approval requests still waiting for a decision are withdrawn (a commit request is not committed). You can leave a note | Records are kept |
+| **Cancel task** | Sets the status to 'Cancelled' and removes it from the in-progress list. Records and artifacts stay, and approval requests still waiting for a decision are withdrawn | Records are kept |
+| **Delete** | Erases **everything** — records, artifact files and approval requests. Links from other tasks are removed too | Not possible |
+
+- Clicking Delete opens a **confirmation dialog**; the **Delete permanently** button works only after you type the task ID (e.g. `T-0003`) exactly.
+- Each of them sends the assigned AI a notice to stop this task. When it stops depends on how the AI is working.
+  - A task run by `devtrack watch`: stops **right away** (the running AI is terminated).
+  - Claude or Codex in a conversation: with the hook installed (5-4, step 11 ⑤), stops **right before its next command or file edit**.
+    Without the hook, it stops when the current step ends and it checks the inbox.
+  - While the AI is writing a long answer without running commands, it cannot be interrupted. If it is urgent, click the stop button in the conversation window.
+- Normally use **Cancel**, and **Delete** only tasks created by mistake or for testing. Deleted task numbers are never reused.
+- In static mode, all three buttons create a message to send to Claude instead.
+- In a terminal: `devtrack done T-0003 --by-user -m "note"`, `devtrack cancel T-0003 -m "reason"`, `devtrack delete T-0003` (confirm by typing the task ID again).
+
+## 9. Use by field
+
+### Code development
+
+1. Give the instruction with type **Code development** and the repository path.
+2. The **Code development** menu collects the code tasks.
+   - Each task card shows the repository · branch and what is being done now
+   - **Applied commits**: what was actually committed and pushed after approval (click a commit hash to open it on GitHub)
+   - **Code and changes**: code files and diffs posted by the AI
+   - The **Awaiting approval** filter shows only the tasks that need your check
+3. Check the result as a diff in **Approvals**. When you approve, Claude commits and pushes (the commit hash is recorded).
+
+### Code review
+
+1. In the Claude chat, `/review-pr https://github.com/<org>/<repo>/pull/<number>` — or instruct on the web with type **Code review** and put the same command in the instruction.
+2. The review appears in the **Code review** menu.
+   - **Review at a glance**: one-line conclusion, review verdict, remaining items by severity (Blocker · Major · Minor · Nit · Question)
+   - A **plain-language explanation** for each item and a link to the code location on GitHub
+   - The full report below — written (in Korean) so that non-developers can read it too. A **PDF** with the same content is attached for download or sharing.
+     When the report is revised, the same artifact gets a **new version (v2, v3…)**, and earlier versions are available through the "Earlier versions" link on the artifact page
+3. Check the **items to write PR comments for** and click **Proceed with selected**. Nothing is posted to the PR yet.
+4. Claude posts draft comments for the chosen items; they are posted to the PR only after you check them and click **Approve**.
+
+### Paper writing
+
+1. Give the instruction with type **Paper writing**. If you list the chapters and sections in the instruction, they appear as a plan checklist.
+2. Check each paper in the **Paper writing** menu.
+   - The **compiled PDF** (page count, undefined citation and reference warnings, error locations if compilation failed)
+   - `.tex` manuscripts can be read in **Document view** instead of as code (with equations, tables and figures; you can switch back to the source)
+   - Figures, linked data analyses, open issues
+3. If the paper needs an analysis, click **New analysis for this paper** on the paper card. The analysis task is linked to the paper.
+
+### Data analysis · visualization
+
+1. Give the instruction with type **Data analysis** or **Visualization**. Say where the data is and what you want to know.
+2. The **Data analysis** menu shows a figure gallery, tables (CSV), notebooks and summary reports. The **For paper** filter shows only analyses linked to a paper.
+3. Results that need interpretation are posted by Claude as approval requests (result checks).
+
+## 10. Using DevTrack on Frontier
+
+On Frontier, Claude works on Frontier and publishes the records as a web page in your `www` directory (static web).
+The live mode that saves approvals clicked on the web right away is not used on Frontier yet ([10-5](#/guide/s10-5)).
+
+| | Static web (the current way) | Live (SSH tunnel) |
+|---|---|---|
+| Where you look | The web address of Frontier `www` | `localhost` in your own browser (through a tunnel) |
+| Approvals · instructions | Paste the message the web creates into the Claude conversation on Frontier | Saved directly from the web; web-instruction waiting mode available |
+| Caution | Anyone who knows the address can see it | Other users on the same login node can connect too → do not use it until protection is added |
+
+### 10-1. Install (once)
+
+```bash
+module load cray-python
+git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+cat >> ~/.bashrc <<'EOF'
+module load cray-python
+export PATH="$HOME/devtrack/bin:$PATH"
+export DEVTRACK_DATA=$HOME/devtrack-data
+export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # where the web page is published (adjust for your site)
+EOF
+source ~/.bashrc
+devtrack --version
+devtrack publish               # once at first (and again after updating the web pages)
+```
+
+- `module load cray-python`: needed because the default `python3` on Frontier is older than 3.7. It is important to put it in `~/.bashrc` as well.
+  Claude and the cancellation hook (5-4) must use this Python too ([10-3](#/guide/s10-3)).
+- `git clone` needs a GitHub SSH key registered on Frontier.
+- From then on, every record Claude makes is copied to the published directory automatically.
+
+### 10-2. Move records from your own computer (optional)
+
+To continue on Frontier with the task records you used locally (on a Mac, etc.), move them in the order below. The records are a single folder, so moving them is simple.
+
+**① Before moving (on your computer)**
+- **Clear pending approvals:** if possible, decide pending approval requests first. **Commit approval requests** in particular refer to repository paths on your computer and cannot be applied on Frontier.
+- **Files only on your computer:** finish tasks that depend on such files before moving, or move those files too. Examples: code review comment drafts (`~/.pr-review/`), paper manuscripts in local folders, data.
+- **Turn off the local side:** stop `devtrack serve` and waiting mode ("wait for web instructions"). **Recording in two places at once makes the records diverge.** After the move, use only Frontier.
+
+**② Copy the records (on your computer)** — run this after finishing the 10-1 installation.
+
+```bash
+rsync -av --exclude '.agent/' --exclude '.lock' \
+  ~/devtrack/data/ <user ID>@frontier.olcf.ornl.gov:~/devtrack-data/
+```
+
+- Copies the records folder on your computer (`$DEVTRACK_DATA`, default `~/devtrack/data/`) to `$DEVTRACK_DATA` on Frontier.
+- `.agent/` holds that computer's conversation and waiting state, so it is not moved. `.lock` is a lock file.
+- Whether instructions and decisions were already handled is stored in each task file, so handled instructions do not show up again on Frontier.
+  The list of deleted task numbers (`.deleted.json`) is moved too, so those numbers are not reused.
+- Artifact files are copied inside the records folder, so they show up as they are (except artifacts recorded by path only with `--no-copy`).
+  Local repository paths written in finished tasks stay as they are, but that does not affect viewing.
+- To continue code reviews, copy the `~/.pr-review/` folder to your Frontier home the same way.
+
+**③ Refresh the web page (on Frontier)** — run `devtrack publish` once.
+
+**④ Claude setup** — [10-3](#/guide/s10-3).
+
+**⑤ Check (on Frontier)**
+- See that the moved tasks appear in `devtrack list` and that `devtrack inbox` runs without errors.
+- Open the web address and see that the tasks and artifacts are there.
+
+### 10-3. Claude setup on Frontier
+
+Do step 5 the same way on Frontier, with the points below. Claude Code must be installed on Frontier.
+
+- **Recording rules (5-1):** write the Frontier location (`~/devtrack/...`) as the path in `~/.claude/CLAUDE.md`. If you copied the file from your computer, the paths point to your computer, so be sure to change them.
+- **Code review skill (5-2):** re-create the link so that it points to `~/devtrack` on Frontier. Code reviews also need `gh auth login`.
+  For the report email feature, set up email once again on Frontier. Do not copy configuration files that contain passwords.
+- **Cancellation hook (5-4):** put the full Frontier path in `"command"`. Check it with `echo $HOME/devtrack/bin/devtrack-hook`.
+- **⚠️ Run Claude in a shell where `module load cray-python` has been done.** Before starting Claude, check that `python3 --version` is 3.7 or later.
+  If the hook runs with Python older than 3.7, it **does nothing** and lets the call through, so that it never blocks Claude.
+  Then cancelling a task on the web does not stop Claude right away.
+- To keep Claude working when your SSH connection drops, it helps to run it inside a terminal session such as `tmux` or `screen`.
+
+### 10-4. What is different on the static web
+
+- **Approvals and instructions by pasting:** the Approve, Message, New task and Cancel buttons show a **message for Claude**.
+  Copy it and paste it into the Claude conversation on Frontier.
+- **No web-instruction waiting mode:** the web cannot write records, so "wait for web instructions", where an instruction sent from the web wakes Claude, is not available.
+- **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
+  and PR reviews. Use a location with access control for sensitive work.
+- **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
+  If Frontier lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
+- **Heavy computation on compute nodes:** Claude works on a login node. Login nodes are shared by many people, so work that uses a lot of computation or memory is not allowed there (OLCF policy).
+  For things like large data processing, say in the instruction that it should run on a compute node. Interactive `salloc` or batch jobs work for this.
+  This uses allocation hours, so if you want to approve before submission, add "get my approval before submitting jobs" to the instruction.
+
+### 10-5. Do not use the live mode (SSH tunnel) yet
+
+If you start `devtrack serve` on a Frontier login node and open a tunnel from your computer with `ssh -L 8765:localhost:8765 …`,
+it looks as if you could approve directly on the web as you do locally. But **a login node is a computer shared by many people**, so
+**other users on the same node can also connect** to a server opened on `localhost`.
+The DevTrack server has no login (authentication) yet, so someone else could view the records or click approve, commit or delete.
+Once protection that allows only you to connect is added, this section will describe how to use it. Until then, use the static web.
+
+## 11. Using it with Codex (optional)
+
+You can use Claude and Codex together. Set an **assigned AI** for each task, and only that AI picks the task up.
+
+| "Assigned AI" in New task | Who handles it |
+|---|---|
+| Claude · Codex · Gemini | Only the chosen AI. Messages, approval decisions and cancellations for that task go only to that AI |
+| Anyone (first AI to start) | The first AI to start takes it, and from then on it is that AI's task |
+
+To have another AI take over a task, tell the AI that should take it: "take T-0007 with `--take` and do it"
+(`devtrack start T-0007 --take` — the assigned AI changes and this is recorded).
+
+### 11-1. Codex setup (once)
+
+**① Recording rules** — Codex follows what is written in `~/.codex/AGENTS.md` in every conversation. Paste the text below
+(almost the same as Claude's rules in step 5-1, with a few lines adapted for Codex). Replace `~/devtrack` with the location from step 2.
+
+```markdown
+## DevTrack work records (Codex)
+- In DevTrack I am "Codex". Run `devtrack` with the environment variable `DEVTRACK_AGENT=Codex`
+  (no need to add it if it is set in `shell_environment_policy` in ~/.codex/config.toml).
+  If `devtrack` is not on PATH, use `~/devtrack/bin/devtrack`. Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
+- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development) with `devtrack`. Do not record simple questions or explanations.
+- Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`. Only input for tasks assigned to me is shown.
+- Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
+  handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
+  Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
+- When a user decision is needed, leave a request with `devtrack request`, tell the user, and stop. Do not wait for long with `devtrack wait` or `devtrack inbox --wait`
+  (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
+- If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
+- At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
+- Record issues with `devtrack issue`, artifacts with `devtrack artifact`, and review reports with `devtrack review`.
+- Write code review reports so that non-developers can follow them: a one-line conclusion, an "at a glance" part for non-developers, a plain-language explanation per item, and a glossary.
+- To apply a DevTrack task's result to a repository, do not run git commit/push yourself: request approval with `devtrack request <TID> "..." --commit -m "..."`,
+  and once approved, apply it with `devtrack apply <TID> <AID>`. If the user directly asks for a commit or push in the chat, do as asked.
+- When the user sends a `[DevTrack 결정]` / `[DevTrack 메시지]` / `[DevTrack 새 작업 지시]` / `[DevTrack 작업 완료]` / `[DevTrack 작업 취소]` / `[DevTrack 작업 삭제]`
+  message, first record it with `devtrack decide` / `devtrack comment` / `devtrack new` / `devtrack done --by-user` / `devtrack cancel` /
+  `devtrack delete --yes` respectively, then continue.
+- If the inbox shows `[완료 처리]` · `[취소]` · `[삭제]`, or a tool call is blocked with a `⛔ DevTrack` message, stop that task immediately, record only the acknowledgement as instructed
+  (`devtrack inbox --task <TID> --ack`), and record nothing more for it. Delete a task only when the user asked for it and confirmed.
+```
+
+**② Codex configuration file** — add this at the end of `~/.codex/config.toml`. Replace `/Users/me/devtrack/data` with the **full path**
+of the records folder (`$DEVTRACK_DATA`, default `~/devtrack/data`).
+
+```toml
+[shell_environment_policy.set]
+DEVTRACK_AGENT = "Codex"                        # Codex records under the name "Codex"
+
+[sandbox_workspace_write]
+writable_roots = ["/Users/me/devtrack/data"]    # allow writing to the DevTrack records folder outside the work folder
+```
+
+- If the file **already has** a `[shell_environment_policy.set]` or `[sandbox_workspace_write]` line, do not add it again; add only the single lines
+  under the existing one. If the same section appears twice, Codex cannot read the configuration file.
+
+- For safety, Codex cannot write outside the work folder. The setting above allows writing to the DevTrack records folder only.
+- For network access (`gh` · `git push`), Codex asks for permission in its chat window when needed. `devtrack watch`, which handles web instructions, has no chat window
+  to ask in, so it allows network access when it runs Codex (to block it: `devtrack watch --codex --no-network`).
+
+**③ Code review skill** (if you will ask for code reviews) — link the same file as for Claude.
+
+```bash
+mkdir -p ~/.codex/skills/review-pr
+ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
+```
+
+**④ The `codex` command** — `devtrack watch`, which receives web instructions, uses the Codex CLI. If there is no `codex` in the terminal, it automatically finds
+the **newest** of the CLIs bundled with the ChatGPT · Codex app and the VS Code extension (older CLIs cannot use newer models).
+To use a different one, `export DEVTRACK_CODEX=<path to codex>`. The CLI in use is shown on the first line when `devtrack watch` starts.
+
+**⑤ Deliver cancellations right away (hook, recommended)** — the same as Claude's 5-4. It lets Codex, working in a conversation in the Codex app or VS Code,
+learn about cancellations and deletions mid-task. Create `~/.codex/hooks.json` (if it already exists, just add the entry to its `"PreToolUse"` list,
+and replace `/Users/me/devtrack` with the full path of DevTrack).
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/Users/me/devtrack/bin/devtrack-hook", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Codex runs a new hook **only after the user has reviewed it**. In the Codex app, go to **Settings → Hooks** (in the terminal `codex`, `/hooks`),
+  review this hook and mark it as trusted. If you change the hook, you need to review it again.
+- Codex run by `devtrack watch` stops right away on cancellation even without the hook.
+
+> The settings take effect **from the next new Codex conversation**.
+
+### 11-2. Give tasks to Codex
+
+**Option A — Instruct in the Codex chat.** Give the instruction in the Codex app (or `codex` in a terminal) as usual; Codex creates a task in DevTrack and records it.
+
+**Option B — Instruct from the web (`devtrack watch`).** Claude's waiting mode ("wait for web instructions") is a Claude Code feature,
+so for Codex you keep a **runner** going in a terminal instead.
+
+```bash
+devtrack watch --codex
+```
+
+1. In **New task** on the web, choose **Codex** as the assigned AI and submit.
+2. Within a few seconds the runner starts Codex to handle the task. The terminal window shows what is being handled, and when it finishes, Codex's summary is added to the progress log.
+3. Once Codex asks for approval and finishes, the runner starts Codex again to continue every time you approve, request changes or send a message on the web.
+
+- Tasks run in their **repository path** folder. Tasks without a path run in the folder where you started `devtrack watch` (change it with `--cwd <folder>`).
+- Cancelling or deleting a task on the web stops the running Codex right away.
+- Keep this terminal window open (to stop: Ctrl+C). When you start it again, it begins with the instructions that arrived while it was off.
+- To pass more options to Codex, put them after `--`: `devtrack watch --codex -- -m <model>`.
+
+## 12. FAQ · troubleshooting
+
+**I gave an instruction on the web, but nothing happens.**
+First look at the notice at the top of the task page (step 6): it tells you whether the assigned AI is waiting, or whether it needs to be woken up and how.
+Claude moves only when it is addressed in a conversation. Check that waiting mode ("wait for web instructions") is on and that its VS Code window is open.
+Otherwise, say "check devtrack inbox and go ahead" in the Claude chat. For Codex, check that `devtrack watch --codex` is running.
+
+**Claude (or Codex) does not pick up the task I gave on the web.**
+Check whether the task's **assigned AI** is a different AI (shown under the title on the task page). An AI picks up only the tasks assigned to it.
+`devtrack inbox --all-agents` shows the input for all AIs, and to take a task over, use `devtrack start <task ID> --take`.
+
+**I cancelled a task (or marked it as done) on the web, but the AI keeps working.**
+An AI in a conversation checks DevTrack only at the end of each work step. With the hook installed (Claude 5-4, Codex step 11 ⑤), it stops right before its next command or file
+edit. If it keeps going with the hook installed, check ① that it is a **new conversation** started after installing the hook, and ② for Codex, that you **marked the hook as trusted**.
+While the AI is writing a long answer without running commands, it cannot be interrupted; if it is urgent, stop it directly in the conversation window.
+
+**Clicking a button opens a dialog with a message to copy.**
+This is static mode ("Static · read-only" at the top right). Paste the message into the Claude conversation, or locally, use the address opened by `devtrack serve`.
+
+**I updated DevTrack or a skill, but it behaves as before.**
+A Claude conversation that was already open (including one in waiting mode) may still remember the old instructions.
+After updating with `git pull`, **open a new** Claude conversation and, if needed, say "wait for web instructions" again.
+
+**`devtrack: command not found`**
+Check the PATH setting from step 3, then reopen the terminal and VS Code.
+
+**The web page is stuck on "Loading…" or looks wrong.**
+Check that the terminal running `devtrack serve` is still open. If you updated DevTrack (`git pull`), stop `devtrack serve` and start it again.
+
+**See an example first.**
+Create the example in a separate folder so that it does not mix with your real records, and open it.
+```bash
+devtrack --data ~/devtrack-demo demo
+devtrack --data ~/devtrack-demo serve --port 8766 --open
+```
+
+**The review report PDF is not created.**
+The PDF is made with Chrome (or Chromium · Edge) installed on the computer. Without a browser, only the Markdown report is posted and a warning is left in the activity log.
+If the browser is installed somewhere else, set `export DEVTRACK_CHROME=<path to the browser executable>`. For a report already posted, run `devtrack pdf <report.md>` separately.
+
+**Where are the records, and how do I back them up?**
+Everything is in the `$DEVTRACK_DATA` folder (default `~/devtrack/data/`). Copying this folder is a backup.
+
+**Can Claude commit without my approval?**
+For DevTrack tasks, Claude commits only through approved requests (`devtrack apply`). If the actual change differs from the diff you approved, it refuses to run.
+However, if you directly say "commit it" in the chat, Claude does as asked.
+
+## 13. Command reference
+
+Commands you use yourself:
+
+| Command | What it does |
+|---|---|
+| `devtrack serve --open` | Open the web dashboard (local) |
+| `devtrack publish` | Publish as a static website (Frontier `www`) |
+| `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
+| `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
+| `devtrack --data <folder> demo` | Create example data |
+
+Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report ·
+`request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
+`start --take` take over another AI's task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
+For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/AI_Dev_Progress_Checker/blob/main/docs/AGENT_PROTOCOL.md).

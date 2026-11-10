@@ -955,6 +955,8 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .guide-body blockquote { border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text); padding: 8px 14px; border-radius: 0 8px 8px 0; }
 .guide-body blockquote p { margin: 0; }
 .guide-body table { font-size: 13.5px; }
+/* 좁은 화면에서도 표의 낱말(영어 단어 · 한국어 어절)을 중간에서 끊지 않는다 (넘치면 표가 가로로 스크롤) */
+.guide-body th, .guide-body td { overflow-wrap: break-word; word-break: keep-all; }
 .code-wrap { position: relative; margin: 0 0 .9em; }
 .code-wrap pre { margin: 0; padding-right: 76px; }
 .code-copy { position: absolute; top: 7px; right: 7px; opacity: .85; }

@@ -33,6 +33,7 @@ const state = {
   details: new Map(),
   taskSearch: '',
   listeners: null, // 웹 입력을 기다리는 AI (로컬 서버 모드만, null = 알 수 없음)
+  guides: {}, // 사용 방법 문서 (파일 이름 → 본문)
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -923,18 +924,31 @@ function viewWelcome() {
 }
 
 // ====================================================================== 화면: 사용 방법
+async function loadGuide(file) {
+  if (state.guides[file] == null) {
+    const r = await fetch(file, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    state.guides[file] = await r.text();
+  }
+  return state.guides[file];
+}
+
 async function viewGuide({ rest }) {
-  if (state.guide == null) {
-    try {
-      const r = await fetch('guide.md', { cache: 'no-cache' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      state.guide = await r.text();
-    } catch (e) {
+  // 영어 화면이면 영어판(guide.en.md). 없거나 못 읽으면 한국어판으로
+  let file = getLang() === 'en' ? 'guide.en.md' : 'guide.md';
+  let text;
+  try {
+    text = await loadGuide(file);
+  } catch (e) {
+    if (file !== 'guide.md') {
+      try { file = 'guide.md'; text = await loadGuide(file); } catch { /* 아래에서 오류 표시 */ }
+    }
+    if (text == null) {
       return html`<div class="page-head"><div><h1>${L('사용 방법')}</h1></div></div>
         <div class="card empty">${icon('alert')}<p>${L('사용 방법 문서(guide.md)를 불러오지 못했습니다')} — ${e.message}</p></div>`;
     }
   }
-  const body = state.guide.replace(/^# [^\n]*\n/, ''); // 문서 제목은 페이지 제목으로
+  const body = text.replace(/^# [^\n]*\n/, ''); // 문서 제목은 페이지 제목으로
   const modeNote = state.mode === 'live'
     ? html`<div class="alert alert-ok">${icon('check-circle')}<div class="alert-body"><b>${L('지금 이 화면은 실시간 · 로컬 서버 모드입니다.')}</b>
         <p>${L('웹에서 누른 승인 · 메시지 · 새 작업 지시가 바로 저장됩니다. 대시보드가 이미 실행 중이니(1 · 2 · 4단계 완료), 3단계(PATH)와 5단계부터 확인하세요.')}</p></div></div>`
@@ -942,7 +956,7 @@ async function viewGuide({ rest }) {
         <p>${L('버튼을 누르면 담당 AI 에게 보낼 메시지가 만들어집니다 (10단계 참고).')}</p></div></div>`;
   return html`
     <div class="page-head"><div><h1>${L('사용 방법')}</h1><p class="sub">${L('처음 쓰는 분을 위한 단계별 안내 — 위에서부터 차례로 따라 하세요')}</p></div>
-      <a class="btn" href="guide.md" target="_blank" rel="noopener">${icon('file-text')} ${L('원문 (Markdown)')}</a></div>
+      <a class="btn" href="${file}" target="_blank" rel="noopener">${icon('file-text')} ${L('원문 (Markdown)')}</a></div>
     <div class="guide-layout">
       <details class="card guide-toc" open><summary>${L('목차')}</summary><div class="toc-list"></div></details>
       <div style="min-width:0">

@@ -240,7 +240,7 @@ const EN = {
   '웹에서 누른 승인 · 메시지 · 새 작업 지시가 바로 저장됩니다. 대시보드가 이미 실행 중이니(1 · 2 · 4단계 완료), 3단계(PATH)와 5단계부터 확인하세요.': 'Approvals, messages and new tasks from the web are saved directly. The dashboard is already running (steps 1, 2 and 4 are done), so check step 3 (PATH) and continue from step 5.',
   '지금 이 화면은 정적 · 읽기 전용 모드입니다.': 'This page is in static (read-only) mode.',
   '버튼을 누르면 담당 AI 에게 보낼 메시지가 만들어집니다 (10단계 참고).': 'Buttons create a message to send to the assigned AI (see step 10).',
-  '처음 쓰는 분을 위한 단계별 안내 — 위에서부터 차례로 따라 하세요': 'A step-by-step guide for first-time users — follow it from the top. The guide itself is written in Korean.',
+  '처음 쓰는 분을 위한 단계별 안내 — 위에서부터 차례로 따라 하세요': 'A step-by-step guide for first-time users — follow it from the top.',
   '원문 (Markdown)': 'Source (Markdown)',
   '목차': 'Contents',
   '지시된 모든 작업과 진행 상태': 'Every assigned task and its status',
