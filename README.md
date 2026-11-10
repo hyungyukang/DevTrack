@@ -140,6 +140,8 @@ devtrack publish                                # 웹 + 데이터 최초 배포
 `DEVTRACK_PUBLISH_DIR` 이 설정되어 있으면 이후 모든 기록이 자동으로 공개 디렉토리에 동기화됩니다
 (파일 권한은 웹에서 읽을 수 있게 644/755 로 설정). 웹 화면(`web/`)을 수정했을 때만 `devtrack publish` 를 다시 실행하면 됩니다.
 위 환경 변수는 `~/.bashrc` 에, 에이전트 규칙은 `~/.claude/CLAUDE.md` 에 넣어 두세요 ([문구](docs/AGENT_PROTOCOL.md#claudemd-에-넣을-내용)).
+로컬에서 쓰던 기록을 Frontier 로 옮기는 방법, Frontier 의 Claude 설정(훅이 쓰는 파이썬 포함), 정적 웹의 주의점과
+실시간(SSH 터널) 방식을 아직 쓰지 않는 이유는 [사용 방법 10단계](web/guide.md#10-frontier-에서-쓰기)에 있습니다.
 
 > ⚠️ 공개 디렉토리에 올라간 내용(코드 diff, 리포트, 로그)은 URL 을 아는 누구나 볼 수 있습니다.
 > 민감한 내용이 있다면 접근 제한이 가능한 위치를 사용하세요.

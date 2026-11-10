@@ -277,24 +277,103 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
 2. **데이터 분석** 메뉴에서 그림 갤러리, 표(CSV), 노트북, 요약 리포트를 봅니다. **논문용** 필터는 논문에 연결된 분석만 보여 줍니다.
 3. 해석이 필요한 결과는 Claude 가 승인 요청(결과 확인)으로 올립니다.
 
-## 10. Frontier 에서 쓰기 (정적 웹)
+## 10. Frontier 에서 쓰기
 
-Frontier 에서는 Claude 가 Frontier 에서 일하고, 기록을 `www` 디렉토리에 웹페이지로 공개합니다.
+Frontier 에서는 Claude 가 Frontier 에서 일하고, 기록을 `www` 디렉토리에 웹페이지로 공개합니다(정적 웹).
+웹에서 누른 승인을 바로 저장하는 실시간 방식은 Frontier 에서는 아직 쓰지 않습니다 ([10-5](#/guide/s10-5)).
+
+| | 정적 웹 (지금 쓰는 방식) | 실시간 (SSH 터널) |
+|---|---|---|
+| 보는 곳 | Frontier `www` 의 웹 주소 | 내 컴퓨터 브라우저의 `localhost` (터널 경유) |
+| 승인 · 지시 | 웹이 만든 메시지를 Frontier 의 Claude 대화에 붙여 넣기 | 웹에서 바로 저장, 웹 지시 대기 모드 사용 가능 |
+| 주의 | 주소를 아는 누구나 볼 수 있음 | 같은 로그인 노드의 다른 사용자도 접속할 수 있음 → 보호 기능이 생기기 전에는 쓰지 않음 |
+
+### 10-1. 설치 (처음 한 번)
 
 ```bash
 module load cray-python
 git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
-echo 'export PATH="$HOME/devtrack/bin:$PATH"'          >> ~/.bashrc
-echo 'export DEVTRACK_DATA=$HOME/devtrack-data'        >> ~/.bashrc
-echo 'export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack'  >> ~/.bashrc   # 웹 공개 위치 (환경에 맞게)
+cat >> ~/.bashrc <<'EOF'
+module load cray-python
+export PATH="$HOME/devtrack/bin:$PATH"
+export DEVTRACK_DATA=$HOME/devtrack-data
+export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # 웹 공개 위치 (환경에 맞게)
+EOF
 source ~/.bashrc
+devtrack --version
 devtrack publish               # 처음 한 번 (웹 화면을 업데이트했을 때도)
 ```
 
-- 이후 Claude 가 기록할 때마다 공개 디렉토리에 자동으로 반영됩니다. 5단계(Claude 설정)도 Frontier 에서 똑같이 해 주세요.
-- 이 웹은 **읽기 전용(정적 · 읽기 전용)** 입니다. 승인 · 메시지 · 새 작업 지시 버튼을 누르면 **Claude 에게 보낼 메시지**가 나오니,
+- `module load cray-python`: Frontier 의 기본 `python3` 는 3.7 미만이라 필요합니다. `~/.bashrc` 에도 넣어 두는 것이 중요합니다.
+  Claude 와 취소 훅(5-4)도 이 파이썬을 써야 합니다 ([10-3](#/guide/s10-3)).
+- `git clone` 을 하려면 Frontier 에 GitHub SSH 키가 등록되어 있어야 합니다.
+- 이후 Claude 가 기록할 때마다 공개 디렉토리에 자동으로 반영됩니다.
+
+### 10-2. 내 컴퓨터에서 쓰던 기록 옮기기 (선택)
+
+로컬(Mac 등)에서 쓰던 작업 기록을 Frontier 에서 이어서 쓰려면 아래 순서로 옮깁니다. 기록 폴더 하나가 전부라 옮기기는 간단합니다.
+
+**① 옮기기 전 (내 컴퓨터에서)**
+- **승인 대기 정리:** 결정을 기다리는 승인 요청은 가능하면 미리 처리하세요. 특히 **커밋 승인 요청**은 내 컴퓨터의 저장소 경로로 되어 있어 Frontier 에서는 반영할 수 없습니다.
+- **내 컴퓨터에만 있는 파일:** 그런 파일에 기대는 작업은 끝내고 옮기거나, 그 파일도 함께 옮기세요. 예: 코드 리뷰 코멘트 초안(`~/.pr-review/`), 로컬 폴더의 논문 원고, 데이터.
+- **로컬은 끄기:** `devtrack serve` 와 대기 모드("웹 지시 기다려줘")를 끄세요. **두 곳에서 동시에 기록하면 내용이 갈라집니다.** 옮긴 뒤에는 Frontier 쪽만 씁니다.
+
+**② 기록 복사 (내 컴퓨터에서)** — 10-1 설치를 마친 뒤 실행합니다.
+
+```bash
+rsync -av --exclude '.agent/' --exclude '.lock' \
+  ~/devtrack/data/ <사용자 ID>@frontier.olcf.ornl.gov:~/devtrack-data/
+```
+
+- 내 컴퓨터의 기록 폴더(`$DEVTRACK_DATA`, 기본 `~/devtrack/data/`)를 Frontier 의 `$DEVTRACK_DATA` 로 복사합니다.
+- `.agent/` 는 그 컴퓨터의 대화 · 대기 상태라 옮기지 않습니다. `.lock` 은 잠금 파일입니다.
+- 처리 여부(확인한 지시 · 결정)는 각 작업 파일에 들어 있어서, 이미 처리한 지시가 Frontier 에서 다시 뜨지 않습니다.
+  지운 작업 번호 목록(`.deleted.json`)도 함께 옮겨지므로 번호가 다시 쓰이지 않습니다.
+- 결과물 파일은 기록 폴더 안에 복사되어 있으므로 그대로 보입니다(`--no-copy` 로 경로만 기록한 결과물은 제외).
+  끝난 작업에 적힌 로컬 저장소 경로는 그대로 남지만 보기에는 문제없습니다.
+- 코드 리뷰를 이어서 하려면 `~/.pr-review/` 폴더도 같은 방법으로 Frontier 의 홈으로 복사하세요.
+
+**③ 웹 갱신 (Frontier 에서)** — `devtrack publish` 를 한 번 실행합니다.
+
+**④ Claude 설정** — [10-3](#/guide/s10-3).
+
+**⑤ 확인 (Frontier 에서)**
+- `devtrack list` 에 옮긴 작업이 보이는지, `devtrack inbox` 가 오류 없이 실행되는지 봅니다.
+- 웹 주소를 열어 작업과 결과물이 보이는지 봅니다.
+
+### 10-3. Frontier 의 Claude 설정
+
+5단계를 Frontier 에서 똑같이 하되, 아래를 지켜 주세요. Frontier 에 Claude Code 가 설치되어 있어야 합니다.
+
+- **기록 규칙(5-1):** `~/.claude/CLAUDE.md` 의 경로를 Frontier 의 위치(`~/devtrack/...`)로 적습니다. 내 컴퓨터의 파일을 복사했다면 경로가 내 컴퓨터 기준이니 꼭 바꾸세요.
+- **코드 리뷰 스킬(5-2):** Frontier 의 `~/devtrack` 을 가리키도록 링크를 다시 겁니다. 코드 리뷰에는 `gh auth login` 도 필요합니다.
+  리포트 메일 기능은 Frontier 에서 메일 설정을 한 번 새로 하세요. 비밀번호가 든 설정 파일은 복사하지 마세요.
+- **취소 훅(5-4):** `"command"` 에 Frontier 의 전체 경로를 적습니다. `echo $HOME/devtrack/bin/devtrack-hook` 으로 확인하세요.
+- **⚠️ Claude 는 `module load cray-python` 이 된 셸에서 실행하세요.** Claude 를 띄우기 전에 `python3 --version` 이 3.7 이상인지 보세요.
+  훅은 3.7 미만 파이썬으로 실행되면 Claude 를 막지 않으려고 **아무 일도 하지 않고** 넘어갑니다.
+  그러면 웹에서 작업을 취소해도 Claude 가 바로 멈추지 않습니다.
+- SSH 접속이 끊겨도 Claude 가 계속 일할 수 있게 `tmux` · `screen` 같은 터미널 세션 안에서 실행하면 편합니다.
+
+### 10-4. 정적 웹에서 달라지는 점
+
+- **승인 · 지시는 붙여 넣기로:** 승인 · 메시지 · 새 작업 지시 · 취소 버튼을 누르면 **Claude 에게 보낼 메시지**가 나옵니다.
   복사해서 Frontier 의 Claude 대화에 붙여 넣으세요.
-- ⚠️ 공개 디렉토리의 내용(코드 diff, 리포트, 로그)은 주소를 아는 누구나 볼 수 있습니다. 민감한 작업은 접근 제한이 되는 위치를 쓰세요.
+- **웹 지시 대기 모드 불가:** 웹이 기록을 쓸 수 없으므로, 웹에서 지시를 보내 Claude 를 깨우는 "웹 지시 기다려줘" 는 쓸 수 없습니다.
+- **⚠️ 공개 범위:** 공개 디렉토리의 내용은 주소를 아는 누구나 볼 수 있습니다. 코드 diff, 리포트, 로그, **발표 전 논문 원고 · 분석 그림**,
+  PR 리뷰가 모두 포함됩니다. 민감한 작업은 접근 제한이 되는 위치를 쓰세요.
+- **PDF · LaTeX:** 리뷰 리포트 PDF 는 Chrome 계열 브라우저가, 논문 컴파일은 TeX 가 있어야 만들어집니다.
+  Frontier 에 없으면 그 단계만 건너뛰고, Markdown 리포트와 원고는 그대로 보입니다.
+- **무거운 계산은 계산 노드에서:** Claude 는 로그인 노드에서 일합니다. 로그인 노드는 여러 사람이 함께 쓰므로, 계산이나 메모리를 많이 쓰는 작업은 할 수 없습니다(OLCF 정책).
+  대용량 데이터 처리 같은 일은 계산 노드에서 하도록 지시에 적어 주세요. 대화형 `salloc` 이나 배치 작업을 쓰면 됩니다.
+  할당 시간이 드는 일이니, 제출 전에 확인받고 싶으면 지시에 "작업 제출 전에 승인받아줘" 라고 적으세요.
+
+### 10-5. 실시간 방식(SSH 터널)은 아직 쓰지 마세요
+
+Frontier 로그인 노드에서 `devtrack serve` 를 켜고 내 컴퓨터에서 `ssh -L 8765:localhost:8765 …` 로 터널을 열면,
+지금처럼 웹에서 바로 승인할 수 있을 것처럼 보입니다. 하지만 **로그인 노드는 여러 사람이 함께 쓰는 컴퓨터**라서,
+`localhost` 로 연 서버에 **같은 노드의 다른 사용자도 접속할 수 있습니다.**
+DevTrack 서버에는 아직 로그인(인증) 기능이 없으므로, 다른 사람이 기록을 보거나 승인 · 커밋 · 삭제를 누를 수 있습니다.
+본인만 접속할 수 있게 하는 보호 기능이 추가되면 이 절에 사용 방법을 적겠습니다. 그 전까지는 정적 웹을 쓰세요.
 
 ## 11. Codex 와 함께 쓰기 (선택)
 
