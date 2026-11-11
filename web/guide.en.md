@@ -300,16 +300,19 @@ Use the buttons at the top right of the task detail page.
 
 ## 10. Using DevTrack on Frontier
 
-On Frontier, Claude works on Frontier and publishes the records as a web page in your `www` directory (static web).
-The live mode that saves approvals clicked on the web right away is not used on Frontier yet ([10-5](#/guide/s10-5)).
+On Frontier, Claude works on Frontier and the records stay on Frontier. There are two ways to see them on the web.
 
-| | Static web (the current way) | Live (SSH tunnel) |
+| | Static web ([10-6](#/guide/s10-6)) | Live · SSH tunnel ([10-5](#/guide/s10-5)) |
 |---|---|---|
 | Where you look | The web address of Frontier `www` | `localhost` in your own browser (through a tunnel) |
-| Approvals · instructions | Paste the message the web creates into the Claude conversation on Frontier | Saved directly from the web; web-instruction waiting mode available |
-| Caution | Anyone who knows the address can see it | Other users on the same login node can connect too → do not use it until protection is added |
+| Approvals · instructions | Paste the message the web creates into the Claude conversation on Frontier | Saved directly from the web — the waiting Claude starts right away |
+| How long it runs | Always (updated every time something is recorded) | Only while you use the web |
+| Caution | Anyone who knows the address can see it | While it runs, other users on the same login node can connect too |
 
-### 10-1. Install (once)
+We recommend following progress on the static web and turning on the live mode briefly only when you give instructions or approve.
+If this is your first time, follow 10-1 → 10-3 → 10-4 → 10-5 in order (10-2 only when you move records from your own computer).
+
+### 10-1. Install DevTrack (once)
 
 ```bash
 module load cray-python
@@ -329,6 +332,9 @@ devtrack publish               # once at first (and again after updating the web
   Claude and the cancellation hook (5-4) must use this Python too ([10-3](#/guide/s10-3)).
 - `git clone` needs a GitHub SSH key registered on Frontier.
 - From then on, every record Claude makes is copied to the published directory automatically.
+- **Keep the records folder (`DEVTRACK_DATA`) in your home directory.** The work areas under `/lustre/orion/...` (Member · Project · World Work) delete (purge) files that have not been read or modified for 90 days, so old task records can disappear.
+  `proj-shared` (Project Work) is also open to other members of the same project.
+  Your home (`/ccs/home/<user ID>`, 50 GB) is not purged and is backed up.
 
 ### 10-2. Move records from your own computer (optional)
 
@@ -362,9 +368,32 @@ rsync -av --exclude '.agent/' --exclude '.lock' \
 - See that the moved tasks appear in `devtrack list` and that `devtrack inbox` runs without errors.
 - Open the web address and see that the tasks and artifacts are there.
 
-### 10-3. Claude setup on Frontier
+### 10-3. Install and set up Claude Code (once)
 
-Do step 5 the same way on Frontier, with the points below. Claude Code must be installed on Frontier.
+**① Install** — run this on Frontier. It installs to `~/.local/bin/claude` in your home directory and needs no administrator rights.
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash      # shows no progress while downloading
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+claude --version                                     # a version number means success
+```
+
+- If you get `claude: command not found`, check with `ls ~/.local/bin/claude` that it is installed; if it is, check the PATH line above.
+
+**② Log in** — the first time you run `claude`, it shows login instructions. Frontier has no browser, so open the address shown on the screen in **the browser on your own computer**, log in, and paste the code it gives you into the Frontier terminal.
+
+**③ Turn off automatic updates (recommended)** — your home on Frontier is a network disk shared by all login nodes.
+If Claude Code updates itself on one node and deletes the old version files, a Claude running in tmux (10-4) on another node can stop with a `Bus error`.
+Put the following in `~/.claude/settings.json` (if the file already exists, add just the one line inside `env`), and update yourself with `claude update` when no Claude is running.
+
+```json
+{
+  "env": { "DISABLE_AUTOUPDATER": "1" }
+}
+```
+
+**④ DevTrack setup** — do step 5 the same way on Frontier, with the points below.
 
 - **Recording rules (5-1):** write the Frontier location (`~/devtrack/...`) as the path in `~/.claude/CLAUDE.md`. If you copied the file from your computer, the paths point to your computer, so be sure to change them.
 - **Code review skill (5-2):** re-create the link so that it points to `~/devtrack` on Frontier. Code reviews also need `gh auth login`.
@@ -373,28 +402,106 @@ Do step 5 the same way on Frontier, with the points below. Claude Code must be i
 - **⚠️ Run Claude in a shell where `module load cray-python` has been done.** Before starting Claude, check that `python3 --version` is 3.7 or later.
   If the hook runs with Python older than 3.7, it **does nothing** and lets the call through, so that it never blocks Claude.
   Then cancelling a task on the web does not stop Claude right away.
-- To keep Claude working when your SSH connection drops, it helps to run it inside a terminal session such as `tmux` or `screen`.
+- If doing this by hand is tedious, you can leave it to Claude on Frontier — **"Read sections 5-1, 5-4 and 10-3 of `~/devtrack/web/guide.md` and set up DevTrack for this Frontier environment"**.
+  After the settings change, restart Claude so they take effect.
 
-### 10-4. What is different on the static web
+### 10-4. Keep Claude running inside tmux
 
-- **Approvals and instructions by pasting:** the Approve, Message, New task and Cancel buttons show a **message for Claude**.
-  Copy it and paste it into the Claude conversation on Frontier.
-- **No web-instruction waiting mode:** the web cannot write records, so "wait for web instructions", where an instruction sent from the web wakes Claude, is not available.
-- **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
-  and PR reviews. Use a location with access control for sensitive work.
-- **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
-  If Frontier lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
+tmux is a program that keeps a terminal screen open on a remote computer. Even if your ssh connection drops or you close your laptop, Claude inside it keeps working, and you can connect again and return to the same screen.
+
+**① Start it the first time** (on Frontier)
+
+```bash
+hostname                  # e.g. login05 — remember the login node where you opened tmux
+tmux new -s claude        # open a tmux screen named 'claude'
+python3 --version         # 3.7 or later? (otherwise module load cray-python)
+cd <working directory>
+claude
+```
+
+When Claude is up, say **"wait for web instructions"** ("웹 지시 기다려줘"). How to give instructions from the web is in [10-5](#/guide/s10-5).
+
+**② Step out** — press and release `Ctrl+b`, then `d`. Claude keeps running in the background, so you can now disconnect ssh.
+
+**③ Go back in**
+
+```bash
+ssh <user ID>@frontier.olcf.ornl.gov
+hostname                  # if this is a different node from before
+ssh login05               # move to the node where you opened tmux
+tmux attach -t claude
+```
+
+A tmux screen exists only on the login node that opened it. Connecting to `frontier.olcf.ornl.gov` may put you on a different node, so move over as above.
+`tmux ls` lists the open screens.
+
+| Key (after pressing and releasing `Ctrl+b`) | What it does |
+|---|---|
+| `d` | Step out (Claude keeps running) |
+| `[` | Scroll up (arrows · PgUp, `q` to finish) |
+| `c` | New window |
+| `n` / `p` | Next / previous window |
+
+**④ Finish** — inside tmux, exit Claude (`/exit`) and type `exit`. To close it from outside, use `tmux kill-session -t claude`.
+
+- If `tmux` is not found, use `screen` — start with `screen -S claude`, step out with `Ctrl+a` then `d`, go back in with `screen -r claude`.
+- If the login node restarts (for maintenance, for example), the tmux screen is gone too. Start again from ①.
 - **Heavy computation on compute nodes:** Claude works on a login node. Login nodes are shared by many people, so work that uses a lot of computation or memory is not allowed there (OLCF policy).
   For things like large data processing, say in the instruction that it should run on a compute node. Interactive `salloc` or batch jobs work for this.
   This uses allocation hours, so if you want to approve before submission, add "get my approval before submitting jobs" to the instruction.
 
-### 10-5. Do not use the live mode (SSH tunnel) yet
+### 10-5. Instruct and approve directly from the web (live mode, SSH tunnel)
 
-If you start `devtrack serve` on a Frontier login node and open a tunnel from your computer with `ssh -L 8765:localhost:8765 …`,
-it looks as if you could approve directly on the web as you do locally. But **a login node is a computer shared by many people**, so
-**other users on the same node can also connect** to a server opened on `localhost`.
-The DevTrack server has no login (authentication) yet, so someone else could view the records or click approve, commit or delete.
-Once protection that allows only you to connect is added, this section will describe how to use it. Until then, use the static web.
+If you start `devtrack serve` on Frontier and open it from your computer through an SSH tunnel, you can give new instructions and save approvals directly on the web, just as you do locally.
+The Claude waiting in tmux (10-4) picks them up within a few seconds and works on Frontier.
+
+> **⚠️ Turn it on only while you use the web, and turn it off right after.**
+> A login node is a computer shared by many people, so while the server runs, **other users on the same node** can connect to it too.
+> The DevTrack server has no login (authentication) yet, so someone else could view the records or click approve, commit or delete.
+> Do not leave the server running inside tmux.
+
+**① Make Claude wait** — as in 10-4, tell Claude inside tmux "wait for web instructions". Once you do, it keeps waiting.
+
+**② Open the tunnel and start the server** — connect from a terminal on your computer,
+
+```bash
+ssh -L 8766:localhost:8765 <user ID>@frontier.olcf.ornl.gov
+```
+
+and start the server **in that same window**.
+
+```bash
+devtrack serve            # do not use --open (Frontier has no browser)
+```
+
+- The tunnel leads to the login node this ssh connected to, so the server must be started in this window. Other windows may be on other nodes.
+- Claude may be in tmux on a different node. Both read the same records folder on the shared disk.
+- The `8766` at the front is the port on your computer. If DevTrack also runs on your computer, it already uses 8765, so use a different number.
+
+**③ Open the web** — open `http://localhost:8766/` in the browser on your computer. If the top right shows "Live · local server", the web saves directly.
+
+**④ Instruct · approve** — register an instruction under **New task** in the menu. If the bottom of the screen shows "AI waiting for web instructions: Claude (waiting mode)", Claude on Frontier starts within a few seconds.
+Progress records and approval requests show up on this web too, and clicking approve delivers it to Claude right away.
+
+**⑤ Finish** — press `Ctrl+C` in the server window. If the ssh connection drops, the server stops with it.
+The Claude in tmux keeps waiting, so next time start again from ②. While the server is off, look at the static web ([10-6](#/guide/s10-6)) and give instructions and approvals by pasting.
+
+**Good to know**
+- **Do not mix up the two DevTracks:** if you also use DevTrack on your computer, `localhost:8765` is your computer's DevTrack and `localhost:8766` is Frontier's.
+  Both may show "Claude (waiting mode)", so tell them apart by the task list. Give instructions on the web of the place where the work should happen.
+- **`Address already in use`:** if someone else uses 8765 on the same node, the server does not start. Start it on another port, such as `devtrack serve --port 8790`, and match the tunnel with `-L 8766:localhost:8790`.
+  If your computer shows the same message, change the `8766` at the front to another number.
+- **If you added `--open`:** you get a long list of messages such as `xdg-open: no method available …`. It only means no browser could be opened; the server is running.
+
+### 10-6. What is different on the static web
+
+- **Approvals and instructions by pasting:** the Approve, Message, New task and Cancel buttons show a **message for Claude**.
+  Copy it and paste it into the Claude conversation on Frontier (the tmux screen, 10-4).
+- **Web instructions cannot wake Claude:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)).
+- **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
+  and PR reviews. Use a location with access control for sensitive work.
+- **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
+  If Frontier lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
 
 ## 11. Using it with Codex (optional)
 
@@ -536,6 +643,16 @@ After updating with `git pull`, **open a new** Claude conversation and, if neede
 
 **`devtrack: command not found`**
 Check the PATH setting from step 3, then reopen the terminal and VS Code.
+
+**The `claude` command does not work on Frontier.**
+Claude Code is not installed or not on your PATH. Install it as in [10-3](#/guide/s10-3) ① and add `~/.local/bin` to your PATH.
+
+**`devtrack serve --open` on Frontier prints a long list of `xdg-open` errors.**
+Frontier has no browser, so none could be opened; the server is running. Open the web from your computer through an SSH tunnel ([10-5](#/guide/s10-5)).
+
+**The Frontier tunnel address (`localhost:8766`) does not open.**
+Check ① that the ssh connection with `-L` is still open and ② that you started `devtrack serve` **in that ssh window**.
+A server started in another window may be on a different login node and is not connected to the tunnel ([10-5](#/guide/s10-5)).
 
 **The web page is stuck on "Loading…" or looks wrong.**
 Check that the terminal running `devtrack serve` is still open. If you updated DevTrack (`git pull`), stop `devtrack serve` and start it again.
