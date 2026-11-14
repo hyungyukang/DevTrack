@@ -79,7 +79,7 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 
 ```markdown
 ## DevTrack work records
-- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
+- Record meaningful work (code changes, code reviews, document reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
   Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
 - Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`.
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
@@ -104,13 +104,15 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 >
 > The bracketed tags (`[DevTrack 결정]`, `[완료 처리]` and so on) stay in Korean: they are exactly what DevTrack prints, and Claude understands them either way.
 
-### 5-2. Install the code review skill (if you will ask for code reviews)
+### 5-2. Install the review skills (if you will ask for code or document reviews)
 
-The `/review-pr` skill posts review results to DevTrack and lets you pick on the web which items to comment on.
+The `/review-pr` skill posts code review results to DevTrack and lets you pick on the web which items to comment on.
+The `/review-doc` skill reviews a paper, report or proposal (PDF, Word, LaTeX) and posts the summary and what to fix as a PDF report ([Document review](#/guide/s9)).
 
 ```bash
-mkdir -p ~/.claude/skills/review-pr
+mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
 ```
 
 Linking instead of copying means `git pull` keeps the skill up to date too.
@@ -175,7 +177,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    | Field | What to enter |
    |---|---|
    | Title | A one-line summary (e.g. `Code review of PR #42`) |
-   | Type | Code development · Code review · Paper writing · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
+   | Type | Code development · Code review · Paper writing · Document review · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
    | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
    | Repository path · Branch | The repository to change (optional) |
    | Related tasks | e.g. the paper task that will use this analysis (optional) |
@@ -279,6 +281,26 @@ Use the buttons at the top right of the task detail page.
    - `.tex` manuscripts can be read in **Document view** instead of as code (with equations, tables and figures; you can switch back to the source)
    - Figures, linked data analyses, open issues
 3. If the paper needs an analysis, click **New analysis for this paper** on the paper card. The analysis task is linked to the paper.
+
+### Document review
+
+Have Claude read a paper, report or proposal and give you a **summary** and **what to improve or fix**. The result comes as a PDF report.
+
+1. Give the instruction with type **Document review**. Choosing this type on the New task page shows its own fields.
+   - **Path to the document**: a PDF, Word (`.docx`) or LaTeX (`.tex`) file, as a path on the computer Claude works on (save an old `.doc` file as `.docx` or PDF first)
+   - **Document type**: scientific paper, report, proposal, thesis or other
+   - **Purpose and destination**: e.g. check before journal submission, prepare a grant proposal for review. The review judges how well the document serves this purpose
+   - In the chat you can also say `/review-doc ~/papers/draft.pdf check before journal submission` (install the skill in [step 5-2](#/guide/s5-2))
+2. Claude goes in this order: summary of the document → what is missing for its purpose → overall logic → awkward sentences and spelling.
+   For a **scientific paper** it looks more closely at the format, how the work differs from prior studies, and the reasoning that leads to the conclusions.
+3. See the results in the **Document review** menu.
+   - **Review at a glance**: the verdict (ready to submit, minor revision, major revision, rewrite) with a one-line conclusion, the **document summary**,
+     a rating per area (good, needs work, poor) and the strengths
+   - **What to improve or fix**: each item (R1, R2…) has a plain explanation, its location (page, section) and, where it applies, **original → suggested revision**.
+     Minor items such as spelling are folded
+   - Below, switch between the **review report (PDF)** and the **original document**. For a Word original only the text and tables are shown (download it to see figures and formatting)
+4. When Claude posts "please check the report", look at it and click **Approve**. Write what should change in the comment or in **Send feedback on the review**.
+   If you want a revised copy of the document itself, send "make a revision with R1 and R3": the original file stays as it is and the revision is uploaded separately.
 
 ### Data analysis · visualization
 
@@ -525,7 +547,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 - In DevTrack I am "Codex". Run `devtrack` with the environment variable `DEVTRACK_AGENT=Codex`
   (no need to add it if it is set in `shell_environment_policy` in ~/.codex/config.toml).
   If `devtrack` is not on PATH, use `~/devtrack/bin/devtrack`. Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
-- Record meaningful work (code changes, code reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
+- Record meaningful work (code changes, code reviews, document reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
 - Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`. Only input for tasks assigned to me is shown.
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
@@ -687,7 +709,7 @@ Commands you use yourself:
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack --data <folder> demo` | Create example data |
 
-Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report ·
+Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
 `request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
 `start --take` take over another AI's task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/AI_Dev_Progress_Checker/blob/main/docs/AGENT_PROTOCOL.md).

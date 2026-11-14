@@ -76,6 +76,7 @@ devtrack delete $TID                  # 완전히 삭제 — 작업 ID 를 다�
 | `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md). 해석이 필요한 결과는 `request -k result`. **논문에 쓸 분석이면 `--related <논문 T-ID>`** 로 연결 |
 | `visualization` | 그림/HTML(plotly 등) 결과물, 사용한 스크립트 |
 | `model` | 학습 설정, 손실 곡선 그림, 로그, 평가 결과. 큰 자원 사용 전 `request -k plan` |
+| `docreview` | 논문 · 보고서 · 제안서 등 사용자가 준 문서(PDF · Word · LaTeX) 리뷰. 원본은 `artifact --source`, 리포트는 `devtrack review <TID> report.md --pdf --findings f.json` (문서 요약 · 점검 영역 · 보완할 부분 R1…). **결과물로 제출하는 것은 리포트 PDF**. 자세한 흐름은 [문서 리뷰](#문서-리뷰) |
 | `brainstorm` | 아이디어 노트(md) — 아이디어마다 번호(I1, I2…)와 필요한 것 · 위험 · 기대 효과. 사용자가 이어갈 아이디어는 `request -k plan --choices "I1=짧은 이름" …` 으로 고르게 하고, 고른 것만 다음 노트로 구체화. 실제 작업은 `--related <브레인스토밍 T-ID>` 로 연결. 자세한 흐름은 [브레인스토밍](#브레인스토밍) |
 
 ## 코드 리뷰
@@ -154,6 +155,70 @@ devtrack new "I3: 왜도 차이 원인 규명" -t analysis --related $TID
 - 사용자가 화면에서 보낸 의견 · 새 아이디어는 메시지(`[메시지]`)로 온다 — 다음 노트나 선택지에 반영한다.
 - 라운드마다 새 파일 이름으로 올리면 화면 위쪽에서 노트를 바꿔 볼 수 있다. 같은 노트를 고쳐 쓰면 같은 이름으로 올려 새 버전으로 남긴다.
 - 사용자가 웹의 **이 아이디어로 작업 지시** 로 새 작업을 만들면, 그 작업은 이미 브레인스토밍과 연결되어 있다.
+
+## 문서 리뷰
+
+논문 · 보고서 · 제안서처럼 사용자가 준 문서(PDF · Word `.docx` · LaTeX)를 그 문서의 목적에 맞게 잘 썼는지 리뷰한다.
+웹의 **문서 리뷰** 화면은 리뷰 결과(문서 요약 · 점검 영역 · 보완할 부분)와 리뷰 리포트 PDF, 원본 문서를 함께 보여 준다.
+Claude Code 에서는 `/review-doc` 스킬이 이 흐름을 따른다 ([integrations/claude-skills](../integrations/claude-skills/README.md)).
+
+```bash
+TID=$(devtrack new "문서 리뷰: <문서 제목>" -t docreview -i "<사용자 요청 원문>" \
+      --plan "문서 읽기 · 요약" "목적 대비 미비한 부분" "논리 점검" "문장 · 맞춤법 점검" "리뷰 리포트(PDF) 작성" "리포트 확인 (사용자)")
+
+# 1. 원본을 '검토할 문서'로 올린다 — Word 는 웹 미리보기(글자 · 표)가 함께 만들어진다
+devtrack artifact $TID ~/Documents/proposal.docx --source -n "검토할 문서: proposal.docx"
+devtrack text ~/Documents/proposal.docx -o proposal.md   # Word → Markdown (pip 없이). PDF 는 pdftotext 가 있으면 같은 명령
+
+# 2. 리포트(md) + 검토 결과(JSON) 등록, --pdf 로 PDF 도 만들어 첨부 — 결과물로 제출하는 것은 이 PDF
+devtrack review $TID doc-review-proposal.md --pdf -n "문서 리뷰 리포트" --findings doc-review-proposal.json
+
+# 3. 리포트 확인 요청 → 승인되면 완료
+AID=$(devtrack request $TID "문서 리뷰 리포트를 확인해 주세요" -k result -a <리포트 PDF 의 F-ID>)
+devtrack done $TID -m "리뷰 리포트 전달 — 소폭 수정"
+```
+
+리뷰 순서 (리포트 양식: [templates/doc_review_report.md](../templates/doc_review_report.md)):
+
+1. **요약** — 무엇에 대한 문서인지, 핵심 주장 · 결과를 3–6문장으로. 먼저 문서의 종류와 **목적**(제출처 · 읽는 사람)을 정한다.
+   지시에 없으면 문서에서 추론하고 "추정"이라고 적는다.
+2. **목적 대비 미비한 부분** — 그 목적의 독자(심사위원 · 편집자 · 결재자)가 찾을 내용이 있는지.
+   제안서: 필요성 · 목표와 방법의 연결 · 일정 · 자원 산정 근거 · 기대 효과 / 보고서: 결론과 근거 · 한계 · 다음 할 일 / 논문: 새로운 기여.
+3. **전반적 논리** — 주장 → 근거 → 결론의 연결, 빠진 단계, 근거보다 큰 주장, 앞뒤가 맞지 않는 수치 · 용어.
+4. **문장 · 맞춤법** — 어색한 문장, 맞춤법 · 띄어쓰기 · 문법, 용어 · 표기 통일. 위치 · 원문 · 수정안을 함께 적는다.
+5. **과학 논문은 더 자세히** — 형식(초록 · 서론 · 방법 · 결과 · 결론의 구성, 투고처 규정, 그림 · 표 · 참고문헌),
+   **선행 연구와의 차이**(인용만 하고 무엇이 다른지 말하지 않는지, "처음"이라는 주장이 맞는지 — 찾아볼 수 있으면 문헌을 확인),
+   **결론을 이끄는 논리**(통계 · 불확도, 일반화 범위, 다른 설명 가능성, 재현에 필요한 정보).
+
+검토 결과 JSON (`--findings`) — 코드 리뷰와 같은 형식에서 `pr` 대신 `doc`, 그리고 `checks` · `strengths`:
+
+```json
+{
+  "doc": {"title": "...", "kind": "paper", "purpose": "Journal of Fluid Mechanics 투고 전 점검", "audience": "심사위원 · 편집자",
+          "authors": "...", "pages": 12, "words": 6500, "format": "PDF", "source": "F-1",
+          "synopsis": "문서 요약 (markdown, 3–6문장)"},
+  "verdict": "major_revision",
+  "summary": "한 줄 결론 + 꼭 고칠 것 (쉬운 말 2–3문장)",
+  "checks": [{"area": "목적 부합", "rating": "fair", "note": "한 줄 메모"}],
+  "strengths": ["잘된 점 한 문장"],
+  "findings": [
+    {"id": "R1", "severity": "blocker", "title": "한 줄 요약", "plain": "쉽게 말하면: 비전문가용 1–2문장",
+     "location": "3쪽 · 2.1절 둘째 문단", "quote": "문서 원문 그대로", "suggestion": "수정안",
+     "category": "선행 연구", "confidence": "high", "status": "open"}
+  ]
+}
+```
+
+- `doc.kind`: `paper`(과학 논문) · `report`(보고서) · `proposal`(제안서) · `thesis`(학위 논문) · `other`. `doc.source` 는 원본 결과물 ID
+- `verdict`: `ready`(제출 가능) · `minor_revision`(소폭 수정) · `major_revision`(대폭 보완) · `rework`(다시 작성)
+- `checks[].rating`: `good`(양호) · `fair`(보완 필요) · `poor`(미흡) · `na`(해당 없음). 영역은 문서에 맞게 —
+  기본은 목적 부합 · 구성 · 형식 · 논리 전개 · 문장 · 표현 · 맞춤법 · 표기, 과학 논문은 선행 연구와의 차이 · 결론의 근거를 더한다
+- `severity` 는 코드 리뷰와 같다. 문장 · 맞춤법 같은 작은 항목은 `nit` — 웹에서는 접어서 보여 준다. 같은 실수가 여러 곳이면 한 항목에 위치를 모은다
+- `category`(권장): 목적 · 내용 / 구성 · 형식 / 논리 / 선행 연구 / 결론 · 근거 / 문장 · 표현 / 맞춤법 · 표기
+- 리포트 · 항목 설명은 한국어. `quote` 는 문서 원문 그대로, `suggestion` 은 **문서의 언어로** (영어 논문이면 영어 수정안)
+- 리포트를 고치면 같은 파일 이름으로 다시 `devtrack review` → 같은 결과물의 새 버전
+- 원본을 고쳐 달라는 요청이 오면(예: "R1, R3 반영해 줘") 고칠 항목을 `request -k review --choices` 로 고르게 하고,
+  수정본은 다른 이름으로 결과물에 올린다. 사용자의 원본 파일은 덮어쓰지 않는다
 
 ## 승인 요청을 올려야 하는 때
 
@@ -262,7 +327,7 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
 
 ```markdown
 ## DevTrack 작업 기록
-- 의미 있는 작업(코드 변경, 코드 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
+- 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
   규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
 - 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다.
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
@@ -292,7 +357,7 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
 - DevTrack 에서 나는 "Codex" 다. `devtrack` 은 환경 변수 `DEVTRACK_AGENT=Codex` 로 실행한다
   (~/.codex/config.toml 의 `shell_environment_policy` 에 설정해 두었으면 따로 붙이지 않는다).
   `devtrack` 이 PATH 에 없으면 `<DevTrack 저장소>/bin/devtrack` 을 쓴다. 규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
-- 의미 있는 작업(코드 변경, 코드 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
+- 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
 - 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 나에게 배정된 작업의 입력만 보인다.
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고

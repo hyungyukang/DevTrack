@@ -267,6 +267,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent);
 label.field { display: block; margin-bottom: 14px; }
 label.field > span { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
 label.field > small { display: block; color: var(--text-3); margin-top: 4px; font-size: 12px; }
+/* 작업 유형에 따라 숨기는 칸 (새 작업 지시) — display 규칙보다 우선 */
+#new-task-form [hidden] { display: none !important; }
 .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -604,6 +606,39 @@ table.data .t-prog span { font-size: 12px; color: var(--text-2); font-variant-nu
 .bs-comment { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 .bs-comment .icon { flex: none; margin-top: 2px; }
 .bs-notes { padding: 12px 20px 0; }
+
+/* 문서 리뷰: 목적 · 점검 영역 · 잘된 점 · 원문 → 수정 제안 · 사소한 항목 접기 */
+.dr-purpose { font-size: 13px; }
+.dr-block { display: flex; flex-direction: column; gap: 8px; }
+.dr-block > .wc-label { margin: 4px 0 0; }
+.dr-checks { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.dr-checks li { display: grid; grid-template-columns: minmax(110px, 180px) max-content minmax(0, 1fr); gap: 10px; align-items: baseline;
+  padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.dr-checks li:first-child { border-top: 0; }
+.dr-checks .dr-area { font-weight: 600; overflow-wrap: anywhere; }
+.dr-checks .dr-note { color: var(--text-2); overflow-wrap: anywhere; }
+.dr-strengths { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.dr-strengths li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; overflow-wrap: anywhere; }
+.dr-strengths .icon { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--green); }
+.dr-edit { margin-top: 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 13px; }
+.dr-edit > div { display: flex; gap: 10px; padding: 6px 10px; }
+.dr-edit > div + div { border-top: 1px solid var(--border); }
+.dr-edit .lbl { flex: none; width: 4.6em; font-size: 12px; font-weight: 650; color: var(--text-3); padding-top: 1px; }
+html[lang="en"] .dr-edit .lbl { width: 7.6em; }
+.dr-edit .txt { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dr-quote { background: var(--red-soft); }
+.dr-quote .txt { color: var(--text-2); }
+.dr-sugg { background: var(--green-soft); }
+.dr-nits > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 13px; font-weight: 600; padding: 6px 0; }
+.dr-nits > summary::-webkit-details-marker { display: none; }
+.dr-nits > summary .chev { transition: transform .15s; color: var(--text-3); width: 14px; height: 14px; }
+.dr-nits[open] > summary .chev { transform: rotate(90deg); }
+@media (max-width: 560px) {
+  .dr-checks li { grid-template-columns: minmax(0, 1fr) max-content; }
+  .dr-checks .dr-note { grid-column: 1 / -1; }
+  .dr-edit > div { flex-direction: column; gap: 2px; }
+}
 
 /* 리뷰 결과 한눈에 보기 · 검토 항목(R1, R2…) */
 .fid { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 22px; padding: 0 6px;

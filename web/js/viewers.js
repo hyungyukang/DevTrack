@@ -139,6 +139,15 @@ export async function renderArtifactInto(el, taskId, art, opts = {}) {
       case 'html':
         el.innerHTML = html`<iframe class="html-frame" sandbox="allow-scripts allow-popups" src="${url}" title="${art.title || 'HTML'}"></iframe>`.s;
         break;
+      case 'docx':
+        if (art.preview) {
+          const { text, truncated } = await fetchText(artifactUrl(taskId, { path: art.preview }));
+          el.innerHTML = `${truncNote(truncated)}<div class="av-note">${icon('info')} ${L('Word 문서에서 글자 · 표만 뽑아 보여 줍니다. 그림 · 수식 · 서식은 원본 파일을 내려받아 확인하세요.')}</div>
+            <div class="markdown-body av-pad">${renderMarkdown(text, { breaks: false })}</div>`;
+          break;
+        }
+        el.innerHTML = html`<div class="link-card">${icon('file')}<div>${L('Word 문서는 미리보기가 없습니다.')} <a href="${url}" download>${L('다운로드')}</a>${art.size ? ` (${fmtBytes(art.size)})` : ''}</div></div>`.s;
+        break;
       case 'link':
         el.innerHTML = html`<div class="link-card">${icon('link')}<div><a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a></div></div>`.s;
         break;

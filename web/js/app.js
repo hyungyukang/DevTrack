@@ -1,7 +1,7 @@
 // DevTrack 웹 앱 — 정적 호스팅(읽기 전용)과 로컬 서버(쓰기 가능) 모두에서 동작
 import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
-  FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
+  FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, DOC_KIND, CHECK_RATING, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
   isUnassigned, aiName, agentLabel,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
@@ -18,8 +18,10 @@ const DECISION = translated({
   reject: { label: '거절', tone: 'red' },
 });
 // 작업 유형 → 분야 섹션 (사이드바 메뉴)
-const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews', brainstorm: 'brainstorm' };
-const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', brainstorm: '브레인스토밍', tasks: '작업' });
+const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews', docreview: 'docreview', brainstorm: 'brainstorm' };
+const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', docreview: '문서 리뷰', brainstorm: '브레인스토밍', tasks: '작업' });
+// 작업을 고른 채로 여는 분야 화면 (#/brainstorm/T-0009)
+const PER_TASK_SECTIONS = ['brainstorm', 'docreview'];
 const ANALYSIS_TYPES = ['analysis', 'visualization'];
 const FIGURE_KINDS = ['image', 'html'];
 
@@ -94,6 +96,7 @@ const VIEWS = {
   papers: viewPapers,
   analysis: viewAnalysis,
   brainstorm: viewBrainstorm,
+  docreview: viewDocReview,
   artifacts: viewArtifacts,
   artifact: viewArtifact,
   activity: viewActivity,
@@ -194,8 +197,8 @@ function isRelevant(changed, prev, idx) {
   if (r.name === 'guide') return false;
   if (r.name === 'task' || r.name === 'artifact') return changed.has(r.rest[0]);
   if (r.name === 'reviews') {
-    const ids = (x) => x.reviews.map((v) => v.task_id + v.id).join();
-    return ids(prev) !== ids(idx) || changed.has(r.rest[0] || idx.reviews[0]?.task_id);
+    const ids = (x) => codeReviews(x).map((v) => v.task_id + v.id).join();
+    return ids(prev) !== ids(idx) || changed.has(r.rest[0] || codeReviews(idx)[0]?.task_id);
   }
   return true;
 }
@@ -382,10 +385,10 @@ function toast({ title, meta, tone = '', href, sticky = false }) {
 }
 
 // ====================================================================== 상단바 / 사이드바
-/** 작업이 속한 분야 화면 주소 (브레인스토밍은 그 작업을 고른 채로) */
+/** 작업이 속한 분야 화면 주소 (브레인스토밍 · 문서 리뷰는 그 작업을 고른 채로) */
 function sectionHref(t) {
   const sec = SECTION_OF_TYPE[t.type] || 'tasks';
-  return sec === 'brainstorm' ? `#/brainstorm/${t.id}` : `#/${sec}`;
+  return PER_TASK_SECTIONS.includes(sec) ? `#/${sec}/${t.id}` : `#/${sec}`;
 }
 
 function sectionOfTask(id) {
@@ -408,6 +411,7 @@ function updateChrome(route = parseRoute()) {
   setCount('#nav-papers-count', pendIn('papers'));
   setCount('#nav-analysis-count', pendIn('analysis'));
   setCount('#nav-brainstorm-count', pendIn('brainstorm'));
+  setCount('#nav-docreview-count', pendIn('docreview'));
   const seen = LS.get('seenTs', 0);
   const unseen = idx ? idx.events.filter((e) => e.kind !== 'approval' && tsNum(e.ts) > seen).length : 0;
   $('#bell-count').textContent = pending;
@@ -583,9 +587,16 @@ function artRow(tid, a, { showTask = false, thumb = false } = {}) {
   const img = thumb && a.kind === 'image' && a.path ? artifactUrl(tid, a) : null;
   return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
     <span class="ic ${img ? 'has-img' : ''}">${img ? html`<img src="${img}" alt="" loading="lazy">` : icon(k.icon)}</span>
-    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : a.category === 'source' ? ` · ${L('검토할 문서')}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
     ${icon('chev')}
   </a>`;
+}
+
+/** 결과물 분류 표시: 리뷰 리포트 · 검토할 문서(문서 리뷰의 원본) */
+function catBadge(a) {
+  if (a.category === 'review') return html`<span class="badge tone-violet">${L('리뷰')}</span>`;
+  if (a.category === 'source') return html`<span class="badge tone-orange">${L('검토할 문서')}</span>`;
+  return '';
 }
 
 function artCard(a) {
@@ -595,7 +606,7 @@ function artCard(a) {
     <div class="thumb">${a.kind === 'image' && url ? html`<img src="${url}" alt="" loading="lazy">` : icon(k.icon)}</div>
     <div class="info">
       <div class="title" title="${a.title}">${a.title}</div>
-      <div class="meta"><span class="badge">${k.label}</span>${a.category === 'review' ? html`<span class="badge tone-violet">${L('리뷰')}</span>` : ''}${a.version > 1 ? html`<span class="badge tone-accent" title="${L('이전 버전 {n}개 보관', { n: a.version - 1 })}">v${a.version}</span>` : ''}<span>${a.task_id}</span>${ago(a.updated_at || a.created_at)}</div>
+      <div class="meta"><span class="badge">${k.label}</span>${catBadge(a)}${a.version > 1 ? html`<span class="badge tone-accent" title="${L('이전 버전 {n}개 보관', { n: a.version - 1 })}">v${a.version}</span>` : ''}<span>${a.task_id}</span>${ago(a.updated_at || a.created_at)}</div>
     </div>
   </a>`;
 }
@@ -1170,7 +1181,7 @@ function taskOverview(t, openIssues) {
   const arts = [...t.artifacts].reverse().slice(0, 6);
   return html`<div class="detail-grid">
     <div>
-      ${reviewPanel(t)}
+      ${t.type === 'docreview' || t.review?.doc ? (t.review ? docReviewPanel(t) : '') : reviewPanel(t)}
       <section class="card">
         <div class="card-head"><h2>${icon('message')} ${L('작업 지시')}</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
         <div class="card-body">${t.instruction ? html`<div class="markdown-body">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted">${L('지시 내용이 기록되지 않았습니다')}</div>`}</div>
@@ -1264,15 +1275,17 @@ function viewerHead(t, art) {
   const url = artifactUrl(t.id, art);
   return html`<div class="viewer-head">
     <div style="min-width:0"><h2>${art.title}</h2>
-      <div class="meta"><span class="badge">${icon(k.icon)}${k.label}</span>${art.category === 'review' ? html`<span class="badge tone-violet">${L('리뷰')}</span>` : ''}${art.version > 1 ? html`<span class="badge tone-accent">v${art.version}</span>` : ''}<a href="#/task/${t.id}">${t.id} · ${t.title}</a><span>${authorName(art.updated_by || art.author)} · ${ago(art.updated_at || art.created_at)}</span>${art.size ? html`<span>${fmtBytes(art.size)}</span>` : ''}</div>
+      <div class="meta"><span class="badge">${icon(k.icon)}${k.label}</span>${catBadge(art)}${art.version > 1 ? html`<span class="badge tone-accent">v${art.version}</span>` : ''}<a href="#/task/${t.id}">${t.id} · ${t.title}</a><span>${authorName(art.updated_by || art.author)} · ${ago(art.updated_at || art.created_at)}</span>${art.size ? html`<span>${fmtBytes(art.size)}</span>` : ''}</div>
       ${art.versions?.length ? html`<div class="versions">${icon('clock')} ${L('이전 버전')} ${[...art.versions].reverse().map((v) => html`<a href="${artifactUrl(t.id, v)}" target="_blank" rel="noopener" title="${fmtAbs(v.created_at)}">v${v.version} · ${fmtRel(v.created_at)}</a>`)}</div>` : ''}
     </div>
     <div class="actions">${url ? html`<a class="btn btn-sm" href="${url}" target="_blank" rel="noopener">${icon('external')} ${L('새 탭')}</a>${art.path ? html`<a class="btn btn-sm" href="${url}" download>${icon('download')} ${L('다운로드')}</a>` : ''}` : ''}</div>
   </div>`;
 }
 
+const codeReviews = (idx) => idx.reviews.filter((r) => r.task_type !== 'docreview'); // 문서 리뷰는 '문서 리뷰' 화면에
+
 async function viewReviews({ rest }) {
-  const reviews = state.index.reviews;
+  const reviews = codeReviews(state.index);
   const head = html`<div class="page-head"><div><h1>${L('코드 리뷰')}</h1><p class="sub">${L('AI가 작성한 리뷰 리포트 (Markdown · PDF)')}</p></div></div>`;
   if (!reviews.length) {
     return html`${head}<div class="card empty">${icon('eye')}<p>${L('등록된 리뷰 리포트가 없습니다')}</p><p>${LH('<code>devtrack review T-0001 review_report.md</code> 로 등록하면 여기에 표시됩니다')}</p></div>`;
@@ -1627,6 +1640,170 @@ async function viewBrainstorm({ rest }) {
     </div>`;
 }
 
+// ---------------------------------------------------------------- 문서 리뷰
+// 논문 · 보고서 · 제안서(PDF · Word · LaTeX)를 AI 가 리뷰한 결과: 문서 요약, 점검 영역별 평가, 보완 · 수정 항목(R1…),
+// 리뷰 리포트(PDF)와 원본 문서를 한 화면에서 본다. 기록은 devtrack review --findings (doc · checks · strengths)
+const DOC_VIEW_KINDS = ['pdf', 'markdown', 'text', 'html', 'latex', 'docx'];
+
+function drListItem(t, sel) {
+  const rs = t.review;
+  const kind = rs?.doc?.kind ? pick(DOC_KIND, rs.doc.kind, 'other').label : '';
+  const v = rs?.verdict ? VERDICT[rs.verdict] : null;
+  return html`<a class="review-item ${t.id === sel ? 'active' : ''}" href="#/docreview/${t.id}">
+    <div class="title">${t.title}</div>
+    <div class="meta">${statusBadge(t.status)}<span>${t.id}</span>${ago(t.updated_at)}
+      ${t.pending_approvals ? html`<span class="flag amber">${icon('bell')}${L('승인§개수')} ${t.pending_approvals}</span>` : ''}</div>
+    ${kind || v ? html`<div class="meta">${kind ? html`<span class="badge">${kind}</span>` : ''}${v ? html`<span class="badge tone-${v.tone}">${v.label}</span>` : ''}</div>` : ''}
+    ${rs?.total ? html`<div class="meta">${rs.open ? sevChips(rs.by_severity) : html`<span class="badge tone-green">${L('모두 처리됨')}</span>`}</div>` : ''}
+  </a>`;
+}
+
+function docMeta(t, doc) {
+  const bits = [];
+  if (doc.kind) bits.push(html`<span class="badge tone-orange">${pick(DOC_KIND, doc.kind, 'other').label}</span>`);
+  if (doc.authors) bits.push(html`<span>${icon('user')} ${doc.authors}</span>`);
+  if (doc.pages) bits.push(html`<span>${L('{n}쪽', { n: doc.pages })}</span>`);
+  if (doc.words) bits.push(html`<span>${L('{n}단어', { n: doc.words })}</span>`);
+  if (doc.format) bits.push(html`<span>${doc.format}</span>`);
+  const src = doc.source && t.artifacts.find((a) => a.id === doc.source);
+  if (src) bits.push(html`<a href="#/docreview/${t.id}/${src.id}">${icon('file-text')} ${L('원본 보기')}</a>`);
+  return bits.length ? html`<div class="pr-meta">${bits}</div>` : '';
+}
+
+function checkTable(checks) {
+  return html`<ul class="dr-checks">${checks.map((c) => {
+    const r = pick(CHECK_RATING, c.rating, 'na');
+    return html`<li><span class="dr-area">${c.area}</span><span class="badge tone-${r.tone}">${icon(r.icon)}${r.label}</span>${c.note ? html`<span class="dr-note">${c.note}</span>` : ''}</li>`;
+  })}</ul>`;
+}
+
+function docFindingItem(f) {
+  const loc = f.location || (f.file ? `${f.file}${f.line ? `:${f.line}` : ''}` : '');
+  return html`<li class="finding s-${f.status}">
+    <span class="fid">${f.id}</span>
+    <div class="f-body">
+      <div class="f-head">${sevBadge(f.severity)}<span class="f-title">${f.title}</span>${f.status !== 'open' ? badge(FINDING_STATUS, f.status) : ''}</div>
+      ${f.plain ? html`<div class="f-plain">${f.plain}</div>` : ''}
+      ${f.quote || f.suggestion ? html`<div class="dr-edit">
+        ${f.quote ? html`<div class="dr-quote"><span class="lbl">${L('원문')}</span><span class="txt">${f.quote}</span></div>` : ''}
+        ${f.suggestion ? html`<div class="dr-sugg"><span class="lbl">${L('수정 제안')}</span><span class="txt">${f.suggestion}</span></div>` : ''}
+      </div>` : ''}
+      ${loc || f.category || f.confidence ? html`<div class="f-meta">${loc ? html`<span>${icon('file-text')} ${loc}</span>` : ''}${f.category ? html`<span>${f.category}</span>` : ''}${f.confidence ? html`<span>${L('확신도')} ${CONFIDENCE[f.confidence] || f.confidence}</span>` : ''}</div>` : ''}
+    </div>
+  </li>`;
+}
+
+function docReviewPanel(t) {
+  const rv = t.review;
+  if (!rv) return html`<div class="card empty inline" style="padding:16px 18px">${L('아직 리뷰 결과가 없습니다 — AI 가 문서를 읽고 요약 · 점검 결과를 올리면 여기에 표시됩니다')}</div>`;
+  const doc = rv.doc || {};
+  const all = rv.findings || [];
+  const open = all.filter((f) => f.status === 'open');
+  const by = {};
+  open.forEach((f) => { by[f.severity] = (by[f.severity] || 0) + 1; });
+  const v = rv.verdict ? pick(VERDICT, rv.verdict) : null;
+  const main = all.filter((f) => f.severity !== 'nit');
+  const nits = all.filter((f) => f.severity === 'nit');
+  const nitsOpen = nits.filter((f) => f.status === 'open').length;
+  return html`<section class="card review-sum">
+    <div class="card-head"><h2>${icon('file-search')} ${L('리뷰 결과 한눈에 보기')}</h2><span class="muted" style="font-size:12.5px">${ago(rv.updated_at)}</span></div>
+    <div class="card-body">
+      ${doc.title ? html`<div class="pr-title">${doc.title}</div>` : ''}
+      ${docMeta(t, doc)}
+      ${doc.purpose || doc.audience ? html`<dl class="kv dr-purpose">
+        ${doc.purpose ? html`<dt>${L('문서의 목적')}</dt><dd>${doc.purpose}</dd>` : ''}
+        ${doc.audience ? html`<dt>${L('읽는 사람')}</dt><dd>${doc.audience}</dd>` : ''}
+      </dl>` : ''}
+      ${v || rv.summary ? html`<div class="rv-verdict">
+        ${v ? html`<div class="rv-v"><span class="badge tone-${v.tone}">${icon(v.icon)} ${L('리뷰 의견')}: ${v.label}</span></div>` : ''}
+        ${rv.summary ? html`<div class="markdown-body compact">${raw(renderMarkdown(rv.summary))}</div>` : ''}
+      </div>` : ''}
+      ${doc.synopsis ? html`<div class="dr-block"><div class="wc-label"><span>${L('문서 요약')}</span></div><div class="markdown-body compact">${raw(renderMarkdown(doc.synopsis))}</div></div>` : ''}
+      ${rv.checks?.length ? html`<div class="dr-block"><div class="wc-label"><span>${L('점검 영역')}</span></div>${checkTable(rv.checks)}</div>` : ''}
+      ${rv.strengths?.length ? html`<div class="dr-block"><div class="wc-label"><span>${L('잘된 점')}</span></div>
+        <ul class="dr-strengths">${rv.strengths.map((x) => html`<li>${icon('check')}<span>${x}</span></li>`)}</ul></div>` : ''}
+      <div class="dr-block">
+        <div class="wc-label"><span>${L('보완 · 수정할 부분')}</span></div>
+        <div class="sev-row"><span class="lbl">${L('남은 항목 {n}개', { n: open.length })}</span>${sevChips(by, { empty: all.length ? html`<span class="badge tone-green">${icon('check')} ${L('모두 처리됨')}</span>` : '' })}</div>
+        ${main.length ? html`<ul class="finding-list">${main.map(docFindingItem)}</ul>` : ''}
+        ${nits.length ? html`<details class="dr-nits" data-key="dr-nits:${t.id}" ${main.length ? '' : raw('open')}>
+          <summary>${icon('chev', 'chev')} ${L('사소한 항목 (문장 · 맞춤법 등) {n}개', { n: nits.length })}${nitsOpen !== nits.length ? html` <span class="muted">· ${L('남은 항목 {n}개', { n: nitsOpen })}</span>` : ''}</summary>
+          <ul class="finding-list">${nits.map(docFindingItem)}</ul>
+        </details>` : ''}
+        ${all.length ? '' : html`<div class="muted mini-empty">${L('아직 검토 항목이 없습니다')}</div>`}
+      </div>
+    </div>
+  </section>`;
+}
+
+/** 리포트(PDF 먼저) → 그 밖의 결과 문서 → 검토할 문서(원본) 순서 */
+function drDocs(t) {
+  const docs = t.artifacts.filter((a) => DOC_VIEW_KINDS.includes(a.kind) && !isBuildLog(a));
+  const rank = (a) => (a.category === 'review' ? (a.kind === 'pdf' ? 0 : 1) : a.category === 'source' ? 3 : 2);
+  return docs.map((a, i) => [a, i]).sort((x, y) => rank(x[0]) - rank(y[0]) || y[1] - x[1]).map(([a]) => a);
+}
+
+async function viewDocReview({ rest }) {
+  const idx = state.index;
+  const head = sectionHead(L('문서 리뷰'), L('논문 · 보고서 · 제안서(PDF · Word · LaTeX)를 AI 가 읽고 요약 · 보완할 점 · 논리 · 문장을 점검한 리뷰'), '#/new?type=docreview');
+  const all = idx.tasks.filter((t) => t.type === 'docreview')
+    .sort((a, b) => Number(!ACTIVE.includes(a.status)) - Number(!ACTIVE.includes(b.status)) || tsNum(b.updated_at) - tsNum(a.updated_at));
+  if (!all.length) {
+    return html`${head}<div class="card empty">${icon('file-search')}<p>${L('아직 문서 리뷰가 없습니다')}</p>
+      <p class="muted">${L('검토할 문서의 경로와 목적을 적어 지시하면, AI 가 문서를 요약하고 보완 · 수정할 부분을 PDF 리포트로 올립니다.')}</p>
+      <p><a href="#/new?type=docreview">${L('문서 리뷰 맡기기')}</a></p></div>`;
+  }
+  const [tid, fid] = rest;
+  const sel = all.find((t) => t.id === tid) || all[0];
+  const t = await loadTask(sel.id);
+  const docs = drDocs(t);
+  const cur = docs.find((a) => a.id === fid) || docs[0];
+  const sources = t.artifacts.filter((a) => a.category === 'source');
+  const pending = t.approvals.filter((a) => a.status === 'pending');
+  const now = taskNow(sel);
+  const allIds = new Set(all.map((x) => x.id));
+  const tabLabel = (a) => (a.category === 'source' ? `${L('원본')} · ${a.title}` : a.title);
+  return html`${head}
+    ${sectionStats(all, idx.artifacts.filter((a) => allIds.has(a.task_id)))}
+    <div class="review-layout">
+      <aside class="card review-list">${all.map((x) => drListItem(x, sel.id))}</aside>
+      <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
+        <article class="card work-card" style="margin-bottom:0">
+          <div class="wc-head">
+            <div class="wc-title">
+              <div class="th-badges">${statusBadge(t.status)}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
+              <h3><a href="#/task/${t.id}"><span class="th-id">${t.id}</span>${t.title}</a></h3>
+              ${now.text ? html`<div class="wc-now"><span class="lbl">${now.label}</span>${now.text}</div>` : ''}
+              <div class="wc-meta">${agentLabel(t)} · ${L('업데이트')} ${ago(t.updated_at)}</div>
+            </div>
+            <div class="wc-prog"><div class="row"><span>${L('진행률')}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
+          </div>
+          <div class="wc-body">
+            <div>
+              <div class="wc-label"><span>${L('검토 요청')}</span><a href="#/task/${t.id}">${L('작업 화면')}</a></div>
+              ${t.instruction ? html`<div class="markdown-body compact">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted mini-empty">${L('지시 내용이 기록되지 않았습니다')}</div>`}
+            </div>
+            <div>
+              <div class="wc-label"><span>${L('진행 계획')}</span></div>
+              ${planList(t)}
+              <div class="wc-label"><span>${L('검토할 문서')}</span></div>
+              ${sources.length ? sources.map((a) => html`<a class="mini-row" href="#/docreview/${t.id}/${a.id}">${icon(pick(ART_KIND, a.kind, 'file').icon)}<span class="t">${a.title}</span><span class="badge">${pick(ART_KIND, a.kind, 'file').label}</span>${a.version > 1 ? html`<span class="badge tone-accent">v${a.version}</span>` : ''}</a>`)
+                : html`<div class="muted mini-empty">${L('AI 가 원본 문서를 올리면 여기에 표시됩니다')}</div>`}
+            </div>
+          </div>
+        </article>
+        ${pending.map((a) => approvalCard(t, a, { skip: cur ? [cur.id] : [] }))}
+        ${docReviewPanel(t)}
+        ${cur ? html`<section class="card" style="overflow:hidden">
+          ${docs.length > 1 ? html`<div class="chips bs-notes">${docs.map((a) => html`<a class="chip ${a === cur ? 'active' : ''}" href="#/docreview/${t.id}/${a.id}">${tabLabel(a)}</a>`)}</div>` : ''}
+          ${viewerHead(t, cur)}
+          <div data-av="${t.id}/${cur.id}"></div>
+        </section>` : html`<div class="card empty inline" style="padding:16px 18px">${L('아직 리뷰 리포트나 문서가 없습니다')}</div>`}
+        ${feedbackBox(t, L('리뷰에 대한 의견 보내기'))}
+      </div>
+    </div>`;
+}
+
 // ---------------------------------------------------------------- 코드 개발
 const CODE_ART_KINDS = ['code', 'diff'];
 const CODE_FILTERS = translated({
@@ -1672,7 +1849,7 @@ function viewCode({ q }) {
 // ====================================================================== 화면: 결과물
 const ART_GROUPS = translated({
   all: { label: '전체', test: () => true },
-  doc: { label: '문서', test: (a) => ['markdown', 'pdf', 'text', 'latex'].includes(a.kind) },
+  doc: { label: '문서', test: (a) => ['markdown', 'pdf', 'text', 'latex', 'docx'].includes(a.kind) },
   code: { label: '코드 · 변경사항', test: (a) => ['code', 'diff'].includes(a.kind) },
   figure: { label: '그림 · 시각화', test: (a) => ['image', 'html'].includes(a.kind) },
   data: { label: '데이터 · 노트북', test: (a) => ['csv', 'notebook'].includes(a.kind) },
@@ -1757,7 +1934,12 @@ function viewNewTask({ q = {} } = {}) {
         <label class="field"><span>${L('우선순위')}</span><select name="priority"><option value="normal">${L('보통')}</option><option value="high">${L('높음')}</option><option value="low">${L('낮음')}</option></select></label>
       </div>
       ${listenersSummary()}
-      <div class="field-row">
+      <div class="field-row" data-type-only="docreview" ${type === 'docreview' ? '' : raw('hidden')}>
+        <label class="field" style="flex:2"><span>${L('검토할 문서 경로')}</span><input type="text" name="doc_path" placeholder="~/Documents/proposal_v3.docx"><small>${L('PDF · Word(.docx) · LaTeX(.tex) — AI 가 일하는 컴퓨터의 경로')}</small></label>
+        <label class="field"><span>${L('문서 종류')}</span><select name="doc_kind">${Object.entries(DOC_KIND).map(([k, v]) => html`<option value="${k}">${v.label}</option>`)}</select></label>
+      </div>
+      <label class="field" data-type-only="docreview" ${type === 'docreview' ? '' : raw('hidden')}><span>${L('문서의 목적 · 제출처')}</span><input type="text" name="doc_purpose" placeholder="${L('예: 학술지 투고 전 점검, 연구 과제 제안서 심사 대비, 연차 보고서 제출')}"><small>${L('목적에 맞게 잘 썼는지를 기준으로 리뷰합니다')}</small></label>
+      <div class="field-row" data-type-hide="docreview" ${type === 'docreview' ? raw('hidden') : ''}>
         <label class="field"><span>${L('대상 저장소 경로')}</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>${L('코드 작업일 때 결과를 커밋할 저장소')}</small></label>
         <label class="field"><span>${L('브랜치')}</span><input type="text" name="branch" placeholder="${L('(현재 브랜치)')}"></label>
       </div>
@@ -1781,10 +1963,29 @@ function agentOptions() {
   return AGENTS.map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${L(label)}</option>`);
 }
 
+/** 작업 유형에 따라 보이는 칸: 문서 리뷰는 문서 경로 · 종류 · 목적, 그 밖에는 저장소 */
+function syncTypeFields(form) {
+  const type = form.elements.type.value;
+  $$('[data-type-only]', form).forEach((el) => { el.hidden = el.dataset.typeOnly !== type; });
+  $$('[data-type-hide]', form).forEach((el) => { el.hidden = el.dataset.typeHide === type; });
+}
+
+/** 문서 리뷰 칸 → 지시 내용 앞에 붙일 요약 (AI 에게 가는 글이라 한국어 그대로) */
+function takeDocFields(data) {
+  const { doc_path: path = '', doc_kind: kind = '', doc_purpose: purpose = '', ...rest } = data;
+  if (rest.type !== 'docreview') return rest;
+  const brief = [
+    path.trim() ? `- 검토할 문서: ${path.trim()}` : '',
+    kind ? `- 문서 종류: ${DOC_KIND[kind]?.labelKo || kind}` : '',
+    purpose.trim() ? `- 문서의 목적 · 제출처: ${purpose.trim()}` : '',
+  ].filter(Boolean).join('\n');
+  return { ...rest, repo: '', branch: '', instruction: [brief, (rest.instruction || '').trim()].filter(Boolean).join('\n\n') };
+}
+
 async function submitNewTask(ev) {
   ev.preventDefault();
   const form = ev.currentTarget;
-  const data = Object.fromEntries(new FormData(form).entries());
+  const data = takeDocFields(Object.fromEntries(new FormData(form).entries()));
   data.title = (data.title || '').trim();
   if (!data.title) return;
   LS.set('newAgent', data.agent); // 다음 지시에도 같은 AI 를 기본으로
@@ -1797,6 +1998,8 @@ async function submitNewTask(ev) {
       const r = await api('api/tasks', { ...data, related: data.related ? [data.related] : [] });
       form.reset();
       form.elements.agent.value = data.agent;
+      form.elements.type.value = data.type;
+      syncTypeFields(form);
       toast({ title: L('작업 지시를 등록했습니다'), meta: `${r.task.id} — ${isUnassigned(data.agent) ? L('먼저 시작한 AI 가 맡습니다') : L('{ai}에게 devtrack inbox 로 전달됩니다', { ai })}`, tone: 'green' });
       await poll({ force: true });
       location.hash = `#/task/${r.task.id}`;
@@ -2189,6 +2392,7 @@ function bindEvents() {
   document.addEventListener('change', (ev) => {
     const el = ev.target.closest('[data-change]');
     if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
+    if (ev.target.matches('#new-task-form select[name="type"]')) syncTypeFields(ev.target.form);
     const box = ev.target.closest('.choice-box');
     if (box) { box.dataset.dirty = '1'; syncChoiceCount(box); }
   });

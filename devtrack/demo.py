@@ -9,6 +9,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import subprocess
 import tempfile
@@ -668,6 +669,388 @@ R2 도 같은 PR 에서 고치는 것이 안전합니다. 최종 결정은 사�
 """
 
 
+# ------------------------------------------------------------------ 문서 리뷰 예시 (논문 원고 · 제안서)
+def _xml_esc(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _docx_runs(text):
+    """'**굵게**', '^위첨자^', '[^1]'(각주) 표시가 있는 글 → <w:r> 목록."""
+    out = []
+    for part in re.split(r"(\*\*.+?\*\*|\^.+?\^|\[\^\d+\])", text):
+        if not part:
+            continue
+        if part.startswith("**"):
+            out.append('<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">{}</w:t></w:r>'.format(_xml_esc(part[2:-2])))
+        elif part.startswith("[^"):
+            out.append('<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteReference w:id="{}"/></w:r>'
+                       .format(part[2:-1]))
+        elif part.startswith("^"):
+            out.append('<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>{}</w:t></w:r>'.format(_xml_esc(part[1:-1])))
+        else:
+            out.append('<w:r><w:t xml:space="preserve">{}</w:t></w:r>'.format(_xml_esc(part)))
+    return "".join(out)
+
+
+def simple_docx(blocks, footnotes=None):
+    """작은 Word 문서(.docx) 바이트. blocks: [(종류, 글)] — 종류는 title · h1 · h2 · p · bullet · num,
+    ('table', [[칸, …], …]) 는 표. 제목 스타일 ID 는 한국어 Word 처럼 숫자("1", "2")로 둔다."""
+    import io
+    import zipfile
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    style = {"title": "Title", "h1": "1", "h2": "2"}
+    body = []
+    for kind, val in blocks:
+        if kind == "table":
+            rows = "".join("<w:tr>{}</w:tr>".format("".join(
+                "<w:tc><w:p>{}</w:p></w:tc>".format(_docx_runs(c)) for c in row)) for row in val)
+            body.append("<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/></w:tblPr>{}</w:tbl>".format(rows))
+            continue
+        ppr = ""
+        if kind in style:
+            ppr = '<w:pPr><w:pStyle w:val="{}"/></w:pPr>'.format(style[kind])
+        elif kind in ("bullet", "num"):
+            ppr = '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{}"/></w:numPr></w:pPr>'.format(
+                1 if kind == "bullet" else 2)
+        body.append("<w:p>{}{}</w:p>".format(ppr, _docx_runs(val)))
+    files = {
+        "[Content_Types].xml": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+            '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>'
+            '<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>'
+            '</Types>'),
+        "_rels/.rels": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+            '</Relationships>'),
+        "word/_rels/document.xml.rels": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>'
+            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>'
+            '</Relationships>'),
+        "word/styles.xml": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles {}>'
+            '<w:style w:type="paragraph" w:default="1" w:styleId="a"><w:name w:val="Normal"/></w:style>'
+            '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style>'
+            '<w:style w:type="paragraph" w:styleId="1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="30"/></w:rPr></w:style>'
+            '<w:style w:type="paragraph" w:styleId="2"><w:name w:val="heading 2"/><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>'
+            '<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders>'
+            '<w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/>'
+            '<w:right w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/>'
+            '</w:tblBorders></w:tblPr></w:style></w:styles>').format(w),
+        "word/numbering.xml": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering {}>'
+            '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/>'
+            '<w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>'
+            '<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>'
+            '<w:lvlText w:val="%1."/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>'
+            '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>'
+            '</w:numbering>').format(w),
+        "word/footnotes.xml": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes {}>'
+            '<w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>'
+            '<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>'
+            '{}</w:footnotes>').format(w, "".join(
+                '<w:footnote w:id="{}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> {}</w:t></w:r></w:p></w:footnote>'
+                .format(k, _xml_esc(v)) for k, v in sorted((footnotes or {}).items()))),
+        "word/document.xml": (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {}><w:body>{}'
+            '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:body></w:document>').format(w, "".join(body)),
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, text in files.items():
+            zf.writestr(name, text.encode("utf-8"))
+    return buf.getvalue()
+
+
+MANUSCRIPT_TEX = r"""\documentclass[11pt]{article}
+\usepackage{amsmath,graphicx}
+\title{Near-wall velocity skewness in low-Reynolds-number turbulent channel flow:\\ DNS and hot-wire comparison}
+\author{H. Kang \and J. Lee}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study the skewness of the streamwise velocity near the wall of a turbulent channel flow using
+direct numerical simulation (DNS) and hot-wire measurements. The results shows good agreement between
+the two approaches. Our findings reveal a universal near-wall behaviour of the skewness.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Near-wall turbulence statistics have been studied extensively \cite{kim1987,moser1999,lee2015}.
+Higher-order moments such as the skewness factor are sensitive to the resolution of both simulations and
+probes. To our knowledge, this is the first study of near-wall skewness.
+
+\section{Methods}\label{sec:methods}
+The DNS was performed at $Re_\tau = 180$ on a $256 \times 128 \times 256$ grid. The wind-tunnel datas were
+obtained with a single hot-wire probe of length $1\,\mathrm{mm}$ at matching friction Reynolds number.
+
+\section{Results}\label{sec:results}
+The results shows that the skewness $S_u$ reaches $S_u = 0.98$ at the wall in the DNS and $1.09$ in the
+experiment, a difference of 10.7\%. It can be seen that the skewness is seen to increase towards the wall.
+In the other hand, the skewness changes sign at $y^+ \approx 15$ in both data sets.
+
+\section{Conclusions}\label{sec:conclusions}
+The near-wall skewness is universal and independent of the Reynolds number. The DNS and the experiment
+agree well, which validates both approaches.
+
+\begin{thebibliography}{9}
+\bibitem{kim1987} J. Kim, P. Moin, R. Moser, J. Fluid Mech. 177 (1987) 133--166.
+\bibitem{moser1999} R. Moser, J. Kim, N. Mansour, Phys. Fluids 11 (1999) 943--945.
+\bibitem{lee2015} M. Lee, R. Moser, J. Fluid Mech. 774 (2015) 395--415.
+\end{thebibliography}
+\end{document}
+"""
+
+MANUSCRIPT_REVIEW = {
+    "doc": {
+        "title": "Near-wall velocity skewness in low-Reynolds-number turbulent channel flow: DNS and hot-wire comparison",
+        "kind": "paper", "purpose": "Journal of Fluid Mechanics 투고 전 점검", "audience": "난류 분야 심사위원 · 편집자",
+        "authors": "H. Kang, J. Lee", "pages": 4, "words": 2850, "format": "LaTeX", "source": "F-1",
+        "synopsis": "난류 채널 유동에서 **벽 가까이의 흐름 방향 속도 왜도**(분포가 한쪽으로 치우친 정도)를 "
+                    "직접 수치 모사(DNS, Re_τ = 180)와 풍동 열선 측정으로 비교한 원고입니다.\n\n"
+                    "- 벽에서의 왜도는 DNS 0.98, 실험 1.09 로 10.7% 차이가 나며, 두 자료 모두 y⁺ ≈ 15 에서 부호가 바뀝니다.\n"
+                    "- 저자들은 이를 근거로 두 방법이 잘 맞고, 벽 근처 왜도가 레이놀즈 수와 무관한 *보편적* 성질이라고 결론짓습니다.",
+    },
+    "verdict": "major_revision",
+    "summary": "DNS 와 실험을 같은 조건으로 맞춘 비교는 탄탄하지만, **선행 연구와 무엇이 다른지(R1)** 와 "
+               "**결론의 일반화 근거(R2)** 가 부족해 지금 투고하면 대폭 수정 요청을 받을 가능성이 큽니다.",
+    "checks": [
+        {"area": "목적 부합", "rating": "fair", "note": "JFM 투고에 필요한 새로운 기여가 본문에 드러나지 않음"},
+        {"area": "구성 · 형식", "rating": "fair", "note": "초록에 정량 결과 없음, 방법 절에 격자 해상도 근거 없음"},
+        {"area": "선행 연구와의 차이", "rating": "poor", "note": "인용만 있고 차이 설명 없음, '첫 연구' 주장은 사실과 다름"},
+        {"area": "논리 전개", "rating": "fair", "note": "10.7% 차이를 오차 범위 없이 '잘 맞는다'고 판단"},
+        {"area": "결론의 근거", "rating": "poor", "note": "레이놀즈 수 하나로 '보편적' 결론"},
+        {"area": "문장 · 표현", "rating": "fair", "note": "같은 뜻을 반복하는 문장, 용어 혼용"},
+        {"area": "맞춤법 · 표기", "rating": "fair", "note": "문법 오류 4곳"},
+    ],
+    "strengths": [
+        "DNS 와 풍동 실험을 같은 마찰 레이놀즈 수로 맞춰 비교한 설계가 명확합니다.",
+        "왜도의 부호가 바뀌는 위치(y⁺ ≈ 15)를 두 자료에서 함께 확인한 점이 설득력 있습니다.",
+    ],
+    "findings": [
+        {"id": "R1", "severity": "blocker", "title": "선행 연구와의 차이가 설명되지 않음 · '첫 연구' 주장이 사실과 다름",
+         "plain": "참고문헌 세 편(Kim 1987, Moser 1999, Lee 2015)이 이미 벽 근처 왜도를 보고했는데, 이 원고가 무엇을 새로 "
+                  "보였는지 설명이 없습니다. 심사위원이 가장 먼저 지적할 부분입니다.",
+         "location": "1쪽 · 1. Introduction 둘째 문단", "category": "선행 연구", "confidence": "high",
+         "quote": "To our knowledge, this is the first study of near-wall skewness.",
+         "suggestion": "While near-wall skewness has been reported from DNS [kim1987, moser1999, lee2015], it has not been "
+                       "compared directly with hot-wire data at matched Re_tau, accounting for probe length. This study ..."},
+        {"id": "R2", "severity": "blocker", "title": "레이놀즈 수 하나(Re_τ=180)로 '보편적' 결론",
+         "plain": "한 가지 조건에서만 계산 · 측정했는데 '레이놀즈 수와 무관하다'고 결론 내렸습니다. 근거보다 주장이 큽니다.",
+         "location": "3쪽 · 5. Conclusions 첫 문장", "category": "결론 · 근거", "confidence": "high",
+         "quote": "The near-wall skewness is universal and independent of the Reynolds number.",
+         "suggestion": "At Re_tau = 180, the near-wall skewness from DNS and experiment agree within 11%; "
+                       "testing its Reynolds-number dependence requires additional cases."},
+        {"id": "R3", "severity": "major", "title": "10.7% 차이를 오차 범위 없이 '잘 맞는다'고 판단",
+         "plain": "실험의 측정 오차(불확도)와 DNS 통계 오차를 밝히지 않아, 10.7% 가 작은 차이인지 판단할 수 없습니다.",
+         "location": "2쪽 · 4. Results 첫 문단", "category": "논리", "confidence": "high"},
+        {"id": "R4", "severity": "major", "title": "초록에 정량 결과가 없고, 방법 절에 격자 해상도 근거가 없음",
+         "plain": "초록만 읽어서는 무엇을 얼마나 알아냈는지 알 수 없습니다. 격자가 벽 근처를 충분히 촘촘하게 나눴는지(Δy⁺)도 빠졌습니다.",
+         "location": "1쪽 · Abstract, 2쪽 · 3. Methods", "category": "구성 · 형식", "confidence": "high"},
+        {"id": "R5", "severity": "minor", "title": "'skewness factor' 와 'skewness' 혼용",
+         "plain": "같은 양을 두 이름으로 부르면 다른 양으로 오해할 수 있습니다. 하나로 통일하세요.",
+         "location": "1쪽 · 1. Introduction, 2쪽 · 4. Results", "category": "문장 · 표현", "confidence": "high"},
+        {"id": "R6", "severity": "question", "title": "열선 길이(1 mm)의 공간 평균 효과를 검토했나요?",
+         "plain": "열선이 1 mm 구간을 평균해서 재기 때문에 벽 근처 왜도가 달라질 수 있습니다. 10.7% 차이의 원인일 수 있습니다.",
+         "location": "2쪽 · 3. Methods", "category": "논리", "confidence": "medium"},
+        {"id": "R7", "severity": "nit", "title": "주어 · 동사 수 일치", "location": "1쪽 Abstract, 2쪽 4. Results",
+         "quote": "The results shows", "suggestion": "The results show", "category": "맞춤법 · 표기"},
+        {"id": "R8", "severity": "nit", "title": "'data' 는 이미 복수형", "location": "2쪽 · 3. Methods",
+         "quote": "The wind-tunnel datas were obtained", "suggestion": "The wind-tunnel data were obtained",
+         "category": "맞춤법 · 표기"},
+        {"id": "R9", "severity": "nit", "title": "관용 표현 오류", "location": "2쪽 · 4. Results",
+         "quote": "In the other hand,", "suggestion": "On the other hand,", "category": "맞춤법 · 표기"},
+        {"id": "R10", "severity": "nit", "title": "같은 뜻을 반복하는 문장", "location": "2쪽 · 4. Results",
+         "quote": "It can be seen that the skewness is seen to increase towards the wall.",
+         "suggestion": "The skewness increases towards the wall.", "category": "문장 · 표현"},
+    ],
+}
+
+MANUSCRIPT_REPORT = """# 문서 리뷰: 근벽 왜도 DNS · 실험 비교 원고 – {date}
+
+> **한 줄 결론:** 비교 실험 자체는 탄탄하지만, 선행 연구와의 차이(R1)와 결론의 일반화 근거(R2)를 보완하지 않으면 JFM 에서 대폭 수정 요청을 받을 가능성이 큽니다.
+
+| 문서 | 종류 | 목적 | 분량 | 형식 |
+|---|---|---|---|---|
+| Near-wall velocity skewness in low-Reynolds-number turbulent channel flow | 과학 논문 | Journal of Fluid Mechanics 투고 전 점검 | 4쪽, 약 2,850단어 | LaTeX |
+
+## 1. 한눈에 보기
+
+- **이 문서는:** 벽 가까이의 속도 왜도를 수치 모사(DNS)와 풍동 측정으로 비교하고, 그 성질이 보편적이라고 주장하는 논문 원고입니다.
+- **리뷰 의견:** 대폭 보완 — 새로운 기여와 결론의 근거가 원고에 드러나지 않습니다.
+- **꼭 고쳐야 할 것:** 2개
+  - **R1** — 이미 같은 주제를 다룬 논문 세 편을 인용하면서 "첫 연구"라고 씁니다. 무엇이 새로운지 밝혀야 합니다.
+  - **R2** — 한 가지 조건만 보고 "레이놀즈 수와 무관하다"고 결론 냅니다.
+
+| 점검 영역 | 평가 | 메모 |
+|---|---|---|
+| 목적 부합 | 보완 필요 | 새로운 기여가 드러나지 않음 |
+| 구성 · 형식 | 보완 필요 | 초록에 정량 결과 없음 |
+| 선행 연구와의 차이 | 미흡 | 인용만 있고 차이 설명 없음 |
+| 논리 전개 | 보완 필요 | 오차 범위 없이 일치 판단 |
+| 결론의 근거 | 미흡 | 조건 하나로 일반화 |
+| 문장 · 표현 | 보완 필요 | 반복 표현, 용어 혼용 |
+| 맞춤법 · 표기 | 보완 필요 | 문법 오류 4곳 |
+
+## 2. 문서 요약
+
+DNS(Re_τ = 180)와 열선 풍속계 측정으로 벽 근처 흐름 방향 속도의 왜도를 비교했습니다. 벽에서의 왜도는 DNS 0.98,
+실험 1.09 로 10.7% 차이가 나고, 두 자료 모두 y⁺ ≈ 15 에서 부호가 바뀝니다. 저자들은 두 방법이 잘 맞으며
+벽 근처 왜도가 보편적이라고 결론짓습니다.
+
+## 3. 목적 대비 보완할 부분
+
+JFM 은 새로운 물리적 이해를 요구합니다. 지금 원고는 기존 DNS 결과를 실험으로 다시 확인한 수준으로 읽힙니다.
+**열선 길이를 고려한 직접 비교**가 새로운 점이라면 서론과 초록에서 그것을 분명히 내세워야 합니다 (R1, R6).
+
+## 4. 과학 논문 점검: 형식 · 선행 연구 · 결론의 근거
+
+- **형식:** 초록에 수치 결과가 없고(R4), 방법 절에 벽 근처 격자 간격(Δy⁺)과 통계 표본 수가 없습니다.
+- **선행 연구와의 차이:** R1 참고.
+- **결론의 근거:** 결론 두 문장 모두 근거보다 큽니다. 조건을 한정하거나(R2) 실험 불확도를 함께 제시해야 합니다(R3).
+
+## 5. 수정 · 보완 항목
+
+| # | 중요도 | 쉬운 설명 | 위치 | 분류 |
+|---|---|---|---|---|
+| R1 | 🔴 반드시 수정 | 무엇이 새로운지 설명이 없고 "첫 연구" 주장이 틀림 | 1쪽 Introduction | 선행 연구 |
+| R2 | 🔴 반드시 수정 | 조건 하나로 "보편적" 결론 | 3쪽 Conclusions | 결론 · 근거 |
+| R3 | 🟠 수정 권장 | 오차 범위 없이 "잘 맞는다" | 2쪽 Results | 논리 |
+| R4 | 🟠 수정 권장 | 초록에 수치 없음, 격자 근거 없음 | 1–2쪽 | 구성 · 형식 |
+| R5 | 🟡 개선 제안 | 같은 양을 두 이름으로 부름 | 1–2쪽 | 문장 · 표현 |
+| R6 | 🔵 질문 | 열선 길이 효과를 검토했는지 | 2쪽 Methods | 논리 |
+
+## 6. 문장 · 맞춤법
+
+| # | 위치 | 원문 | 수정안 |
+|---|---|---|---|
+| R7 | 1쪽 Abstract, 2쪽 Results | The results shows | The results show |
+| R8 | 2쪽 Methods | The wind-tunnel datas were obtained | The wind-tunnel data were obtained |
+| R9 | 2쪽 Results | In the other hand, | On the other hand, |
+| R10 | 2쪽 Results | It can be seen that the skewness is seen to increase towards the wall. | The skewness increases towards the wall. |
+
+## 7. 종합 의견
+
+대폭 보완 후 투고를 권합니다. R1 · R2 를 고치고 실험 불확도(R3)를 더하면 원고의 주장과 근거가 맞아집니다.
+최종 판단은 저자가 합니다.
+
+## 용어 풀이
+
+- **왜도(skewness):** 값의 분포가 평균을 기준으로 한쪽으로 치우친 정도
+- **DNS:** 난류의 모든 크기의 소용돌이를 직접 계산하는 수치 모사
+- **y⁺:** 벽에서의 거리를 벽 근처 흐름의 길이 척도로 나눈 값
+"""
+
+PROPOSAL_DOCX = [
+    ("title", "차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안)"),
+    ("h1", "1. 연구 목표"),
+    ("num", "벽 근처 난류 구조를 Re_τ = 1000 까지 직접 수치 모사로 규명한다."),
+    ("num", "DNS 자료로 **데이터 기반 벽 모델**을 개발한다."),
+    ("h1", "2. 연구 방법"),
+    ("p", "GPU 로 포팅한 압력 솔버(HIP)를 사용해 세 가지 레이놀즈 수에서 조건마다 10^5^ 시간 단계를 계산한다.[^1] 계산 결과는 몇일 간격으로 검증할수 있다."),
+    ("bullet", "Re_τ = 180, 550, 1000 세 조건"),
+    ("bullet", "풍동 실험 자료와 비교 검증"),
+    ("h1", "3. 계산 자원 요청"),
+    ("table", [["조건", "격자 수", "노드시간"], ["Re_τ = 180", "0.8억", "5,000"], ["Re_τ = 550", "6억", "15,000"],
+               ["Re_τ = 1000", "30억", "30,000"], ["합계", "", "50,000"]]),
+    ("h1", "4. 기대 효과"),
+    ("p", "본 연구는 난류 모델링 분야에서 중요한 역활을 할 것이며 산업계에도 큰 도움이 될 것이다."),
+]
+PROPOSAL_FOOTNOTES = {1: "솔버 성능은 T-0001 · T-0006 작업에서 검증했다."}
+
+PROPOSAL_REVIEW = {
+    "doc": {"title": "차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안)", "kind": "proposal",
+            "purpose": "Frontier 계산 시간 신청 (심사위원 평가 대비)", "audience": "계산 자원 배분 심사위원",
+            "pages": 2, "format": "Word (.docx)", "source": "F-1",
+            "synopsis": "GPU 로 포팅한 압력 솔버로 세 가지 레이놀즈 수의 채널 유동 DNS 를 수행하고, 그 자료로 "
+                        "데이터 기반 벽 모델을 만들겠다는 계산 자원 제안서입니다. 총 **50,000 노드시간**을 요청합니다."},
+    "verdict": "minor_revision",
+    "summary": "구성은 깔끔하지만 심사에서 가장 중요한 **노드시간 산정 근거(R1)** 가 없습니다. 목표 2 에 대한 방법(R2)도 채워 주세요.",
+    "checks": [
+        {"area": "목적 부합", "rating": "fair", "note": "심사 기준인 자원 산정 근거가 빠짐"},
+        {"area": "구성 · 형식", "rating": "good"},
+        {"area": "논리 전개", "rating": "fair", "note": "목표 2(벽 모델)에 대응하는 방법이 없음"},
+        {"area": "문장 · 표현", "rating": "fair", "note": "기대 효과가 추상적"},
+        {"area": "맞춤법 · 표기", "rating": "fair", "note": "맞춤법 · 띄어쓰기 3곳"},
+    ],
+    "strengths": ["목표 · 방법 · 자원 · 기대 효과 순서로 심사 양식에 맞게 구성되어 있습니다.",
+                  "GPU 솔버 검증 이력을 각주로 밝혀 신뢰를 줍니다."],
+    "findings": [
+        {"id": "R1", "severity": "major", "title": "노드시간 산정 근거가 없음 (표의 50,000 노드시간)",
+         "plain": "심사위원은 요청한 계산 시간이 타당한지를 가장 먼저 봅니다. 격자 수 × 시간 단계 × 측정한 1단계 비용으로 계산한 근거를 넣어야 합니다.",
+         "location": "3. 계산 자원 요청 · 표", "category": "목적 · 내용", "confidence": "high"},
+        {"id": "R2", "severity": "major", "title": "목표 2(데이터 기반 벽 모델)에 대한 방법이 없음",
+         "plain": "목표는 두 개인데 방법 절에는 DNS 계산만 있습니다. 벽 모델을 어떻게 학습 · 검증할지 한두 문단이 필요합니다.",
+         "location": "2. 연구 방법", "category": "논리", "confidence": "high"},
+        {"id": "R3", "severity": "minor", "title": "기대 효과가 추상적",
+         "plain": "'큰 도움이 될 것' 대신 어떤 계산이 얼마나 빨라지거나 정확해지는지 수치로 쓰면 설득력이 커집니다.",
+         "location": "4. 기대 효과", "category": "문장 · 표현", "confidence": "medium",
+         "quote": "산업계에도 큰 도움이 될 것이다.",
+         "suggestion": "벽 모델 LES 의 계산 비용을 DNS 대비 1/100 로 줄여, 항공기 날개 설계 해석에 바로 쓸 수 있다."},
+        {"id": "R4", "severity": "nit", "title": "맞춤법: 몇일 → 며칠", "location": "2. 연구 방법",
+         "quote": "몇일 간격으로", "suggestion": "며칠 간격으로", "category": "맞춤법 · 표기"},
+        {"id": "R5", "severity": "nit", "title": "띄어쓰기: 할수 → 할 수", "location": "2. 연구 방법",
+         "quote": "검증할수 있다", "suggestion": "검증할 수 있다", "category": "맞춤법 · 표기"},
+        {"id": "R6", "severity": "nit", "title": "맞춤법: 역활 → 역할", "location": "4. 기대 효과",
+         "quote": "중요한 역활을", "suggestion": "중요한 역할을", "category": "맞춤법 · 표기"},
+    ],
+}
+
+PROPOSAL_REPORT = """# 문서 리뷰: 계산 자원 제안서 (초안) – {date}
+
+> **한 줄 결론:** 구성은 심사 양식에 맞지만, 요청한 50,000 노드시간의 산정 근거(R1)와 벽 모델 방법(R2)을 채워야 심사를 통과할 수 있습니다.
+
+| 문서 | 종류 | 목적 | 분량 | 형식 |
+|---|---|---|---|---|
+| 차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안) | 제안서 | Frontier 계산 시간 신청 | 2쪽 | Word |
+
+## 1. 한눈에 보기
+
+- **이 문서는:** GPU 솔버로 세 조건의 난류 DNS 를 하고, 그 자료로 벽 모델을 만들겠다며 계산 시간을 요청하는 제안서입니다.
+- **리뷰 의견:** 소폭 수정 — 근거 두 가지만 보완하면 됩니다.
+- **꼭 고쳐야 할 것:** 없음 (수정 권장 2개: R1, R2)
+
+## 2. 문서 요약
+
+Re_τ = 180, 550, 1000 세 조건에서 DNS 를 수행하고, 풍동 자료와 비교 검증한 뒤 데이터 기반 벽 모델을 개발합니다.
+계산 자원으로 총 50,000 노드시간을 요청합니다.
+
+## 3. 목적 대비 보완할 부분
+
+계산 자원 심사는 **요청량의 타당성**과 **솔버의 준비 상태**를 봅니다. 준비 상태는 각주로 밝혔지만, 요청량 산정 근거가 없습니다 (R1).
+
+## 4. 수정 · 보완 항목
+
+| # | 중요도 | 쉬운 설명 | 위치 |
+|---|---|---|---|
+| R1 | 🟠 수정 권장 | 노드시간을 어떻게 계산했는지 없음 | 3. 계산 자원 요청 |
+| R2 | 🟠 수정 권장 | 목표 2 에 대한 방법이 없음 | 2. 연구 방법 |
+| R3 | 🟡 개선 제안 | 기대 효과를 수치로 | 4. 기대 효과 |
+
+## 5. 문장 · 맞춤법
+
+| # | 원문 | 수정안 |
+|---|---|---|
+| R4 | 몇일 간격으로 | 며칠 간격으로 |
+| R5 | 검증할수 있다 | 검증할 수 있다 |
+| R6 | 중요한 역활을 | 중요한 역할을 |
+
+## 6. 종합 의견
+
+R1 · R2 를 보완하면 제출해도 좋습니다.
+"""
+
+
 def build_demo(store, force=False):
     root = store.root
     if os.path.exists(os.path.join(root, "tasks")) and store.task_ids():
@@ -1101,3 +1484,92 @@ def _scenario(s, clk, tmp):
         choices=["I3=왜도 차이 원인 규명 — 2주, 계산 거의 없음", "I1=데이터 기반 벽 모델 — 6주, 약 8,000 노드시간"],
         choices_label="먼저 시작할 아이디어",
         description="고른 아이디어로 새 작업(데이터 분석 · 코드 개발)을 만들어 진행합니다. 둘 다 고르면 I3 부터 시작합니다.")
+
+    # ---------------------------------------------------------------- T-0010 논문 원고 문서 리뷰 (리포트 확인 대기)
+    clk.at(260)
+    t10 = s.create_task(
+        "문서 리뷰: JFM 투고 원고 (근벽 왜도 DNS · 실험 비교)", type="docreview", agent="Claude", related=[tid5],
+        instruction="/review-doc ~/papers/skewness/main.tex\n\n- 문서 종류: 과학 논문\n"
+                    "- 문서의 목적 · 제출처: Journal of Fluid Mechanics 투고 전 점검\n\n"
+                    "선행 연구와의 차별점과 결론을 이끄는 논리를 특히 꼼꼼히 봐 주세요.",
+        plan=["원고 읽기 · 요약", "목적 대비 미비한 부분", "논리 · 선행 연구 · 결론 점검", "문장 · 맞춤법 점검",
+              "리뷰 리포트(PDF) 작성", "리포트 확인 (사용자)"], tags=["JFM"])
+    tid10 = t10["id"]
+    clk.at(255)
+    s.add_artifact(tid10, path=f("main.tex", MANUSCRIPT_TEX), title="검토할 원고: main.tex", category="source")
+    s.update_task(tid10, step="원고 읽기 · 요약 (4쪽, 약 2,850단어)", progress=10)
+    clk.at(240); s.check_plan(tid10, [1])
+    clk.at(230); s.update_task(tid10, step="목적(JFM 투고) 대비 빠진 부분 점검", progress=25)
+    clk.at(215); s.check_plan(tid10, [2])
+    clk.at(205); s.update_task(tid10, step="선행 연구 3편과 비교, 결론의 근거 점검", progress=45)
+    clk.at(196)
+    s.add_issue(tid10, "참고문헌 3편이 이미 벽 근처 왜도를 보고 — 원고의 '첫 연구' 주장과 맞지 않음", severity="high",
+                detail="Kim et al. (1987), Moser et al. (1999), Lee & Moser (2015). 리포트 R1 로 정리합니다.")
+    clk.at(185); s.check_plan(tid10, [3])
+    clk.at(180); s.update_task(tid10, step="문장 · 맞춤법 점검", progress=65)
+    clk.at(170); s.check_plan(tid10, [4])
+    clk.at(150)
+    s.set_review(tid10, MANUSCRIPT_REVIEW)
+    today = _dt.date.today().isoformat()
+    s.add_artifact(tid10, path=f("doc-review-skewness.md", MANUSCRIPT_REPORT.format(date=today)),
+                   title="문서 리뷰 리포트 (Markdown)", category="review")
+    rep10 = s.add_artifact(tid10, path=f("doc-review-skewness.pdf", simple_pdf("Document Review - JFM manuscript", [
+        "Near-wall velocity skewness in low-Re turbulent channel flow (4 pages, LaTeX)", "",
+        "## Bottom line",
+        "Solid DNS / hot-wire comparison, but the novelty over prior work (R1) and the",
+        "basis for a 'universal' conclusion (R2) are missing. Verdict: major revision.", "",
+        "## Must fix",
+        "R1  Difference from Kim 1987, Moser 1999, Lee 2015 not explained ('first study' claim)",
+        "R2  'Universal' conclusion drawn from a single Re_tau = 180 case", "",
+        "## Should fix",
+        "R3  10.7% difference called 'good agreement' without uncertainty",
+        "R4  No numbers in the abstract; grid resolution not justified", "",
+        "## Wording and grammar",
+        "R7  The results shows -> The results show",
+        "R8  datas -> data      R9  In the other hand -> On the other hand",
+    ]), "wb"), title="문서 리뷰 리포트 (PDF)", category="review")
+    clk.at(148); s.resolve_issue(tid10, "I-1", note="리포트 R1 (반드시 수정) 으로 정리")
+    clk.at(146); s.check_plan(tid10, [5])
+    clk.at(145)
+    s.update_task(tid10, step="리뷰 리포트 확인을 기다리는 중", progress=90)
+    s.request_approval(
+        tid10, "원고 리뷰 리포트를 확인해 주세요", kind="result", artifact_ids=[rep10["id"]],
+        description="요약 · 점검 영역 · 보완할 부분(R1–R10)을 PDF 로 정리했습니다.\n\n"
+                    "- **반드시 수정:** R1 선행 연구와의 차이, R2 결론의 일반화\n"
+                    "- 원하시면 고를 항목만 원고(main.tex)에 반영한 수정안을 따로 만들어 드립니다.")
+
+    # ---------------------------------------------------------------- T-0011 제안서(Word) 문서 리뷰 (완료)
+    clk.at(1500)
+    t11 = s.create_task(
+        "문서 리뷰: 계산 자원 제안서 초안 (Word)", type="docreview", agent="Claude",
+        instruction="- 검토할 문서: ~/Documents/proposal_draft.docx\n- 문서 종류: 제안서\n"
+                    "- 문서의 목적 · 제출처: Frontier 계산 시간 신청 (다음 주 마감)\n\n심사위원 입장에서 봐 주세요.",
+        plan=["문서 읽기 · 요약", "목적 대비 미비한 부분 · 논리", "문장 · 맞춤법", "리뷰 리포트(PDF) 작성"],
+        tags=["proposal"])
+    tid11 = t11["id"]
+    clk.at(1495)
+    s.add_artifact(tid11, path=f("proposal_draft.docx", simple_docx(PROPOSAL_DOCX, PROPOSAL_FOOTNOTES), "wb"),
+                   title="검토할 문서: proposal_draft.docx", category="source")
+    s.update_task(tid11, step="제안서 읽기 · 요약", progress=15)
+    clk.at(1480); s.check_plan(tid11, [1])
+    clk.at(1470); s.check_plan(tid11, [2])
+    clk.at(1462); s.check_plan(tid11, [3])
+    clk.at(1450)
+    s.set_review(tid11, PROPOSAL_REVIEW)
+    s.add_artifact(tid11, path=f("doc-review-proposal.md", PROPOSAL_REPORT.format(date=today)),
+                   title="문서 리뷰 리포트 (Markdown)", category="review")
+    rep11 = s.add_artifact(tid11, path=f("doc-review-proposal.pdf", simple_pdf("Document Review - Compute proposal", [
+        "Draft proposal for Frontier compute time (2 pages, Word)", "",
+        "## Bottom line",
+        "Well structured, but the 50,000 node-hour request has no basis (R1) and",
+        "goal 2 (data-driven wall model) has no method (R2). Verdict: minor revision.", "",
+        "## Spelling (Korean)",
+        "R4-R6  three spelling and spacing fixes",
+    ]), "wb"), title="문서 리뷰 리포트 (PDF)", category="review")
+    clk.at(1446); s.check_plan(tid11, [4])
+    ap11 = s.request_approval(tid11, "제안서 리뷰 리포트를 확인해 주세요", kind="result", artifact_ids=[rep11["id"]],
+                              description="수정 권장 2개(R1 노드시간 근거, R2 벽 모델 방법)와 맞춤법 3곳입니다.")
+    clk.at(1400)
+    s.decide(tid11, ap11["id"], "approve", comment="R1 은 지난 할당량 사용 실적으로 보완하겠습니다. 고맙습니다.")
+    s.ack_decision(tid11, ap11["id"])
+    clk.at(1395); s.update_task(tid11, status="done", message="리뷰 리포트 전달 완료 (소폭 수정)")

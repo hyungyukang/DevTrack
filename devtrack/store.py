@@ -41,6 +41,7 @@ TASK_TYPES = {
     "code": "코드 개발",
     "review": "코드 리뷰",
     "paper": "논문 작성",
+    "docreview": "문서 리뷰",
     "analysis": "데이터 분석",
     "visualization": "시각화",
     "model": "AI 모델 개발",
@@ -116,6 +117,31 @@ _VERDICT_ALIAS = {"approved": "approve", "lgtm": "approve", "comments": "comment
 _PR_KEYS = ("url", "repo", "number", "title", "author", "base", "head", "head_sha", "files", "additions",
             "deletions", "ci", "draft", "previous_sha")
 
+# 문서 리뷰 — 리뷰한 문서(doc) · 종합 의견 · 점검 영역(checks). 검토 항목은 코드 리뷰와 같은 R1, R2…
+DOC_KINDS = {"paper": "과학 논문", "report": "보고서", "proposal": "제안서", "thesis": "학위 논문", "other": "기타 문서"}
+_DOC_KIND_ALIAS = {
+    "논문": "paper", "과학 논문": "paper", "article": "paper", "manuscript": "paper", "journal": "paper",
+    "conference": "paper", "보고서": "report", "제안서": "proposal", "학위 논문": "thesis", "학위논문": "thesis",
+    "dissertation": "thesis", "기타": "other", "기타 문서": "other",
+}
+DOC_VERDICTS = ("ready", "minor_revision", "major_revision", "rework")
+DOC_VERDICT_LABEL = {"ready": "제출 가능", "minor_revision": "소폭 수정", "major_revision": "대폭 보완",
+                     "rework": "다시 작성"}
+_DOC_VERDICT_ALIAS = {
+    "accept": "ready", "accepted": "ready", "ok": "ready", "제출 가능": "ready",
+    "minor": "minor_revision", "minor revision": "minor_revision", "minor-revision": "minor_revision", "소폭 수정": "minor_revision",
+    "major": "major_revision", "major revision": "major_revision", "major-revision": "major_revision", "대폭 보완": "major_revision",
+    "reject": "rework", "rewrite": "rework", "resubmit": "rework", "다시 작성": "rework",
+}
+CHECK_RATINGS = ("good", "fair", "poor", "na")
+_CHECK_ALIAS = {
+    "ok": "good", "pass": "good", "양호": "good", "좋음": "good",
+    "partial": "fair", "warn": "fair", "warning": "fair", "보완": "fair", "보완 필요": "fair",
+    "bad": "poor", "fail": "poor", "미흡": "poor", "n/a": "na", "none": "na", "해당 없음": "na",
+}
+_DOC_KEYS = ("title", "kind", "purpose", "audience", "authors", "pages", "words", "format", "language", "source",
+             "synopsis")
+
 
 def _norm_finding_id(value, fallback):
     s = str(value if value is not None else fallback).strip()
@@ -159,15 +185,70 @@ def normalize_finding(raw, n, base=None):
         "category": _first(raw, "category", "type", "kind"),
         "url": _first(raw, "url", "link", "permalink"),
         "comment_url": raw.get("comment_url"),
+        # 문서 리뷰: 위치(쪽 · 절) · 원문 인용 · 수정 제안
+        "location": _first(raw, "location", "where") or _doc_location(raw.get("page"), raw.get("section")),
+        "quote": _first(raw, "quote", "original", "excerpt"),
+        "suggestion": _first(raw, "suggestion", "revised", "fix"),
     })
     merged = {"id": f["id"]}
     merged.update(base or {"severity": "minor", "title": "(제목 없음)", "status": "open"})
     merged.update({k: v for k, v in f.items() if v not in (None, "")})
     return merged
 
+def _doc_location(page, section):
+    bits = []
+    if page not in (None, ""):
+        bits.append("{}쪽".format(page) if re.match(r"^\d+([-–]\d+)?$", str(page).strip()) else str(page).strip())
+    if section not in (None, ""):
+        bits.append(str(section).strip())
+    return " · ".join(bits) or None
+
+
+def _norm_doc(raw):
+    """문서 리뷰의 문서 정보 — 알려진 키만, 종류(kind)는 DOC_KINDS 로 맞춘다."""
+    raw = dict(raw)
+    if not raw.get("synopsis"):
+        raw["synopsis"] = _first(raw, "abstract", "overview", "summary")
+    doc = {k: raw[k] for k in _DOC_KEYS if raw.get(k) not in (None, "", [])}
+    if "kind" in doc:
+        k = str(doc["kind"]).strip().lower()
+        doc["kind"] = k if k in DOC_KINDS else _DOC_KIND_ALIAS.get(k, "other")
+    if "source" in doc:
+        doc["source"] = normalize_item_id(doc["source"], "F")
+    if isinstance(doc.get("authors"), (list, tuple)):
+        doc["authors"] = ", ".join(str(a) for a in doc["authors"])
+    for k in ("title", "purpose", "audience", "synopsis", "format", "language"):
+        if k in doc:
+            doc[k] = str(doc[k]).strip()
+    return doc
+
+
+def _norm_checks(raw):
+    """점검 영역: [{area, rating, note}] 또는 {영역: rating | {rating, note}} → [{area, rating, note}]"""
+    if isinstance(raw, dict):
+        raw = [dict(v, area=k) if isinstance(v, dict) else {"area": k, "rating": v} for k, v in raw.items()]
+    if not isinstance(raw, list):
+        raise DevTrackError("checks 는 목록이어야 합니다 (예: [{\"area\": \"논리\", \"rating\": \"fair\", \"note\": \"...\"}])")
+    out = []
+    for c in raw:
+        if not isinstance(c, dict):
+            c = {"area": str(c)}
+        area = str(_first(c, "area", "name", "title") or "").strip()
+        if not area:
+            continue
+        r = str(_first(c, "rating", "status", "grade") or "na").strip().lower()
+        item = {"area": area, "rating": r if r in CHECK_RATINGS else _CHECK_ALIAS.get(r, "fair")}
+        note = _first(c, "note", "comment", "detail")
+        if note:
+            item["note"] = str(note).strip()
+        out.append(item)
+    return out
+
+
 _KIND_EXT = {
     "markdown": ("md", "markdown"),
     "pdf": ("pdf",),
+    "docx": ("docx",),
     "image": ("png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"),
     "diff": ("diff", "patch"),
     "latex": ("tex", "bib", "sty", "cls", "bst"),
@@ -756,11 +837,30 @@ class Store:
         if extra:
             art.update(extra)
         t.setdefault("artifacts", []).append(art)
+        if art.get("kind") == "docx" and art.get("path"):
+            self._docx_preview(t, art)
         if log:
-            label = "리뷰 리포트 등록" if category == "review" else "결과물 추가"
+            label = {"review": "리뷰 리포트 등록", "source": "검토할 문서 등록"}.get(category, "결과물 추가")
             self._log(t, "{}: {}".format(label, art["title"]), kind="artifact", author=author, ref=fid,
                       meta={"category": category, "kind": art["kind"]})
         return art
+
+    def _docx_preview(self, t, art):
+        """Word 문서의 글자 · 표를 Markdown 으로 뽑아 웹 미리보기(art['preview'])로 둔다. 실패해도 결과물 등록은 계속."""
+        from .docx import docx_to_markdown
+        src = os.path.join(self.tasks_dir, t["id"], art["path"])
+        rel = art["path"] + ".md"
+        try:
+            text = docx_to_markdown(src)
+        except Exception as e:  # noqa: BLE001 — 손상된 파일 등 어떤 이유든 미리보기만 건너뛴다
+            art.pop("preview", None)
+            sys.stderr.write("[devtrack] Word 미리보기를 만들지 못했습니다 ({}): {}\n".format(art.get("filename"), e))
+            return
+        dest = os.path.join(self.tasks_dir, t["id"], rel)
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        _chmod(dest, 0o644)
+        art["preview"] = rel
 
     # ------------------------------------------------------------------ LaTeX 빌드
     def record_build(self, tid, source, result, author=None):
@@ -854,7 +954,9 @@ class Store:
             art["title"] = title
         if description:
             art["description"] = description
-        label = "리뷰 리포트 갱신" if art.get("category") == "review" else "결과물 갱신"
+        if art.get("kind") == "docx":
+            self._docx_preview(t, art)
+        label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신"}.get(art.get("category"), "결과물 갱신")
         self._log(t, "{} (v{}): {}".format(label, n + 1, art["title"]), kind="artifact", author=author,
                   ref=art["id"], meta={"category": art.get("category"), "kind": art.get("kind"), "version": n + 1})
         return art
@@ -872,15 +974,27 @@ class Store:
             if isinstance(data.get("pr"), dict):
                 pr = {k: data["pr"][k] for k in _PR_KEYS if data["pr"].get(k) not in (None, "")}
                 rv["pr"] = dict(rv.get("pr") or {}, **pr)
+            if isinstance(data.get("doc"), dict):
+                rv["doc"] = dict(rv.get("doc") or {}, **_norm_doc(data["doc"]))
             if data.get("verdict"):
                 v = str(data["verdict"]).strip().lower()
-                v = v if v in VERDICTS else _VERDICT_ALIAS.get(v)
+                if t.get("type") == "docreview" or rv.get("doc"):  # 문서 리뷰: 제출 가능 / 소폭 수정 / 대폭 보완 / 다시 작성
+                    v = v if v in DOC_VERDICTS else _DOC_VERDICT_ALIAS.get(v)
+                    allowed = DOC_VERDICTS
+                else:
+                    v = v if v in VERDICTS else _VERDICT_ALIAS.get(v)
+                    allowed = VERDICTS
                 if not v:
-                    raise DevTrackError("verdict 는 {} 중 하나여야 합니다".format(", ".join(VERDICTS)))
+                    raise DevTrackError("verdict 는 {} 중 하나여야 합니다".format(", ".join(allowed)))
                 rv["verdict"] = v
             for key in ("summary", "verdict_reason"):
                 if data.get(key):
                     rv[key] = str(data[key]).strip()
+            if "checks" in data:  # 점검 영역은 통째로 교체
+                rv["checks"] = _norm_checks(data["checks"] or [])
+            if "strengths" in data:
+                items = data["strengths"] or []
+                rv["strengths"] = [str(x).strip() for x in (items if isinstance(items, list) else [items]) if str(x).strip()]
             if "findings" in data:
                 items = data["findings"] or []
                 if not isinstance(items, list):
@@ -1386,7 +1500,7 @@ class Store:
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
                                                    "created_at", "author", "size", "description", "lang", "build",
-                                                   "version", "updated_at")})
+                                                   "version", "updated_at", "preview")})
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)
@@ -1447,11 +1561,15 @@ def _review_summary(rv):
     findings = rv.get("findings", [])
     open_ = [f for f in findings if f.get("status") == "open"]
     pr = rv.get("pr") or {}
-    return {
+    doc = rv.get("doc") or {}
+    out = {
         "total": len(findings), "open": len(open_),
         "by_severity": {s: sum(1 for f in open_ if f.get("severity") == s) for s in FINDING_SEVERITIES},
         "verdict": rv.get("verdict"), "pr": {k: pr.get(k) for k in ("url", "number", "repo") if pr.get(k)},
     }
+    if doc:
+        out["doc"] = {k: doc.get(k) for k in ("title", "kind") if doc.get(k)}
+    return out
 
 
 def _ts_key(ts):

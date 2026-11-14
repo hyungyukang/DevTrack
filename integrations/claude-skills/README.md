@@ -6,6 +6,7 @@ DevTrack 에 기록하도록 고친 Claude Code 스킬입니다. `devtrack` 명�
 | 스킬 | 하는 일 | DevTrack 에서 보이는 것 |
 |---|---|---|
 | `review-pr` | 다른 사람의 PR 리뷰 → 쉬운 말 리포트 + 검토 항목 R1, R2… → 고른 항목만 코멘트 초안 → 승인 후 게시 | 코드 리뷰 화면: 리뷰 결과 한눈에 보기, 리포트(md/pdf), **코멘트할 항목 체크 → 진행**, 코멘트 초안 게시 승인 |
+| `review-doc` | 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 → 문서 요약 · 목적 대비 미비한 부분 · 논리 · 문장/맞춤법 (과학 논문은 형식 · 선행 연구와의 차이 · 결론의 근거까지) → 보완 · 수정 항목 R1, R2… 를 **PDF 리포트**로 | 문서 리뷰 화면: 리뷰 의견 · 문서 요약 · 영역별 평가 · 원문 → 수정 제안, 리뷰 리포트(PDF) · 원본 보기, 리포트 확인 요청 |
 
 ## 설치
 
@@ -21,11 +22,19 @@ cp integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKIL
 cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ```
 
+`review-doc` 은 다른 스킬 없이 혼자 동작합니다 (메일 기능 없음).
+
+```bash
+mkdir -p ~/.claude/skills/review-doc
+ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
+```
+
 **Codex 에서도** 같은 파일을 씁니다 (Codex 는 `allowed-tools` 를 무시하고, `${CLAUDE_SKILL_DIR}` 는 이 파일이 있는 폴더로 읽습니다).
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr
+mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
 ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
+ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
 ```
 
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`
@@ -59,3 +68,15 @@ ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.cod
 
 웹 대신 채팅으로 "R1, R3 코멘트 초안 써줘", "이대로 게시해줘" 라고 해도 됩니다 (DevTrack 에 결정으로 기록됨).
 정적 모드(Frontier www)에서는 웹 버튼이 Claude 에게 붙여넣을 `[DevTrack 결정] … 선택: R1, R3` 메시지를 만들어 줍니다.
+
+## 사용 흐름 (`review-doc`)
+
+```
+/review-doc ~/papers/draft.pdf JFM 투고 전 점검
+  → (Claude) 원본을 '검토할 문서'로 등록 → 읽기 · 요약 → 목적 대비 미비한 부분 · 논리 · 문장/맞춤법 점검
+  → (Claude) 리포트(md → PDF) + 검토 항목 R1… 등록 → 리포트 확인 요청
+  → (웹 · 문서 리뷰) 리뷰 결과 한눈에 보기 · PDF 확인 → 승인 / 수정 요청
+  → (선택) "R1, R3 반영한 수정본 만들어 줘" → 원본은 그대로 두고 수정본을 따로 올림
+```
+
+웹에서 유형 **문서 리뷰** 로 지시해도 됩니다 (문서 경로 · 종류 · 목적 칸). 원고는 기밀일 수 있어, 스킬은 문서 내용을 검색이나 외부 서비스에 넣지 않습니다.

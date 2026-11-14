@@ -51,6 +51,7 @@ const ICONS = {
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  'file-search': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="11.5" cy="14.5" r="2.5"/><line x1="13.3" y1="16.3" x2="15.5" y2="18.5"/>',
   bulb: '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/>',
   book: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
   bar: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
@@ -92,6 +93,7 @@ export const TYPES = translated({
   code: { label: '코드 개발', icon: 'code', tone: 'blue' },
   review: { label: '코드 리뷰', icon: 'eye', tone: 'violet' },
   paper: { label: '논문 작성', icon: 'book', tone: 'teal' },
+  docreview: { label: '문서 리뷰', icon: 'file-search', tone: 'orange' },
   analysis: { label: '데이터 분석', icon: 'bar', tone: 'amber' },
   visualization: { label: '시각화', icon: 'image', tone: 'pink' },
   model: { label: 'AI 모델', icon: 'cpu', tone: 'accent' },
@@ -152,12 +154,32 @@ export const VERDICT = translated({
   approve: { label: '승인해도 됨', tone: 'green', icon: 'check-circle' },
   comment: { label: '의견만 전달', tone: 'blue', icon: 'message' },
   request_changes: { label: '수정 후 다시 확인', tone: 'orange', icon: 'edit' },
+  // 문서 리뷰의 종합 의견
+  ready: { label: '제출 가능', tone: 'green', icon: 'check-circle' },
+  minor_revision: { label: '소폭 수정', tone: 'blue', icon: 'edit' },
+  major_revision: { label: '대폭 보완', tone: 'orange', icon: 'alert' },
+  rework: { label: '다시 작성', tone: 'red', icon: 'x-circle' },
+});
+// 문서 리뷰: 문서 종류 · 점검 영역 평가
+export const DOC_KIND = translated({
+  paper: { label: '과학 논문' },
+  report: { label: '보고서' },
+  proposal: { label: '제안서' },
+  thesis: { label: '학위 논문' },
+  other: { label: '기타 문서' },
+});
+export const CHECK_RATING = translated({
+  good: { label: '양호', tone: 'green', icon: 'check' },
+  fair: { label: '보완 필요', tone: 'amber', icon: 'alert' },
+  poor: { label: '미흡', tone: 'red', icon: 'x-circle' },
+  na: { label: '해당 없음', tone: 'gray', icon: 'slash' },
 });
 export const CONFIDENCE = translatedStrings({ high: '높음', medium: '중간', low: '낮음' });
 
 export const ART_KIND = translated({
   markdown: { label: '문서§종류', icon: 'file-text' },
   pdf: { label: 'PDF', icon: 'file-text' },
+  docx: { label: 'Word', icon: 'file-text' },
   image: { label: '그림§종류', icon: 'image' },
   diff: { label: '변경사항', icon: 'git' },
   code: { label: '코드', icon: 'code' },

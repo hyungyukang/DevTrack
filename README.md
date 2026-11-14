@@ -61,6 +61,7 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
   Claude Code `/review-pr` 스킬 연동은 [integrations/claude-skills](integrations/claude-skills/README.md)
 - **논문 작성** — 논문(유형 `paper`)별 카드: 원고 구성(작성 계획), **컴파일된 PDF**(최신 빌드 · 경고 · 실패 알림), 원고 파일, 그림, 연결된 데이터 분석, 열린 문제. 논문 결과물(PDF · 원고 · 그림 · 표/데이터) 모아보기
 - **LaTeX 문서 보기** — `.tex` 결과물을 코드 대신 읽기 쉬운 문서로 표시: 절 제목 · 수식(KaTeX) · 표 · 목록 · 각주, `\cite`/`\ref`/`\eqref` 번호 연결, `\includegraphics` 는 같은 이름으로 올라온 그림(같은 작업 또는 연결된 분석 작업)을 찾아 표시. `원본 코드` 로 전환 가능. 번호·레이아웃은 실제 PDF 와 다를 수 있는 미리보기
+- **문서 리뷰** — 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 작업(유형 `docreview`) 목록과, 고른 작업의 **리뷰 결과 한눈에 보기**(리뷰 의견 · 한 줄 결론, 문서 요약, 영역별 평가, 잘된 점, 보완 · 수정할 부분 R1… 의 위치와 **원문 → 수정 제안**), 리뷰 리포트(PDF) · 원본 문서 보기. Word 원본은 글자 · 표를 뽑아 미리보기(표준 라이브러리만). 새 작업 지시에서 문서 경로 · 종류 · 목적 입력
 - **데이터 분석** — 데이터 분석 · 시각화 작업(유형 `analysis`, `visualization`)과 그림 갤러리, 데이터 · 노트북 · 리포트. `논문용` 필터는 논문 작업에 연결된 분석만 표시
 - **브레인스토밍** — 브레인스토밍 작업(유형 `brainstorm`) 목록과, 고른 작업의 주제 · 진행 계획, AI 가 정리한 아이디어 노트, **이어갈 아이디어를 체크해서 고르기**(`request --choices "I1=…"`), 지금까지 고른 아이디어, 의견 보내기, 고른 아이디어로 새 작업 지시(연결된 작업으로 표시)
 - **결과물** — Markdown, PDF, 이미지/SVG, diff, 코드/LaTeX(하이라이트), CSV 표, Jupyter 노트북, HTML.
@@ -107,7 +108,8 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
 | `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `issue` / `resolve` | 문제 기록 / 해결 |
-| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`) / 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록, `--pdf` 로 PDF 도 만들어 첨부. 같은 이름으로 다시 올리면 새 버전으로 교체(이전 버전 보관, `artifact --replace` 도 동일) |
+| `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`, `--source` = 문서 리뷰의 검토할 원본) / 코드 · 문서 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록 (문서 리뷰는 `doc` · `checks` · `strengths` 도), `--pdf` 로 PDF 도 만들어 첨부. 같은 이름으로 다시 올리면 새 버전으로 교체(이전 버전 보관, `artifact --replace` 도 동일) |
+| `text` | 문서의 글자 뽑기 — Word(`.docx`) → Markdown (표준 라이브러리), PDF → 글자 (`pdftotext` 가 있을 때). 문서 리뷰에서 AI 가 원본을 읽는 용도 |
 | `pdf` | Markdown 문서를 PDF 로 변환 (A4, 한글 글꼴, 웹과 같은 모양 — 헤드리스 Chrome/Chromium 사용, `DEVTRACK_CHROME` 으로 경로 지정) |
 | `latex` | LaTeX 컴파일 → 성공하면 PDF 를 빌드로 기록(쪽수, 정의 안 된 인용/참조, overfull 경고), 실패하면 오류 위치와 로그 기록. `--pdf` 로 다른 곳에서 만든 PDF 기록 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
@@ -167,5 +169,5 @@ data/
 ## 개발
 
 - 프런트엔드: `web/js/app.js`(화면 · 라우팅 · 폴링), `web/js/viewers.js`(결과물 뷰어), `web/js/util.js`, `web/css/app.css`
-- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py`(Markdown → PDF)
+- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py`(Markdown → PDF), `devtrack/docx.py`(Word → Markdown)
 - 외부 라이브러리는 `web/vendor/` 에 고정 버전으로 포함 (marked 12.0.2, DOMPurify 3.1.6, highlight.js 11.9.0)

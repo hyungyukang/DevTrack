@@ -18,7 +18,7 @@ import time
 
 from . import DevTrackError, __version__, gitops
 from .store import (
-    APPROVAL_KINDS, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
+    APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     Store, is_unassigned, normalize_item_id, normalize_task_id, pid_alive,
     now as now_iso, _choice_labels,
 )
@@ -129,7 +129,10 @@ def cmd_resolve(store, args):
 
 
 def cmd_artifact(store, args, category=None):
-    category = category or ("review" if getattr(args, "review", False) else "result")
+    if getattr(args, "source", False) and getattr(args, "review", False):
+        raise DevTrackError("--source 와 --review 는 함께 쓸 수 없습니다")
+    category = category or ("source" if getattr(args, "source", False) else
+                            "review" if getattr(args, "review", False) else "result")
     common = dict(title=args.title, description=_text(args.desc, args.desc_file), category=category,
                   author=args.author)
     if getattr(args, "git_diff", None):
@@ -152,7 +155,11 @@ def cmd_artifact(store, args, category=None):
     elif art.get("version", 1) > 1 and getattr(args, "replace", False):
         _info("결과물 갱신: {} — {} (v{})".format(art["id"], art["title"], art["version"]))
     else:
-        _info("결과물 추가: {} — {} ({})".format(art["id"], art["title"], art["kind"]))
+        _info("{}: {} — {} ({})".format("검토할 문서 등록" if category == "source" else "결과물 추가",
+                                       art["id"], art["title"], art["kind"]))
+    if art.get("kind") == "docx" and not art.get("unchanged"):
+        _info("  Word 미리보기: {}".format("만듦 (웹에서 글자 · 표를 볼 수 있음)" if art.get("preview")
+                                        else "만들지 못함 — 웹에서는 내려받아 보세요"))
     _out(args, art, art["id"])
 
 
@@ -212,6 +219,41 @@ def cmd_review(store, args):
                 store.add_log(args.task, "리뷰 리포트 PDF 변환 실패", kind="warning", detail=str(e),
                               author=args.author)
     _out(args, arts, "\n".join(a["id"] for a in arts))
+    return 0
+
+
+def cmd_text(store, args):
+    """문서의 글자를 뽑는다 — Word(.docx)는 표준 라이브러리로, PDF 는 pdftotext 로 (문서 리뷰에서 AI 가 읽는 용도)."""
+    path = os.path.expanduser(args.file)
+    if not os.path.isfile(path):
+        raise DevTrackError("파일을 찾을 수 없습니다: {}".format(args.file))
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".docx":
+        from .docx import docx_to_markdown
+        text = docx_to_markdown(path)
+    elif ext == ".pdf":
+        exe = shutil.which("pdftotext")
+        if not exe:
+            raise DevTrackError("pdftotext 가 없습니다 (poppler-utils) — PDF 는 AI 가 직접 읽거나 pdftotext 를 설치하세요")
+        try:
+            text = subprocess.run([exe, "-layout", "-enc", "UTF-8", path, "-"], stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, check=True, timeout=args.timeout).stdout.decode("utf-8", "replace")
+        except subprocess.CalledProcessError as e:
+            raise DevTrackError("pdftotext 실패: {}".format(e.stderr.decode("utf-8", "replace").strip()))
+        except subprocess.TimeoutExpired:
+            raise DevTrackError("pdftotext 시간 초과 ({}초)".format(args.timeout))
+    elif ext == ".doc":
+        raise DevTrackError("옛 Word 형식(.doc)은 읽지 못합니다 — Word 에서 .docx 나 PDF 로 저장해 주세요")
+    else:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    if args.output:
+        with open(os.path.expanduser(args.output), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        _info("저장: {} ({}자)".format(args.output, len(text)))
+        _out(args, {"output": args.output, "chars": len(text)}, args.output)
+    else:
+        sys.stdout.write(text)
     return 0
 
 
@@ -945,12 +987,20 @@ def cmd_show(store, args):
         for i, p in enumerate(t["plan"]):
             print("    [{}] {}. {}".format("x" if p["done"] else " ", i + 1, p["text"]))
     rv = t.get("review") or {}
+    doc = rv.get("doc") or {}
+    if doc:
+        print("  리뷰한 문서: {}{}{}".format(doc.get("title") or "(제목 없음)",
+                                       " ({})".format(DOC_KINDS.get(doc.get("kind"), doc.get("kind"))) if doc.get("kind") else "",
+                                       " · 목적: " + doc["purpose"] if doc.get("purpose") else ""))
+    if rv.get("checks"):
+        print("  점검 영역: " + ", ".join("{} {}".format(c["area"], c["rating"]) for c in rv["checks"]))
     if rv.get("findings"):
         pr = rv.get("pr") or {}
+        verdict = DOC_VERDICT_LABEL.get(rv.get("verdict"), rv.get("verdict"))
         print("  리뷰 결과{}{}:".format(" — PR #{}".format(pr["number"]) if pr.get("number") else "",
-                                    " · 의견 {}".format(rv["verdict"]) if rv.get("verdict") else ""))
+                                    " · 의견 {}".format(verdict) if verdict else ""))
         for f in rv["findings"]:
-            loc = "{}{}".format(f.get("file", ""), ":{}".format(f["line"]) if f.get("line") else "")
+            loc = f.get("location") or "{}{}".format(f.get("file", ""), ":{}".format(f["line"]) if f.get("line") else "")
             print("    {} [{}{}] {}{}".format(f["id"], f["severity"], "" if f["status"] == "open" else ", " + f["status"],
                                            f["title"], "  ({})".format(loc) if loc else ""))
     issues = [i for i in t.get("issues", []) if i["status"] == "open"]
@@ -965,8 +1015,8 @@ def cmd_show(store, args):
     if t.get("artifacts"):
         print("  결과물:")
         for a in t["artifacts"]:
-            print("    {} [{}{}] {}".format(a["id"], a["kind"], ", 리뷰" if a.get("category") == "review" else "",
-                                         a["title"]))
+            print("    {} [{}{}] {}".format(a["id"], a["kind"], {"review": ", 리뷰", "source": ", 검토할 문서"}.get(
+                a.get("category"), ""), a["title"]))
     print("  최근 기록:")
     for e in t.get("log", [])[-args.lines:]:
         print("    {} [{}] {}: {}".format(e["ts"][5:16].replace("T", " "), e["kind"], e["author"], e["message"]))
@@ -1118,11 +1168,13 @@ def build_parser():
     sp.add_argument("-d", "--desc", help="설명 (markdown)")
     sp.add_argument("--desc-file", metavar="FILE")
     sp.add_argument("--review", action="store_true", help="리뷰 섹션에 표시")
+    sp.add_argument("--source", action="store_true",
+                    help="문서 리뷰의 검토할 원본 문서로 등록 (PDF · Word .docx · LaTeX — Word 는 웹 미리보기를 함께 만듦)")
     sp.add_argument("--no-copy", action="store_true", help="복사하지 않고 경로만 기록 (웹에서는 볼 수 없음)")
     sp.add_argument("--replace", action="store_true",
                     help="같은 이름의 결과물이 있으면 새로 추가하지 않고 새 버전으로 교체 (이전 버전 보관)")
 
-    sp = add("review", cmd_review, "코드 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록 "
+    sp = add("review", cmd_review, "코드 · 문서 리뷰 리포트(markdown/pdf) 등록 · 검토 항목(R1, R2…) 기록 "
                                    "(같은 이름의 리포트를 다시 등록하면 새 버전으로 교체)")
     sp.add_argument("task")
     sp.add_argument("paths", nargs="*", metavar="FILE", help="리뷰 리포트 파일 (md, pdf — 여러 개 가능)")
@@ -1130,11 +1182,18 @@ def build_parser():
                     help="Markdown 리포트를 PDF 로도 만들어 함께 등록 (같은 폴더에 .pdf 생성, 헤드리스 Chrome 필요)")
     sp.add_argument("--findings", metavar="JSON",
                     help="검토 결과 JSON: {pr, verdict, summary, findings:[{id, severity, title, plain, file, line, "
-                         "category, confidence, status}]} (- 는 stdin). 다시 실행하면 상태만 갱신")
+                         "category, confidence, status}]} (- 는 stdin). 다시 실행하면 상태만 갱신. "
+                         "문서 리뷰는 pr 대신 doc{title, kind, purpose, synopsis, ...}, checks[{area, rating, note}], "
+                         "strengths[], 항목의 location · quote · suggestion")
     sp.add_argument("-n", "--title")
     sp.add_argument("-k", "--kind")
     sp.add_argument("-d", "--desc")
     sp.add_argument("--desc-file", metavar="FILE")
+
+    sp = add("text", cmd_text, "문서의 글자 뽑기 — Word(.docx) → Markdown (표준 라이브러리), PDF → 글자 (pdftotext)")
+    sp.add_argument("file", help=".docx · .pdf · .tex · .md 등")
+    sp.add_argument("-o", "--output", help="저장할 파일 (없으면 표준출력)")
+    sp.add_argument("--timeout", type=int, default=120, help="pdftotext 제한 시간 (초)")
 
     sp = add("pdf", cmd_pdf, "Markdown 문서를 PDF 로 변환 (헤드리스 Chrome/Chromium, 한글 글꼴 포함)")
     sp.add_argument("markdown", help="변환할 .md 파일")
