@@ -458,7 +458,7 @@ const EN = {
   '데이터를 불러올 수 없습니다': 'Cannot load the data',
   '<b>file:// 로 직접 연 경우 동작하지 않습니다.</b> 웹 서버로 열어주세요: <code>devtrack serve</code>': '<b>Opening the file directly (file://) does not work.</b> Open it through a web server: <code>devtrack serve</code>',
   '로컬: <code>devtrack serve</code> 실행 후 <code>http://localhost:8765</code> 접속': 'Locally: run <code>devtrack serve</code> and open <code>http://localhost:8765</code>',
-  '정적 호스팅(Frontier www): <code>devtrack publish --to ~/www/devtrack</code> 로 웹과 데이터를 함께 배포했는지 확인': 'Static hosting (Frontier www): check that <code>devtrack publish --to ~/www/devtrack</code> published the web page together with the data',
+  '정적 호스팅(웹 공개 폴더): <code>devtrack publish --to ~/www/devtrack</code> 로 웹과 데이터를 함께 배포했는지 확인': 'Static hosting (public web folder): check that <code>devtrack publish --to ~/www/devtrack</code> published the web page together with the data',
   '데이터가 아직 없다면 <code>devtrack init</code> 또는 첫 작업을 <code>devtrack new</code> 로 생성': 'No data yet? Run <code>devtrack init</code>, or create a first task with <code>devtrack new</code>',
   '무엇을 수정해야 하는지 코멘트를 적어주세요': 'Add a comment saying what to change',
   '진행할 항목을 하나 이상 선택해주세요': 'Select at least one item to proceed with',

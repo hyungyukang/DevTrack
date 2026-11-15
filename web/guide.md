@@ -31,7 +31,7 @@ Claude 같은 AI 에게 일을 맡기고, **무엇을 하고 있는지 · 어디
 터미널에서 아래 명령이 모두 실행되는지 확인합니다.
 
 ```bash
-python3 --version      # 3.7 이상 (Frontier: module load cray-python)
+python3 --version      # 3.7 이상 (HPC 에서는 module load python 등)
 git --version
 ```
 
@@ -43,7 +43,7 @@ DevTrack 은 Python 표준 라이브러리만 쓰므로 `pip install` 같은 설
 ## 2. DevTrack 내려받기
 
 ```bash
-git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 ```
 
 이후 설명은 `~/devtrack` 에 받았다고 가정합니다. 다른 곳에 받았다면 경로만 바꿔 주세요.
@@ -116,7 +116,7 @@ ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skill
 
 복사 대신 링크로 걸어 두면 `git pull` 만으로 스킬도 함께 최신이 됩니다.
 리뷰 리포트를 메일로 받는 기능은 `pr-review-report` 스킬이 함께 설치되어 있어야 합니다
-([자세히](https://github.com/hyungyukang/AI_Dev_Progress_Checker/tree/main/integrations/claude-skills)).
+([자세히](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills)).
 
 ### 5-3. 권한 확인 창 줄이기 (선택)
 
@@ -319,14 +319,15 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
 3. 해 볼 아이디어가 정해지면 **이 아이디어로 작업 지시** 를 누르세요. 새 작업(코드 개발 · 데이터 분석 · 논문 작성 등)이
    이 브레인스토밍과 연결되어 **연결된 작업** 에 표시됩니다.
 
-## 10. Frontier 에서 쓰기
+## 10. HPC 에서 쓰기
 
-Frontier 에서는 Claude 가 Frontier 에서 일하고, 기록도 Frontier 에 남습니다. 그 기록을 웹으로 보는 방법은 두 가지입니다.
+슈퍼컴퓨터(HPC) 같은 원격 서버에서는 Claude 가 그 서버에서 일하고, 기록도 그 서버에 남습니다. 그 기록을 웹으로 보는 방법은 두 가지입니다.
+아래의 모듈 이름 · 경로 · 접속 주소는 예시이니, 쓰는 시스템에 맞게 바꾸세요.
 
 | | 정적 웹 ([10-6](#/guide/s10-6)) | 실시간 · SSH 터널 ([10-5](#/guide/s10-5)) |
 |---|---|---|
-| 보는 곳 | Frontier `www` 의 웹 주소 | 내 컴퓨터 브라우저의 `localhost` (터널 경유) |
-| 승인 · 지시 | 웹이 만든 메시지를 Frontier 의 Claude 대화에 붙여 넣기 | 웹에서 바로 저장 — 기다리던 Claude 가 바로 시작 |
+| 보는 곳 | HPC 의 웹 공개 폴더(예: `~/www`) 주소 | 내 컴퓨터 브라우저의 `localhost` (터널 경유) |
+| 승인 · 지시 | 웹이 만든 메시지를 HPC 의 Claude 대화에 붙여 넣기 | 웹에서 바로 저장 — 기다리던 Claude 가 바로 시작 |
 | 켜 두는 시간 | 항상 (기록할 때마다 자동 반영) | 웹을 쓰는 동안만 |
 | 주의 | 주소를 아는 누구나 볼 수 있음 | 켜 있는 동안 같은 로그인 노드의 다른 사용자도 접속할 수 있음 |
 
@@ -336,10 +337,10 @@ Frontier 에서는 Claude 가 Frontier 에서 일하고, 기록도 Frontier 에 
 ### 10-1. DevTrack 설치 (처음 한 번)
 
 ```bash
-module load cray-python
-git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+module load python               # 3.7 이상 파이썬 (모듈 이름은 시스템마다 다름)
+git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 cat >> ~/.bashrc <<'EOF'
-module load cray-python
+module load python
 export PATH="$HOME/devtrack/bin:$PATH"
 export DEVTRACK_DATA=$HOME/devtrack-data
 export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # 웹 공개 위치 (환경에 맞게)
@@ -349,49 +350,51 @@ devtrack --version
 devtrack publish               # 처음 한 번 (웹 화면을 업데이트했을 때도)
 ```
 
-- `module load cray-python`: Frontier 의 기본 `python3` 는 3.7 미만이라 필요합니다. `~/.bashrc` 에도 넣어 두는 것이 중요합니다.
+- `module load python`: 시스템 기본 `python3` 가 3.7 미만일 때 필요합니다. 모듈 이름은 시스템마다 다르니 `module avail python` 으로 확인하세요
+  (기본 `python3` 가 3.7 이상이면 두 줄 모두 빼도 됩니다). `~/.bashrc` 에도 넣어 두는 것이 중요합니다.
   Claude 와 취소 훅(5-4)도 이 파이썬을 써야 합니다 ([10-3](#/guide/s10-3)).
-- `git clone` 을 하려면 Frontier 에 GitHub SSH 키가 등록되어 있어야 합니다.
+- `git clone` 을 하려면 HPC 에 GitHub SSH 키가 등록되어 있어야 합니다.
 - 이후 Claude 가 기록할 때마다 공개 디렉토리에 자동으로 반영됩니다.
-- **기록 폴더(`DEVTRACK_DATA`)는 홈에 두세요.** `/lustre/orion/...` 의 작업 공간(Member · Project · World Work)은 90일 동안 읽거나 고치지 않은 파일이 지워지는(purge) 곳이라 오래된 작업 기록이 사라질 수 있습니다.
-  그중 `proj-shared`(Project Work)는 같은 프로젝트 구성원도 들어올 수 있습니다.
-  홈(`/ccs/home/<사용자 ID>`, 50 GB)은 지워지지 않고 백업됩니다.
+  센터가 웹 공개 폴더를 제공하지 않으면 `DEVTRACK_PUBLISH_DIR` 줄과 `devtrack publish` 는 빼고 실시간 방식([10-5](#/guide/s10-5))으로 보세요.
+- **기록 폴더(`DEVTRACK_DATA`)는 홈에 두세요.** 스크래치(scratch) 같은 병렬 파일 시스템의 작업 공간은 한동안 읽거나 고치지 않은 파일을 지우는(purge) 경우가 많아 오래된 작업 기록이 사라질 수 있습니다.
+  프로젝트 공유 공간은 같은 프로젝트 구성원도 들어올 수 있습니다.
+  홈은 보통 지워지지 않고 백업됩니다. 자세한 정책은 쓰는 센터의 안내를 확인하세요.
 
 ### 10-2. 내 컴퓨터에서 쓰던 기록 옮기기 (선택)
 
-로컬(Mac 등)에서 쓰던 작업 기록을 Frontier 에서 이어서 쓰려면 아래 순서로 옮깁니다. 기록 폴더 하나가 전부라 옮기기는 간단합니다.
+로컬(Mac 등)에서 쓰던 작업 기록을 HPC 에서 이어서 쓰려면 아래 순서로 옮깁니다. 기록 폴더 하나가 전부라 옮기기는 간단합니다.
 
 **① 옮기기 전 (내 컴퓨터에서)**
-- **승인 대기 정리:** 결정을 기다리는 승인 요청은 가능하면 미리 처리하세요. 특히 **커밋 승인 요청**은 내 컴퓨터의 저장소 경로로 되어 있어 Frontier 에서는 반영할 수 없습니다.
+- **승인 대기 정리:** 결정을 기다리는 승인 요청은 가능하면 미리 처리하세요. 특히 **커밋 승인 요청**은 내 컴퓨터의 저장소 경로로 되어 있어 HPC 에서는 반영할 수 없습니다.
 - **내 컴퓨터에만 있는 파일:** 그런 파일에 기대는 작업은 끝내고 옮기거나, 그 파일도 함께 옮기세요. 예: 코드 리뷰 코멘트 초안(`~/.pr-review/`), 로컬 폴더의 논문 원고, 데이터.
-- **로컬은 끄기:** `devtrack serve` 와 대기 모드("웹 지시 기다려줘")를 끄세요. **두 곳에서 동시에 기록하면 내용이 갈라집니다.** 옮긴 뒤에는 Frontier 쪽만 씁니다.
+- **로컬은 끄기:** `devtrack serve` 와 대기 모드("웹 지시 기다려줘")를 끄세요. **두 곳에서 동시에 기록하면 내용이 갈라집니다.** 옮긴 뒤에는 HPC 쪽만 씁니다.
 
 **② 기록 복사 (내 컴퓨터에서)** — 10-1 설치를 마친 뒤 실행합니다.
 
 ```bash
 rsync -av --exclude '.agent/' --exclude '.lock' \
-  ~/devtrack/data/ <사용자 ID>@frontier.olcf.ornl.gov:~/devtrack-data/
+  ~/devtrack/data/ <사용자 ID>@<HPC 로그인 주소>:~/devtrack-data/
 ```
 
-- 내 컴퓨터의 기록 폴더(`$DEVTRACK_DATA`, 기본 `~/devtrack/data/`)를 Frontier 의 `$DEVTRACK_DATA` 로 복사합니다.
+- 내 컴퓨터의 기록 폴더(`$DEVTRACK_DATA`, 기본 `~/devtrack/data/`)를 HPC 의 `$DEVTRACK_DATA` 로 복사합니다.
 - `.agent/` 는 그 컴퓨터의 대화 · 대기 상태라 옮기지 않습니다. `.lock` 은 잠금 파일입니다.
-- 처리 여부(확인한 지시 · 결정)는 각 작업 파일에 들어 있어서, 이미 처리한 지시가 Frontier 에서 다시 뜨지 않습니다.
+- 처리 여부(확인한 지시 · 결정)는 각 작업 파일에 들어 있어서, 이미 처리한 지시가 HPC 에서 다시 뜨지 않습니다.
   지운 작업 번호 목록(`.deleted.json`)도 함께 옮겨지므로 번호가 다시 쓰이지 않습니다.
 - 결과물 파일은 기록 폴더 안에 복사되어 있으므로 그대로 보입니다(`--no-copy` 로 경로만 기록한 결과물은 제외).
   끝난 작업에 적힌 로컬 저장소 경로는 그대로 남지만 보기에는 문제없습니다.
-- 코드 리뷰를 이어서 하려면 `~/.pr-review/` 폴더도 같은 방법으로 Frontier 의 홈으로 복사하세요.
+- 코드 리뷰를 이어서 하려면 `~/.pr-review/` 폴더도 같은 방법으로 HPC 의 홈으로 복사하세요.
 
-**③ 웹 갱신 (Frontier 에서)** — `devtrack publish` 를 한 번 실행합니다.
+**③ 웹 갱신 (HPC 에서)** — `devtrack publish` 를 한 번 실행합니다.
 
 **④ Claude 설정** — [10-3](#/guide/s10-3).
 
-**⑤ 확인 (Frontier 에서)**
+**⑤ 확인 (HPC 에서)**
 - `devtrack list` 에 옮긴 작업이 보이는지, `devtrack inbox` 가 오류 없이 실행되는지 봅니다.
 - 웹 주소를 열어 작업과 결과물이 보이는지 봅니다.
 
 ### 10-3. Claude Code 설치 · 설정 (처음 한 번)
 
-**① 설치** — Frontier 에서 실행합니다. 홈의 `~/.local/bin/claude` 에 설치되며 관리자 권한은 필요 없습니다.
+**① 설치** — HPC 에서 실행합니다. 홈의 `~/.local/bin/claude` 에 설치되며 관리자 권한은 필요 없습니다.
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash      # 내려받는 동안 진행 표시가 없습니다
@@ -402,9 +405,9 @@ claude --version                                     # 버전 번호가 나오�
 
 - `claude: command not found` 가 나오면 `ls ~/.local/bin/claude` 로 설치됐는지 보고, 있으면 위의 PATH 줄을 확인하세요.
 
-**② 로그인** — `claude` 를 처음 실행하면 로그인 안내가 나옵니다. Frontier 에는 브라우저가 없으므로, 화면에 나온 주소를 **내 컴퓨터 브라우저**에서 열어 로그인하고, 나온 코드를 Frontier 터미널에 붙여 넣습니다.
+**② 로그인** — `claude` 를 처음 실행하면 로그인 안내가 나옵니다. HPC 에는 보통 브라우저가 없으므로, 화면에 나온 주소를 **내 컴퓨터 브라우저**에서 열어 로그인하고, 나온 코드를 HPC 터미널에 붙여 넣습니다.
 
-**③ 자동 업데이트 끄기 (권장)** — Frontier 의 홈은 모든 로그인 노드가 함께 쓰는 네트워크 디스크입니다.
+**③ 자동 업데이트 끄기 (권장)** — HPC 의 홈은 보통 모든 로그인 노드가 함께 쓰는 네트워크 디스크입니다.
 한 노드에서 Claude Code 가 자동 업데이트하며 예전 버전 파일을 지우면, 다른 노드의 tmux(10-4)에서 돌던 Claude 가 `Bus error` 로 꺼질 수 있습니다.
 `~/.claude/settings.json` 에 아래를 넣고(파일이 이미 있으면 `env` 안에 한 줄만 추가), 업데이트는 Claude 가 하나도 돌지 않을 때 `claude update` 로 직접 하세요.
 
@@ -414,28 +417,28 @@ claude --version                                     # 버전 번호가 나오�
 }
 ```
 
-**④ DevTrack 설정** — 5단계를 Frontier 에서 똑같이 하되, 아래를 지켜 주세요.
+**④ DevTrack 설정** — 5단계를 HPC 에서 똑같이 하되, 아래를 지켜 주세요.
 
-- **기록 규칙(5-1):** `~/.claude/CLAUDE.md` 의 경로를 Frontier 의 위치(`~/devtrack/...`)로 적습니다. 내 컴퓨터의 파일을 복사했다면 경로가 내 컴퓨터 기준이니 꼭 바꾸세요.
-- **코드 리뷰 스킬(5-2):** Frontier 의 `~/devtrack` 을 가리키도록 링크를 다시 겁니다. 코드 리뷰에는 `gh auth login` 도 필요합니다.
-  리포트 메일 기능은 Frontier 에서 메일 설정을 한 번 새로 하세요. 비밀번호가 든 설정 파일은 복사하지 마세요.
-- **취소 훅(5-4):** `"command"` 에 Frontier 의 전체 경로를 적습니다. `echo $HOME/devtrack/bin/devtrack-hook` 으로 확인하세요.
-- **⚠️ Claude 는 `module load cray-python` 이 된 셸에서 실행하세요.** Claude 를 띄우기 전에 `python3 --version` 이 3.7 이상인지 보세요.
+- **기록 규칙(5-1):** `~/.claude/CLAUDE.md` 의 경로를 HPC 의 위치(`~/devtrack/...`)로 적습니다. 내 컴퓨터의 파일을 복사했다면 경로가 내 컴퓨터 기준이니 꼭 바꾸세요.
+- **코드 리뷰 스킬(5-2):** HPC 의 `~/devtrack` 을 가리키도록 링크를 다시 겁니다. 코드 리뷰에는 `gh auth login` 도 필요합니다.
+  리포트 메일 기능은 HPC 에서 메일 설정을 한 번 새로 하세요. 비밀번호가 든 설정 파일은 복사하지 마세요.
+- **취소 훅(5-4):** `"command"` 에 HPC 의 전체 경로를 적습니다. `echo $HOME/devtrack/bin/devtrack-hook` 으로 확인하세요.
+- **⚠️ Claude 는 3.7 이상 파이썬이 잡힌 셸(10-1 의 `module load` 를 한 셸)에서 실행하세요.** Claude 를 띄우기 전에 `python3 --version` 이 3.7 이상인지 보세요.
   훅은 3.7 미만 파이썬으로 실행되면 Claude 를 막지 않으려고 **아무 일도 하지 않고** 넘어갑니다.
   그러면 웹에서 작업을 취소해도 Claude 가 바로 멈추지 않습니다.
-- 직접 하기 번거로우면 Frontier 의 Claude 에게 맡겨도 됩니다 — **"`~/devtrack/web/guide.md` 의 5-1, 5-4, 10-3 절을 읽고 이 Frontier 환경에 맞게 DevTrack 설정해줘"**.
+- 직접 하기 번거로우면 HPC 의 Claude 에게 맡겨도 됩니다 — **"`~/devtrack/web/guide.md` 의 5-1, 5-4, 10-3 절을 읽고 이 HPC 환경에 맞게 DevTrack 설정해줘"**.
   설정을 바꾼 뒤에는 Claude 를 다시 띄워야 반영됩니다.
 
 ### 10-4. tmux 안에서 Claude 띄워 두기
 
 tmux 는 원격 컴퓨터에 터미널 화면을 열어 두는 프로그램입니다. ssh 접속이 끊기거나 노트북을 덮어도 그 안의 Claude 는 계속 일하고, 다시 접속해 같은 화면으로 돌아갈 수 있습니다.
 
-**① 처음 띄우기** (Frontier 에서)
+**① 처음 띄우기** (HPC 에서)
 
 ```bash
 hostname                  # 예: login05 — tmux 를 연 로그인 노드를 기억해 두세요
 tmux new -s claude        # 'claude' 라는 이름의 tmux 화면 열기
-python3 --version         # 3.7 이상인지 (아니면 module load cray-python)
+python3 --version         # 3.7 이상인지 (아니면 module load python)
 cd <작업할 디렉토리>
 claude
 ```
@@ -447,13 +450,13 @@ Claude 가 뜨면 **"웹 지시 기다려줘"** 라고 하세요. 웹에서 지�
 **③ 다시 들어가기**
 
 ```bash
-ssh <사용자 ID>@frontier.olcf.ornl.gov
+ssh <사용자 ID>@<HPC 로그인 주소>
 hostname                  # 처음과 다른 노드라면
 ssh login05               # tmux 를 연 노드로 이동
 tmux attach -t claude
 ```
 
-tmux 화면은 그것을 연 로그인 노드에만 있습니다. `frontier.olcf.ornl.gov` 로 접속하면 다른 노드에 배정될 수 있으니 위처럼 옮겨 가세요.
+tmux 화면은 그것을 연 로그인 노드에만 있습니다. 로그인 주소가 여러 로그인 노드를 묶은 것이면 접속할 때마다 다른 노드에 배정될 수 있으니 위처럼 옮겨 가세요.
 열린 화면 목록은 `tmux ls` 로 봅니다.
 
 | 키 (`Ctrl+b` 를 누르고 뗀 뒤) | 하는 일 |
@@ -467,14 +470,14 @@ tmux 화면은 그것을 연 로그인 노드에만 있습니다. `frontier.olcf
 
 - `tmux` 가 없다고 나오면 `screen` 을 쓰세요 — 시작 `screen -S claude`, 빠져나오기 `Ctrl+a` 뒤 `d`, 다시 들어가기 `screen -r claude`.
 - 정비 등으로 로그인 노드가 다시 시작되면 tmux 화면도 사라집니다. 그때는 ①부터 다시 하세요.
-- **무거운 계산은 계산 노드에서:** Claude 는 로그인 노드에서 일합니다. 로그인 노드는 여러 사람이 함께 쓰므로, 계산이나 메모리를 많이 쓰는 작업은 할 수 없습니다(OLCF 정책).
-  대용량 데이터 처리 같은 일은 계산 노드에서 하도록 지시에 적어 주세요. 대화형 `salloc` 이나 배치 작업을 쓰면 됩니다.
+- **무거운 계산은 계산 노드에서:** Claude 는 로그인 노드에서 일합니다. 로그인 노드는 여러 사람이 함께 쓰므로, 계산이나 메모리를 많이 쓰는 작업은 할 수 없습니다(대부분 HPC 센터의 정책).
+  대용량 데이터 처리 같은 일은 계산 노드에서 하도록 지시에 적어 주세요. 대화형 할당(Slurm 이면 `salloc`)이나 배치 작업을 쓰면 됩니다.
   할당 시간이 드는 일이니, 제출 전에 확인받고 싶으면 지시에 "작업 제출 전에 승인받아줘" 라고 적으세요.
 
 ### 10-5. 웹에서 바로 지시 · 승인하기 (실시간 방식, SSH 터널)
 
-Frontier 에서 `devtrack serve` 를 켜고 내 컴퓨터에서 SSH 터널로 열면, 로컬에서 쓰듯 웹에서 새 작업을 지시하고 승인을 바로 저장할 수 있습니다.
-tmux 에서 기다리는 Claude(10-4)가 몇 초 안에 받아 Frontier 에서 일합니다.
+HPC 에서 `devtrack serve` 를 켜고 내 컴퓨터에서 SSH 터널로 열면, 로컬에서 쓰듯 웹에서 새 작업을 지시하고 승인을 바로 저장할 수 있습니다.
+tmux 에서 기다리는 Claude(10-4)가 몇 초 안에 받아 HPC 에서 일합니다.
 
 > **⚠️ 웹을 쓰는 동안만 켜고, 끝나면 바로 끄세요.**
 > 로그인 노드는 여러 사람이 함께 쓰는 컴퓨터라, 서버가 켜져 있는 동안에는 **같은 노드의 다른 사용자도** 그 서버에 접속할 수 있습니다.
@@ -486,13 +489,13 @@ tmux 에서 기다리는 Claude(10-4)가 몇 초 안에 받아 Frontier 에서 �
 **② 터널을 열고 서버 켜기** — 내 컴퓨터 터미널에서 접속한 뒤,
 
 ```bash
-ssh -L 8766:localhost:8765 <사용자 ID>@frontier.olcf.ornl.gov
+ssh -L 8766:localhost:8765 <사용자 ID>@<HPC 로그인 주소>
 ```
 
 접속한 **그 창에서** 서버를 켭니다.
 
 ```bash
-devtrack serve            # --open 은 쓰지 않습니다 (Frontier 에는 브라우저가 없음)
+devtrack serve            # --open 은 쓰지 않습니다 (HPC 에는 보통 브라우저가 없음)
 ```
 
 - 터널은 이 ssh 가 접속한 로그인 노드로 이어집니다. 그래서 서버는 반드시 이 창에서 켜야 합니다. 다른 창은 다른 노드에 있을 수 있습니다.
@@ -501,14 +504,14 @@ devtrack serve            # --open 은 쓰지 않습니다 (Frontier 에는 브�
 
 **③ 웹 열기** — 내 컴퓨터 브라우저에서 `http://localhost:8766/` 을 엽니다. 오른쪽 위에 "실시간 · 로컬 서버" 가 보이면 웹에서 바로 저장되는 상태입니다.
 
-**④ 지시 · 승인** — 메뉴의 **새 작업**에서 지시를 등록합니다. 화면 아래에 "지금 웹 지시를 기다리는 AI: Claude (대기 모드)" 가 보이면 Frontier 의 Claude 가 몇 초 안에 시작합니다.
+**④ 지시 · 승인** — 메뉴의 **새 작업**에서 지시를 등록합니다. 화면 아래에 "지금 웹 지시를 기다리는 AI: Claude (대기 모드)" 가 보이면 HPC 의 Claude 가 몇 초 안에 시작합니다.
 진행 기록과 승인 요청도 이 웹에 나타나고, 승인 버튼을 누르면 바로 Claude 에게 전달됩니다.
 
 **⑤ 끝내기** — 서버 창에서 `Ctrl+C`. ssh 접속이 끊겨도 서버는 함께 꺼집니다.
 tmux 의 Claude 는 계속 기다리므로 다음에는 ②부터 다시 하면 됩니다. 서버가 꺼져 있는 동안에는 정적 웹([10-6](#/guide/s10-6))으로 보고, 지시 · 승인은 붙여 넣기로 합니다.
 
 **알아 둘 점**
-- **두 DevTrack 을 헷갈리지 않기:** 내 컴퓨터에서도 DevTrack 을 쓰면 `localhost:8765` 는 내 컴퓨터의, `localhost:8766` 은 Frontier 의 DevTrack 입니다.
+- **두 DevTrack 을 헷갈리지 않기:** 내 컴퓨터에서도 DevTrack 을 쓰면 `localhost:8765` 는 내 컴퓨터의, `localhost:8766` 은 HPC 의 DevTrack 입니다.
   둘 다 "Claude (대기 모드)" 로 보일 수 있으니 작업 목록으로 구분하세요. 지시는 일을 시킬 곳의 웹에서 합니다.
 - **`Address already in use`:** 같은 노드에서 다른 사람이 8765 를 쓰고 있으면 서버가 켜지지 않습니다. `devtrack serve --port 8790` 처럼 다른 번호로 켜고 터널도 `-L 8766:localhost:8790` 으로 맞추세요.
   내 컴퓨터 쪽에서 같은 메시지가 나오면 앞의 `8766` 을 다른 번호로 바꾸세요.
@@ -517,12 +520,12 @@ tmux 의 Claude 는 계속 기다리므로 다음에는 ②부터 다시 하면 
 ### 10-6. 정적 웹에서 달라지는 점
 
 - **승인 · 지시는 붙여 넣기로:** 승인 · 메시지 · 새 작업 지시 · 취소 버튼을 누르면 **Claude 에게 보낼 메시지**가 나옵니다.
-  복사해서 Frontier 의 Claude 대화(tmux 화면, 10-4)에 붙여 넣으세요.
+  복사해서 HPC 의 Claude 대화(tmux 화면, 10-4)에 붙여 넣으세요.
 - **웹 지시로 깨우기 불가:** 정적 웹은 기록을 쓸 수 없어서, 웹에서 보낸 지시로 기다리는 Claude 를 깨울 수 없습니다. 웹에서 바로 지시하려면 실시간 방식([10-5](#/guide/s10-5))을 켜세요.
 - **⚠️ 공개 범위:** 공개 디렉토리의 내용은 주소를 아는 누구나 볼 수 있습니다. 코드 diff, 리포트, 로그, **발표 전 논문 원고 · 분석 그림**,
   PR 리뷰가 모두 포함됩니다. 민감한 작업은 접근 제한이 되는 위치를 쓰세요.
 - **PDF · LaTeX:** 리뷰 리포트 PDF 는 Chrome 계열 브라우저가, 논문 컴파일은 TeX 가 있어야 만들어집니다.
-  Frontier 에 없으면 그 단계만 건너뛰고, Markdown 리포트와 원고는 그대로 보입니다.
+  HPC 에 없으면 그 단계만 건너뛰고, Markdown 리포트와 원고는 그대로 보입니다.
 
 ## 11. Codex 와 함께 쓰기 (선택)
 
@@ -665,13 +668,13 @@ AI 가 명령 없이 긴 답을 쓰는 동안에는 끼어들 수 없으니, 급
 **`devtrack: command not found`**
 3단계의 PATH 설정을 확인하고, 터미널과 VS Code 를 다시 여세요.
 
-**Frontier 에서 `claude` 명령이 안 돼요.**
+**HPC 에서 `claude` 명령이 안 돼요.**
 Claude Code 가 설치되지 않았거나 PATH 에 없는 경우입니다. [10-3](#/guide/s10-3) ① 을 따라 설치하고 `~/.local/bin` 을 PATH 에 넣으세요.
 
-**Frontier 에서 `devtrack serve --open` 을 하면 `xdg-open` 오류가 길게 나와요.**
-Frontier 에는 브라우저가 없어서 띄우지 못했다는 뜻이고, 서버는 켜져 있습니다. 웹은 내 컴퓨터에서 SSH 터널로 엽니다 ([10-5](#/guide/s10-5)).
+**HPC 에서 `devtrack serve --open` 을 하면 `xdg-open` 오류가 길게 나와요.**
+HPC 에는 보통 브라우저가 없어서 띄우지 못했다는 뜻이고, 서버는 켜져 있습니다. 웹은 내 컴퓨터에서 SSH 터널로 엽니다 ([10-5](#/guide/s10-5)).
 
-**Frontier 터널 주소(`localhost:8766`)가 안 열려요.**
+**HPC 터널 주소(`localhost:8766`)가 안 열려요.**
 ① `-L` 을 붙인 ssh 접속이 아직 열려 있는지, ② `devtrack serve` 를 **그 ssh 창에서** 켰는지 보세요.
 다른 창에서 켠 서버는 다른 로그인 노드에 있을 수 있어 터널과 이어지지 않습니다 ([10-5](#/guide/s10-5)).
 
@@ -703,7 +706,7 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | 명령 | 하는 일 |
 |---|---|
 | `devtrack serve --open` | 웹 대시보드 열기 (로컬) |
-| `devtrack publish` | 정적 웹으로 배포 (Frontier `www`) |
+| `devtrack publish` | 정적 웹으로 배포 (HPC 의 웹 공개 폴더 등) |
 | `devtrack list` · `devtrack show T-0001` | 터미널에서 작업 목록 · 상세 보기 |
 | `devtrack watch --codex` | 웹에서 Codex 에게 온 지시를 Codex 로 처리 (11단계) |
 | `devtrack --data <폴더> demo` | 예시 데이터 만들기 |
@@ -711,4 +714,4 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 일 · `issue` 문제 · `artifact` 결과물 · `review` 리뷰 리포트 · `text` Word · PDF 의 글자 뽑기 ·
 `request` 승인 요청 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
 `start --take` 다른 AI 의 작업 가져오기 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
-전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/AI_Dev_Progress_Checker/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.
+전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.

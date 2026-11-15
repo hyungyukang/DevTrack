@@ -226,7 +226,7 @@ def paper_pdf():
 
     p2 = _Page(2)
     p2.heading("4.2   GPU performance")
-    p2.para("On a single Frontier node (8 MI250X GCDs) the HIP port achieves a 112x speedup over a 64-core CPU "
+    p2.para("On a single GPU node (8 MI250X GCDs) the HIP port achieves a 112x speedup over a 64-core CPU "
             "baseline (Table 4.1 and Figure 4.2), comparable to results reported for other exascale CFD codes "
             "[1, ?]. Three factors dominate:")
     for b in ["64-wide wavefronts favour 64x4 thread blocks over the original 16x16;",
@@ -310,7 +310,7 @@ $\Delta\tau = 10^{-4}$.}
 \end{figure}
 
 \subsection{GPU performance}\label{sec:perf}
-On a single Frontier node (8 MI250X GCDs) the HIP port achieves a $112\times$
+On a single GPU node (8 MI250X GCDs) the HIP port achieves a $112\times$
 speedup over a 64-core CPU baseline (Table~\ref{tab:perf} and
 Figure~\ref{fig:speedup}), comparable to results reported for other exascale CFD
 codes~\cite{smith2023,kim2022}. Three factors dominate:
@@ -970,7 +970,7 @@ PROPOSAL_FOOTNOTES = {1: "솔버 성능은 T-0001 · T-0006 작업에서 검증�
 
 PROPOSAL_REVIEW = {
     "doc": {"title": "차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안)", "kind": "proposal",
-            "purpose": "Frontier 계산 시간 신청 (심사위원 평가 대비)", "audience": "계산 자원 배분 심사위원",
+            "purpose": "HPC 계산 시간 신청 (심사위원 평가 대비)", "audience": "계산 자원 배분 심사위원",
             "pages": 2, "format": "Word (.docx)", "source": "F-1",
             "synopsis": "GPU 로 포팅한 압력 솔버로 세 가지 레이놀즈 수의 채널 유동 DNS 를 수행하고, 그 자료로 "
                         "데이터 기반 벽 모델을 만들겠다는 계산 자원 제안서입니다. 총 **50,000 노드시간**을 요청합니다."},
@@ -1012,7 +1012,7 @@ PROPOSAL_REPORT = """# 문서 리뷰: 계산 자원 제안서 (초안) – {date
 
 | 문서 | 종류 | 목적 | 분량 | 형식 |
 |---|---|---|---|---|
-| 차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안) | 제안서 | Frontier 계산 시간 신청 | 2쪽 | Word |
+| 차세대 난류 시뮬레이션을 위한 계산 자원 제안서 (초안) | 제안서 | HPC 계산 시간 신청 | 2쪽 | Word |
 
 ## 1. 한눈에 보기
 
@@ -1182,11 +1182,11 @@ def _scenario(s, clk, tmp):
     # ---------------------------------------------------------------- T-0003 Transformer 서로게이트 (막힘)
     clk.at(380)
     t3 = s.create_task(
-        "Transformer 서로게이트 모델 학습 (Frontier 8 GCD)", type="model", agent="Claude", priority="high",
+        "Transformer 서로게이트 모델 학습 (GPU 노드 1개, 8 GCD)", type="model", agent="Claude", priority="high",
         instruction="CFD 스냅샷 1,200개로 압력장 예측 Transformer 를 학습해 주세요.\n\n"
-                    "- 노드 1개 (MI250X 8 GCD), PyTorch DDP\n- 목표: 검증 상대 L2 오차 < 3%\n- 체크포인트는 `/lustre/orion/proj/ckpt` 에 저장",
+                    "- 노드 1개 (MI250X 8 GCD), PyTorch DDP\n- 목표: 검증 상대 L2 오차 < 3%\n- 체크포인트는 `$SCRATCH/proj/ckpt` 에 저장",
         plan=["데이터 로더 구성", "모델/학습 스크립트 작성", "소규모 디버그 학습", "본 학습 (200 epoch)", "평가 및 리포트"],
-        tags=["pytorch", "frontier"])
+        tags=["pytorch", "hpc"])
     tid3 = t3["id"]
     clk.at(370); s.update_task(tid3, step="HDF5 스냅샷 로더 구성 (1,200 × 256×256)", progress=5)
     clk.at(340); s.check_plan(tid3, [1])
@@ -1320,10 +1320,10 @@ def _scenario(s, clk, tmp):
     clk.at(190)
     t6 = s.create_task(
         "압력 솔버 HIP 포팅 (MI250X)", type="code", agent="Claude", repo=repo,
-        instruction="`src/pressure_solver.cu` 를 HIP 으로 포팅해 Frontier(MI250X)에서 돌아가게 해주세요.\n\n"
+        instruction="`src/pressure_solver.cu` 를 HIP 으로 포팅해 AMD GPU(MI250X)에서 돌아가게 해주세요.\n\n"
                     "- CPU 결과 대비 상대오차 1e-10 이내\n- 오류 체크 매크로 추가\n- **커밋 전 승인 필수**",
         plan=["CUDA 커널 구조 분석", "hipify 변환 및 빌드 설정", "MI250X 단일 GCD 성능 측정", "수치 검증 (CPU 대비)", "커밋 승인 요청"],
-        tags=["hip", "frontier", "gpu"])
+        tags=["hip", "hpc", "gpu"])
     tid6 = t6["id"]
     clk.at(185); s.update_task(tid6, step="CUDA 커널 1개, 메모리 전송 5곳 확인", progress=5)
     clk.at(175); s.check_plan(tid6, [1])
@@ -1427,7 +1427,7 @@ def _scenario(s, clk, tmp):
     t9 = s.create_task(
         "DNS run_042 후속 연구 아이디어 브레인스토밍", type="brainstorm", agent="Claude", related=[tid8],
         instruction="DNS `run_042` 와 풍동 실험 데이터로 다음에 할 수 있는 연구를 같이 생각해 주세요.\n\n"
-                    "- 6개월 안에 논문 한 편이 나올 규모\n- 지금 있는 데이터와 계산 시간(Frontier 50,000 노드시간) 안에서\n"
+                    "- 6개월 안에 논문 한 편이 나올 규모\n- 지금 있는 데이터와 계산 시간(HPC 50,000 노드시간) 안에서\n"
                     "- 아이디어마다 필요한 것 · 위험 요소 · 기대 효과를 함께",
         plan=["가진 데이터 · 자원 정리", "아이디어 목록 (1차)", "고른 아이디어 구체화", "첫 작업 정하기"],
         tags=["idea", "turbulence"])
@@ -1459,7 +1459,7 @@ def _scenario(s, clk, tmp):
              comment="I1 과 I3 이 좋겠습니다. I3 은 T-0008 결과와 바로 이어지니 우선순위를 높게 봐 주세요.")
     s.ack_decision(tid9, ap9["id"])
     clk.at(495); s.check_plan(tid9, [2])
-    clk.at(490); s.add_user_comment(tid9, "I1 은 Frontier 시간이 얼마나 들지도 같이 봐 주세요.")
+    clk.at(490); s.add_user_comment(tid9, "I1 은 HPC 계산 시간이 얼마나 들지도 같이 봐 주세요.")
     s.ack_inbox(s.inbox(task=tid9))
     clk.at(470); s.add_log(tid9, "I1 예비 학습 계산량 추정: 약 8,000 노드시간 (스냅샷 300개, 3회 반복)")
     clk.at(420)
@@ -1543,7 +1543,7 @@ def _scenario(s, clk, tmp):
     t11 = s.create_task(
         "문서 리뷰: 계산 자원 제안서 초안 (Word)", type="docreview", agent="Claude",
         instruction="- 검토할 문서: ~/Documents/proposal_draft.docx\n- 문서 종류: 제안서\n"
-                    "- 문서의 목적 · 제출처: Frontier 계산 시간 신청 (다음 주 마감)\n\n심사위원 입장에서 봐 주세요.",
+                    "- 문서의 목적 · 제출처: HPC 계산 시간 신청 (다음 주 마감)\n\n심사위원 입장에서 봐 주세요.",
         plan=["문서 읽기 · 요약", "목적 대비 미비한 부분 · 논리", "문장 · 맞춤법", "리뷰 리포트(PDF) 작성"],
         tags=["proposal"])
     tid11 = t11["id"]
@@ -1559,7 +1559,7 @@ def _scenario(s, clk, tmp):
     s.add_artifact(tid11, path=f("doc-review-proposal.md", PROPOSAL_REPORT.format(date=today)),
                    title="문서 리뷰 리포트 (Markdown)", category="review")
     rep11 = s.add_artifact(tid11, path=f("doc-review-proposal.pdf", simple_pdf("Document Review - Compute proposal", [
-        "Draft proposal for Frontier compute time (2 pages, Word)", "",
+        "Draft proposal for HPC compute time (2 pages, Word)", "",
         "## Bottom line",
         "Well structured, but the 50,000 node-hour request has no basis (R1) and",
         "goal 2 (data-driven wall model) has no method (R2). Verdict: minor revision.", "",

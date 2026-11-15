@@ -1305,7 +1305,7 @@ def build_parser():
     sp.add_argument("--open", action="store_true", help="브라우저 열기")
     sp.add_argument("-v", "--verbose", action="store_true", help="요청 로그 출력")
 
-    sp = add("publish", cmd_publish, "정적 웹사이트 배포 (예: Frontier www 디렉토리)")
+    sp = add("publish", cmd_publish, "정적 웹사이트 배포 (예: 웹 서버의 공개 폴더)")
     sp.add_argument("--to", metavar="DIR", help="배포 디렉토리 (기본: $DEVTRACK_PUBLISH_DIR)")
 
     sp = add("demo", cmd_demo, "예시 데이터 생성")

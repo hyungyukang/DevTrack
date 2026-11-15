@@ -1,11 +1,11 @@
 # DevTrack 개발 가이드 (이 저장소에서 작업하는 에이전트용)
 
 AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/`)와, 이를 보여주고 승인받는 웹(`web/`)으로 구성된다.
-사용자 문서는 README.md 와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신) · web/guide.en.md(영어 화면의 같은 문서 —
+사용자 문서는 README.md(영어 — GitHub 첫 화면) · README.ko.md(한국어판 — README.md 를 고치면 함께 고친다)와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신) · web/guide.en.md(영어 화면의 같은 문서 —
 guide.md 를 고치면 같은 절 번호로 함께 고친다), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
 
 ## 반드시 지킬 제약
-- **Python 표준 라이브러리만** (Python 3.7+). Frontier 등 HPC 에서 pip 설치 없이 돌아가야 한다. f-string 대신 `.format` 을 써 온 기존 스타일 유지.
+- **Python 표준 라이브러리만** (Python 3.7+). HPC(슈퍼컴퓨터) 같은 공유 서버에서 pip 설치 없이 돌아가야 한다. f-string 대신 `.format` 을 써 온 기존 스타일 유지.
 - **웹은 빌드 단계 없음** — 순수 ES 모듈 + `web/vendor/` 의 고정 버전 라이브러리. npm/번들러 도입 금지.
 - **정적 호스팅 호환** — 웹은 `data/` 의 JSON/파일을 읽기만 한다. URL 은 항상 상대경로(`data/...`, `api/...`)로 써서 하위 경로(`~/www/devtrack/`)에서도 동작해야 한다. 쓰기 기능은 `api/health` 가 live 일 때만, 정적 모드에서는 Claude 에게 보낼 메시지/명령을 보여준다.
 - **보안** — 화면에 넣는 모든 동적 값은 `html`` ` 템플릿(자동 이스케이프)으로, markdown 은 `renderMarkdown()`(DOMPurify)으로만 넣는다. HTML 결과물은 sandbox iframe.

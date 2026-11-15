@@ -2051,7 +2051,7 @@ function viewLoadError(e) {
     <ol>
       ${file ? html`<li>${LH('<b>file:// 로 직접 연 경우 동작하지 않습니다.</b> 웹 서버로 열어주세요: <code>devtrack serve</code>')}</li>` : ''}
       <li>${LH('로컬: <code>devtrack serve</code> 실행 후 <code>http://localhost:8765</code> 접속')}</li>
-      <li>${LH('정적 호스팅(Frontier www): <code>devtrack publish --to ~/www/devtrack</code> 로 웹과 데이터를 함께 배포했는지 확인')}</li>
+      <li>${LH('정적 호스팅(웹 공개 폴더): <code>devtrack publish --to ~/www/devtrack</code> 로 웹과 데이터를 함께 배포했는지 확인')}</li>
       <li>${LH('데이터가 아직 없다면 <code>devtrack init</code> 또는 첫 작업을 <code>devtrack new</code> 로 생성')}</li>
     </ol>
   </section>`;

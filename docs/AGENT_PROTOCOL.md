@@ -298,7 +298,7 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
 ## 사용자 결정이 도착하는 방법
 
 - **로컬 서버 모드**: 사용자가 웹에서 누르면 즉시 기록됨 → `devtrack wait` / `devtrack inbox` 로 확인
-- **정적 모드 (Frontier www)**: 사용자가 Claude 세션에 `[DevTrack 결정] T-0001 / A-1 ... → 승인` 형태의 메시지를 붙여넣음
+- **정적 모드 (웹 공개 폴더)**: 사용자가 Claude 세션에 `[DevTrack 결정] T-0001 / A-1 ... → 승인` 형태의 메시지를 붙여넣음
   → 에이전트가 `devtrack decide T-0001 A-1 approve -m "코멘트"` 로 기록한 뒤 `apply` 진행
   (선택 항목이 있는 요청이면 메시지에 `선택: R1, R3` 이 있고, 명령에 `--select R1 R3` 가 붙어 있음)
 - `[DevTrack 메시지]` → `devtrack comment <TID> "..."` 로 기록 후 반영

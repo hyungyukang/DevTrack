@@ -18,7 +18,7 @@ DevTrack 에 기록하도록 고친 Claude Code 스킬입니다. `devtrack` 명�
 cp ~/.claude/skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md.bak
 cp integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 
-# Frontier 에서도 같은 방법으로 (DevTrack 저장소를 clone 한 위치 기준)
+# HPC 등 원격 서버에서도 같은 방법으로 (DevTrack 저장소를 clone 한 위치 기준)
 cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ```
 
@@ -67,7 +67,7 @@ ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.co
 ```
 
 웹 대신 채팅으로 "R1, R3 코멘트 초안 써줘", "이대로 게시해줘" 라고 해도 됩니다 (DevTrack 에 결정으로 기록됨).
-정적 모드(Frontier www)에서는 웹 버튼이 Claude 에게 붙여넣을 `[DevTrack 결정] … 선택: R1, R3` 메시지를 만들어 줍니다.
+정적 모드(웹 공개 폴더)에서는 웹 버튼이 Claude 에게 붙여넣을 `[DevTrack 결정] … 선택: R1, R3` 메시지를 만들어 줍니다.
 
 ## 사용 흐름 (`review-doc`)
 

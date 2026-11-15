@@ -31,7 +31,7 @@ Common terms:
 Make sure these commands run in a terminal.
 
 ```bash
-python3 --version      # 3.7 or later (Frontier: module load cray-python)
+python3 --version      # 3.7 or later (on HPC systems: module load python or similar)
 git --version
 ```
 
@@ -43,7 +43,7 @@ DevTrack uses only the Python standard library, so there is nothing to install w
 ## 2. Download DevTrack
 
 ```bash
-git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 ```
 
 The rest of this guide assumes you cloned it to `~/devtrack`. If you used another location, change the path accordingly.
@@ -118,7 +118,7 @@ ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skill
 
 Linking instead of copying means `git pull` keeps the skill up to date too.
 To receive review reports by email, the `pr-review-report` skill must also be installed
-([details](https://github.com/hyungyukang/AI_Dev_Progress_Checker/tree/main/integrations/claude-skills)).
+([details](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills)).
 
 ### 5-3. Fewer permission prompts (optional)
 
@@ -321,14 +321,15 @@ Have Claude read a paper, report or proposal and give you a **summary** and **wh
 3. Once you know which idea to try, click **New task from these ideas**. The new task (code development · data analysis · paper writing, etc.)
    is linked to this brainstorm and shows up under **Linked tasks**.
 
-## 10. Using DevTrack on Frontier
+## 10. Using DevTrack on an HPC system
 
-On Frontier, Claude works on Frontier and the records stay on Frontier. There are two ways to see them on the web.
+On a remote server such as an HPC system (supercomputer), Claude works on that system and the records stay there. There are two ways to see them on the web.
+The module names, paths and login addresses below are examples; adjust them for the system you use.
 
 | | Static web ([10-6](#/guide/s10-6)) | Live · SSH tunnel ([10-5](#/guide/s10-5)) |
 |---|---|---|
-| Where you look | The web address of Frontier `www` | `localhost` in your own browser (through a tunnel) |
-| Approvals · instructions | Paste the message the web creates into the Claude conversation on Frontier | Saved directly from the web — the waiting Claude starts right away |
+| Where you look | The address of the HPC system's public web folder (e.g. `~/www`) | `localhost` in your own browser (through a tunnel) |
+| Approvals · instructions | Paste the message the web creates into the Claude conversation on the HPC system | Saved directly from the web — the waiting Claude starts right away |
 | How long it runs | Always (updated every time something is recorded) | Only while you use the web |
 | Caution | Anyone who knows the address can see it | While it runs, other users on the same login node can connect too |
 
@@ -338,10 +339,10 @@ If this is your first time, follow 10-1 → 10-3 → 10-4 → 10-5 in order (10-
 ### 10-1. Install DevTrack (once)
 
 ```bash
-module load cray-python
-git clone git@github.com:hyungyukang/AI_Dev_Progress_Checker.git ~/devtrack
+module load python               # Python 3.7 or later (the module name differs by system)
+git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 cat >> ~/.bashrc <<'EOF'
-module load cray-python
+module load python
 export PATH="$HOME/devtrack/bin:$PATH"
 export DEVTRACK_DATA=$HOME/devtrack-data
 export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # where the web page is published (adjust for your site)
@@ -351,49 +352,51 @@ devtrack --version
 devtrack publish               # once at first (and again after updating the web pages)
 ```
 
-- `module load cray-python`: needed because the default `python3` on Frontier is older than 3.7. It is important to put it in `~/.bashrc` as well.
+- `module load python`: needed when the system's default `python3` is older than 3.7. The module name differs by system, so check with `module avail python`
+  (if the default `python3` is 3.7 or later, leave out both lines). It is important to put it in `~/.bashrc` as well.
   Claude and the cancellation hook (5-4) must use this Python too ([10-3](#/guide/s10-3)).
-- `git clone` needs a GitHub SSH key registered on Frontier.
+- `git clone` needs a GitHub SSH key registered on the HPC system.
 - From then on, every record Claude makes is copied to the published directory automatically.
-- **Keep the records folder (`DEVTRACK_DATA`) in your home directory.** The work areas under `/lustre/orion/...` (Member · Project · World Work) delete (purge) files that have not been read or modified for 90 days, so old task records can disappear.
-  `proj-shared` (Project Work) is also open to other members of the same project.
-  Your home (`/ccs/home/<user ID>`, 50 GB) is not purged and is backed up.
+  If your center does not offer a public web folder, leave out the `DEVTRACK_PUBLISH_DIR` line and `devtrack publish`, and use the live mode ([10-5](#/guide/s10-5)).
+- **Keep the records folder (`DEVTRACK_DATA`) in your home directory.** Work areas on parallel file systems such as scratch often delete (purge) files that have not been read or modified for a while, so old task records can disappear.
+  Project-shared areas are also open to other members of the same project.
+  Home directories are usually not purged and are backed up. Check your center's documentation for its policies.
 
 ### 10-2. Move records from your own computer (optional)
 
-To continue on Frontier with the task records you used locally (on a Mac, etc.), move them in the order below. The records are a single folder, so moving them is simple.
+To continue on the HPC system with the task records you used locally (on a Mac, etc.), move them in the order below. The records are a single folder, so moving them is simple.
 
 **① Before moving (on your computer)**
-- **Clear pending approvals:** if possible, decide pending approval requests first. **Commit approval requests** in particular refer to repository paths on your computer and cannot be applied on Frontier.
+- **Clear pending approvals:** if possible, decide pending approval requests first. **Commit approval requests** in particular refer to repository paths on your computer and cannot be applied on the HPC system.
 - **Files only on your computer:** finish tasks that depend on such files before moving, or move those files too. Examples: code review comment drafts (`~/.pr-review/`), paper manuscripts in local folders, data.
-- **Turn off the local side:** stop `devtrack serve` and waiting mode ("wait for web instructions"). **Recording in two places at once makes the records diverge.** After the move, use only Frontier.
+- **Turn off the local side:** stop `devtrack serve` and waiting mode ("wait for web instructions"). **Recording in two places at once makes the records diverge.** After the move, use only the HPC system.
 
 **② Copy the records (on your computer)** — run this after finishing the 10-1 installation.
 
 ```bash
 rsync -av --exclude '.agent/' --exclude '.lock' \
-  ~/devtrack/data/ <user ID>@frontier.olcf.ornl.gov:~/devtrack-data/
+  ~/devtrack/data/ <user ID>@<HPC login address>:~/devtrack-data/
 ```
 
-- Copies the records folder on your computer (`$DEVTRACK_DATA`, default `~/devtrack/data/`) to `$DEVTRACK_DATA` on Frontier.
+- Copies the records folder on your computer (`$DEVTRACK_DATA`, default `~/devtrack/data/`) to `$DEVTRACK_DATA` on the HPC system.
 - `.agent/` holds that computer's conversation and waiting state, so it is not moved. `.lock` is a lock file.
-- Whether instructions and decisions were already handled is stored in each task file, so handled instructions do not show up again on Frontier.
+- Whether instructions and decisions were already handled is stored in each task file, so handled instructions do not show up again on the HPC system.
   The list of deleted task numbers (`.deleted.json`) is moved too, so those numbers are not reused.
 - Artifact files are copied inside the records folder, so they show up as they are (except artifacts recorded by path only with `--no-copy`).
   Local repository paths written in finished tasks stay as they are, but that does not affect viewing.
-- To continue code reviews, copy the `~/.pr-review/` folder to your Frontier home the same way.
+- To continue code reviews, copy the `~/.pr-review/` folder to your home on the HPC system the same way.
 
-**③ Refresh the web page (on Frontier)** — run `devtrack publish` once.
+**③ Refresh the web page (on the HPC system)** — run `devtrack publish` once.
 
 **④ Claude setup** — [10-3](#/guide/s10-3).
 
-**⑤ Check (on Frontier)**
+**⑤ Check (on the HPC system)**
 - See that the moved tasks appear in `devtrack list` and that `devtrack inbox` runs without errors.
 - Open the web address and see that the tasks and artifacts are there.
 
 ### 10-3. Install and set up Claude Code (once)
 
-**① Install** — run this on Frontier. It installs to `~/.local/bin/claude` in your home directory and needs no administrator rights.
+**① Install** — run this on the HPC system. It installs to `~/.local/bin/claude` in your home directory and needs no administrator rights.
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash      # shows no progress while downloading
@@ -404,9 +407,9 @@ claude --version                                     # a version number means su
 
 - If you get `claude: command not found`, check with `ls ~/.local/bin/claude` that it is installed; if it is, check the PATH line above.
 
-**② Log in** — the first time you run `claude`, it shows login instructions. Frontier has no browser, so open the address shown on the screen in **the browser on your own computer**, log in, and paste the code it gives you into the Frontier terminal.
+**② Log in** — the first time you run `claude`, it shows login instructions. HPC systems usually have no browser, so open the address shown on the screen in **the browser on your own computer**, log in, and paste the code it gives you into the terminal on the HPC system.
 
-**③ Turn off automatic updates (recommended)** — your home on Frontier is a network disk shared by all login nodes.
+**③ Turn off automatic updates (recommended)** — your home on an HPC system is usually a network disk shared by all login nodes.
 If Claude Code updates itself on one node and deletes the old version files, a Claude running in tmux (10-4) on another node can stop with a `Bus error`.
 Put the following in `~/.claude/settings.json` (if the file already exists, add just the one line inside `env`), and update yourself with `claude update` when no Claude is running.
 
@@ -416,28 +419,28 @@ Put the following in `~/.claude/settings.json` (if the file already exists, add 
 }
 ```
 
-**④ DevTrack setup** — do step 5 the same way on Frontier, with the points below.
+**④ DevTrack setup** — do step 5 the same way on the HPC system, with the points below.
 
-- **Recording rules (5-1):** write the Frontier location (`~/devtrack/...`) as the path in `~/.claude/CLAUDE.md`. If you copied the file from your computer, the paths point to your computer, so be sure to change them.
-- **Code review skill (5-2):** re-create the link so that it points to `~/devtrack` on Frontier. Code reviews also need `gh auth login`.
-  For the report email feature, set up email once again on Frontier. Do not copy configuration files that contain passwords.
-- **Cancellation hook (5-4):** put the full Frontier path in `"command"`. Check it with `echo $HOME/devtrack/bin/devtrack-hook`.
-- **⚠️ Run Claude in a shell where `module load cray-python` has been done.** Before starting Claude, check that `python3 --version` is 3.7 or later.
+- **Recording rules (5-1):** write the location on the HPC system (`~/devtrack/...`) as the path in `~/.claude/CLAUDE.md`. If you copied the file from your computer, the paths point to your computer, so be sure to change them.
+- **Code review skill (5-2):** re-create the link so that it points to `~/devtrack` on the HPC system. Code reviews also need `gh auth login`.
+  For the report email feature, set up email once again on the HPC system. Do not copy configuration files that contain passwords.
+- **Cancellation hook (5-4):** put the full path on the HPC system in `"command"`. Check it with `echo $HOME/devtrack/bin/devtrack-hook`.
+- **⚠️ Run Claude in a shell where Python 3.7 or later is active (where the `module load` from 10-1 has been done).** Before starting Claude, check that `python3 --version` is 3.7 or later.
   If the hook runs with Python older than 3.7, it **does nothing** and lets the call through, so that it never blocks Claude.
   Then cancelling a task on the web does not stop Claude right away.
-- If doing this by hand is tedious, you can leave it to Claude on Frontier — **"Read sections 5-1, 5-4 and 10-3 of `~/devtrack/web/guide.md` and set up DevTrack for this Frontier environment"**.
+- If doing this by hand is tedious, you can leave it to Claude on the HPC system — **"Read sections 5-1, 5-4 and 10-3 of `~/devtrack/web/guide.md` and set up DevTrack for this HPC environment"**.
   After the settings change, restart Claude so they take effect.
 
 ### 10-4. Keep Claude running inside tmux
 
 tmux is a program that keeps a terminal screen open on a remote computer. Even if your ssh connection drops or you close your laptop, Claude inside it keeps working, and you can connect again and return to the same screen.
 
-**① Start it the first time** (on Frontier)
+**① Start it the first time** (on the HPC system)
 
 ```bash
 hostname                  # e.g. login05 — remember the login node where you opened tmux
 tmux new -s claude        # open a tmux screen named 'claude'
-python3 --version         # 3.7 or later? (otherwise module load cray-python)
+python3 --version         # 3.7 or later? (otherwise module load python)
 cd <working directory>
 claude
 ```
@@ -449,13 +452,13 @@ When Claude is up, say **"wait for web instructions"** ("웹 지시 기다려줘
 **③ Go back in**
 
 ```bash
-ssh <user ID>@frontier.olcf.ornl.gov
+ssh <user ID>@<HPC login address>
 hostname                  # if this is a different node from before
 ssh login05               # move to the node where you opened tmux
 tmux attach -t claude
 ```
 
-A tmux screen exists only on the login node that opened it. Connecting to `frontier.olcf.ornl.gov` may put you on a different node, so move over as above.
+A tmux screen exists only on the login node that opened it. If the login address covers several login nodes, each connection may put you on a different node, so move over as above.
 `tmux ls` lists the open screens.
 
 | Key (after pressing and releasing `Ctrl+b`) | What it does |
@@ -469,14 +472,14 @@ A tmux screen exists only on the login node that opened it. Connecting to `front
 
 - If `tmux` is not found, use `screen` — start with `screen -S claude`, step out with `Ctrl+a` then `d`, go back in with `screen -r claude`.
 - If the login node restarts (for maintenance, for example), the tmux screen is gone too. Start again from ①.
-- **Heavy computation on compute nodes:** Claude works on a login node. Login nodes are shared by many people, so work that uses a lot of computation or memory is not allowed there (OLCF policy).
-  For things like large data processing, say in the instruction that it should run on a compute node. Interactive `salloc` or batch jobs work for this.
+- **Heavy computation on compute nodes:** Claude works on a login node. Login nodes are shared by many people, so work that uses a lot of computation or memory is not allowed there (the policy at most HPC centers).
+  For things like large data processing, say in the instruction that it should run on a compute node. An interactive allocation (`salloc` with Slurm) or batch jobs work for this.
   This uses allocation hours, so if you want to approve before submission, add "get my approval before submitting jobs" to the instruction.
 
 ### 10-5. Instruct and approve directly from the web (live mode, SSH tunnel)
 
-If you start `devtrack serve` on Frontier and open it from your computer through an SSH tunnel, you can give new instructions and save approvals directly on the web, just as you do locally.
-The Claude waiting in tmux (10-4) picks them up within a few seconds and works on Frontier.
+If you start `devtrack serve` on the HPC system and open it from your computer through an SSH tunnel, you can give new instructions and save approvals directly on the web, just as you do locally.
+The Claude waiting in tmux (10-4) picks them up within a few seconds and works on the HPC system.
 
 > **⚠️ Turn it on only while you use the web, and turn it off right after.**
 > A login node is a computer shared by many people, so while the server runs, **other users on the same node** can connect to it too.
@@ -488,13 +491,13 @@ The Claude waiting in tmux (10-4) picks them up within a few seconds and works o
 **② Open the tunnel and start the server** — connect from a terminal on your computer,
 
 ```bash
-ssh -L 8766:localhost:8765 <user ID>@frontier.olcf.ornl.gov
+ssh -L 8766:localhost:8765 <user ID>@<HPC login address>
 ```
 
 and start the server **in that same window**.
 
 ```bash
-devtrack serve            # do not use --open (Frontier has no browser)
+devtrack serve            # do not use --open (HPC systems usually have no browser)
 ```
 
 - The tunnel leads to the login node this ssh connected to, so the server must be started in this window. Other windows may be on other nodes.
@@ -503,14 +506,14 @@ devtrack serve            # do not use --open (Frontier has no browser)
 
 **③ Open the web** — open `http://localhost:8766/` in the browser on your computer. If the top right shows "Live · local server", the web saves directly.
 
-**④ Instruct · approve** — register an instruction under **New task** in the menu. If the bottom of the screen shows "AI waiting for web instructions: Claude (waiting mode)", Claude on Frontier starts within a few seconds.
+**④ Instruct · approve** — register an instruction under **New task** in the menu. If the bottom of the screen shows "AI waiting for web instructions: Claude (waiting mode)", Claude on the HPC system starts within a few seconds.
 Progress records and approval requests show up on this web too, and clicking approve delivers it to Claude right away.
 
 **⑤ Finish** — press `Ctrl+C` in the server window. If the ssh connection drops, the server stops with it.
 The Claude in tmux keeps waiting, so next time start again from ②. While the server is off, look at the static web ([10-6](#/guide/s10-6)) and give instructions and approvals by pasting.
 
 **Good to know**
-- **Do not mix up the two DevTracks:** if you also use DevTrack on your computer, `localhost:8765` is your computer's DevTrack and `localhost:8766` is Frontier's.
+- **Do not mix up the two DevTracks:** if you also use DevTrack on your computer, `localhost:8765` is your computer's DevTrack and `localhost:8766` is the HPC system's.
   Both may show "Claude (waiting mode)", so tell them apart by the task list. Give instructions on the web of the place where the work should happen.
 - **`Address already in use`:** if someone else uses 8765 on the same node, the server does not start. Start it on another port, such as `devtrack serve --port 8790`, and match the tunnel with `-L 8766:localhost:8790`.
   If your computer shows the same message, change the `8766` at the front to another number.
@@ -519,12 +522,12 @@ The Claude in tmux keeps waiting, so next time start again from ②. While the s
 ### 10-6. What is different on the static web
 
 - **Approvals and instructions by pasting:** the Approve, Message, New task and Cancel buttons show a **message for Claude**.
-  Copy it and paste it into the Claude conversation on Frontier (the tmux screen, 10-4).
+  Copy it and paste it into the Claude conversation on the HPC system (the tmux screen, 10-4).
 - **Web instructions cannot wake Claude:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)).
 - **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
   and PR reviews. Use a location with access control for sensitive work.
 - **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
-  If Frontier lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
+  If the HPC system lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
 
 ## 11. Using it with Codex (optional)
 
@@ -667,13 +670,13 @@ After updating with `git pull`, **open a new** Claude conversation and, if neede
 **`devtrack: command not found`**
 Check the PATH setting from step 3, then reopen the terminal and VS Code.
 
-**The `claude` command does not work on Frontier.**
+**The `claude` command does not work on the HPC system.**
 Claude Code is not installed or not on your PATH. Install it as in [10-3](#/guide/s10-3) ① and add `~/.local/bin` to your PATH.
 
-**`devtrack serve --open` on Frontier prints a long list of `xdg-open` errors.**
-Frontier has no browser, so none could be opened; the server is running. Open the web from your computer through an SSH tunnel ([10-5](#/guide/s10-5)).
+**`devtrack serve --open` on the HPC system prints a long list of `xdg-open` errors.**
+There is no browser on the HPC system, so none could be opened; the server is running. Open the web from your computer through an SSH tunnel ([10-5](#/guide/s10-5)).
 
-**The Frontier tunnel address (`localhost:8766`) does not open.**
+**The tunnel address to the HPC system (`localhost:8766`) does not open.**
 Check ① that the ssh connection with `-L` is still open and ② that you started `devtrack serve` **in that ssh window**.
 A server started in another window may be on a different login node and is not connected to the tunnel ([10-5](#/guide/s10-5)).
 
@@ -705,7 +708,7 @@ Commands you use yourself:
 | Command | What it does |
 |---|---|
 | `devtrack serve --open` | Open the web dashboard (local) |
-| `devtrack publish` | Publish as a static website (Frontier `www`) |
+| `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack --data <folder> demo` | Create example data |
@@ -713,4 +716,4 @@ Commands you use yourself:
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
 `request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
 `start --take` take over another AI's task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
-For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/AI_Dev_Progress_Checker/blob/main/docs/AGENT_PROTOCOL.md).
+For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).
