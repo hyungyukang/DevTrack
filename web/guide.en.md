@@ -155,11 +155,11 @@ Add this to `~/.claude/settings.json`. Create the file if it does not exist; if 
 
 ## 6. Give your first task
 
-There are two ways. Use whichever is convenient; the result appears on the web the same way.
+There are three ways. Use whichever is convenient; the result appears on the web the same way.
 
 ### Option A — Instruct in the Claude chat
 
-Give the instruction in the Claude chat in VS Code as usual.
+Give the instruction in the Claude chat in VS Code (or in `claude` started in a terminal) as usual.
 
 ```
 Port the pressure solver in ~/project to HIP. Verify it too, and get my approval before committing.
@@ -169,7 +169,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
 
 ### Option B — Instruct from the web (waiting mode)
 
-1. Say this once in the Claude chat, and keep that conversation (VS Code window) open.
+1. Say this once in the Claude chat, and keep that conversation (VS Code window) open. To do this in a terminal without VS Code, see Option C.
    ```
    wait for web instructions
    ```
@@ -195,6 +195,33 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
 >
 > If the AI is busy with another task, it continues without asking — messages and follow-up questions sent from a task page are handled after the current step,
 > and new tasks start once the current task is finished or waiting for approval.
+
+### Option C — Keep Claude running in a terminal and instruct from the web (without VS Code)
+
+You can also run `claude` in a terminal, without opening VS Code, and give all instructions from the web. This is Option B in a terminal instead of VS Code.
+If you do not have the `claude` command for the terminal, install it as in [10-3](#/guide/s10-3) ① (the same steps work on your own computer).
+
+1. Open a terminal and start Claude in the folder where it will work.
+   ```bash
+   cd ~/project        # the folder Claude mainly works in
+   claude
+   ```
+2. Once Claude is up, say this once.
+   ```
+   wait for web instructions
+   ```
+   Claude starts `devtrack inbox --wait` in the background and waits. **Leave this terminal window open.**
+3. Give instructions from the web with **New task** (steps 2–3 of Option B). Within a few seconds the Claude in this terminal starts the task, and it waits again when it is done.
+   Follow progress and approval requests on the web, and approve there too.
+
+Good to know:
+- **Permission prompts appear in this terminal.** While Claude waits for permission to run a command or edit a file, the task looks stalled on the web.
+  Check the terminal now and then, or allow frequently used commands in advance as in [5-3](#/guide/s5-3).
+- **Working folder:** Claude mainly works with files in the folder where it was started. If you often give it repositories in other folders, start it in a parent folder or add a folder with `/add-dir <folder>` in Claude.
+- **Closing the window stops it:** closing the terminal window ends Claude too. To keep it running after you close the window, run it inside `tmux`, as in [10-4](#/guide/s10-4)
+  (`tmux new -s claude` → `claude` → "wait for web instructions" → press and release `Ctrl+b`, then `d`). While the computer is asleep, Claude does not work.
+- **Waiting mode in one place only:** if both Claude in VS Code and Claude in a terminal are in waiting mode, both can receive the same instruction and start it together.
+- **To stop waiting:** tell the Claude in the terminal "stop waiting for web instructions", or end Claude with `/exit`.
 
 ## 7. Follow the progress
 
@@ -648,7 +675,8 @@ devtrack watch --codex
 
 **I gave an instruction on the web, but nothing happens.**
 First look at the notice at the top of the task page (step 6): it tells you whether the assigned AI is waiting, or whether it needs to be woken up and how.
-Claude moves only when it is addressed in a conversation. Check that waiting mode ("wait for web instructions") is on and that its VS Code window is open.
+Claude moves only when it is addressed in a conversation. Check that waiting mode ("wait for web instructions") is on and that its VS Code window or terminal is open.
+If it runs in a terminal, also check that it is not waiting at a permission prompt ([Option C](#/guide/s6)).
 Otherwise, say "check devtrack inbox and go ahead" in the Claude chat. For Codex, check that `devtrack watch --codex` is running.
 
 **Claude (or Codex) does not pick up the task I gave on the web.**
