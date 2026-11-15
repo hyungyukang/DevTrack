@@ -8,9 +8,10 @@
 // 영어 화면은 'Cancelled' (버튼의 L('취소') 는 'Cancel').
 
 const KEY = 'devtrack.lang';
-let lang = 'ko';
+// 처음 열면(언어를 고른 적이 없으면) 영어 화면. 사용자가 고른 언어는 브라우저에 기억한다
+let lang = 'en';
 try {
-  if (JSON.parse(localStorage.getItem(KEY)) === 'en') lang = 'en';
+  if (JSON.parse(localStorage.getItem(KEY)) === 'ko') lang = 'ko';
 } catch { /* 저장소 사용 불가 */ }
 
 export const getLang = () => lang;
@@ -18,7 +19,7 @@ export const getLang = () => lang;
 export const locale = () => (lang === 'en' ? 'en' : 'ko');
 
 export function setLang(next) {
-  lang = next === 'en' ? 'en' : 'ko';
+  lang = next === 'ko' ? 'ko' : 'en';
   try { localStorage.setItem(KEY, JSON.stringify(lang)); } catch { /* 저장소 사용 불가 */ }
   document.documentElement.lang = lang;
 }
@@ -68,7 +69,7 @@ export const missing = (keys) => keys.filter((k) => !has(k));
 const EN = {
   '메뉴': 'Menu',
   '주 메뉴': 'Main menu',
-  'AI 개발 진행 현황': 'AI development progress',
+  'AI 협업 작업 관리': 'AI collaboration hub',
   '새 업데이트 보기': 'Show new updates',
   '연결 중…': 'Connecting…',
   '새로고침': 'Refresh',

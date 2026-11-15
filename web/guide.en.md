@@ -69,6 +69,7 @@ devtrack serve --open          # → http://localhost:8765
 - **Keep this terminal window open.** Closing it stops the web server.
 - If the top right of the page shows **Live · local server**, everything is working. In this mode, approvals and instructions you click on the web are saved immediately.
 - At first there are no tasks, so the page is empty. To see an example first → "See an example first" in [12. FAQ](#/guide/s12).
+- The page opens in **English**. Click **한** at the top right to switch to Korean; the browser remembers your choice.
 
 ## 5. Set up Claude to use DevTrack (once)
 
@@ -207,8 +208,8 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
 - The page **refreshes automatically every 10 seconds**. To see changes right away, click the refresh button at the top right.
 - **How artifacts are shown** — the button at the top right of the **Artifacts** page and of a task's **Artifacts** tab switches between **cards** (a grid) and a **list** (one row each).
   The list shows full titles together with the task number, kind, time and size, and figures get a small preview. Your choice is remembered in the browser.
-- **Display language (한국어 / English)** — click **EN** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to English;
-  click **한** to switch back to Korean. Task titles, instructions, progress logs, artifacts and review reports stay in the language they were written in (usually Korean).
+- **Display language (English / 한국어)** — the page opens in English. Click **한** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to Korean;
+  click **EN** to switch back to English. The browser remembers your choice. Task titles, instructions, progress logs, artifacts and review reports stay in the language they were written in (usually Korean).
   Messages for the AI (the paste-in text in static mode) are also generated in Korean.
 
 ## 8. Approve · request changes · reject

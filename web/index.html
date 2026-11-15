@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DevTrack · AI 개발 진행 현황</title>
+  <title>DevTrack · AI collaboration hub</title>
   <meta name="description" content="AI 에이전트의 개발 진행상황, 문제점, 결과물을 확인하고 승인하는 대시보드">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233a5ccc'/%3E%3Cpolyline points='7 17 12 17 15 9 19 23 22 15 25 15' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <script>
     try { var t = JSON.parse(localStorage.getItem('devtrack.theme')); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-    try { if (JSON.parse(localStorage.getItem('devtrack.lang')) === 'en') document.documentElement.lang = 'en'; } catch (e) {}
+    try { if (JSON.parse(localStorage.getItem('devtrack.lang')) === 'ko') document.documentElement.lang = 'ko'; } catch (e) {}
   </script>
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <link rel="stylesheet" href="css/app.css">
@@ -30,7 +30,7 @@
       </button>
       <a class="brand" href="#/">
         <span class="brand-mark"><svg class="icon" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
-        <span class="brand-text">DevTrack<small data-i18n="AI 개발 진행 현황">AI 개발 진행 현황</small></span>
+        <span class="brand-text">DevTrack<small data-i18n="AI 협업 작업 관리">AI 협업 작업 관리</small></span>
       </a>
       <button id="update-pill" class="update-pill" data-action="apply-update" data-i18n="새 업데이트 보기">새 업데이트 보기</button>
       <span id="mode-chip" class="mode-chip"><span class="dot"></span><span data-i18n="연결 중…">연결 중…</span></span>

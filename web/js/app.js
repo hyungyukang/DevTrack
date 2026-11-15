@@ -417,7 +417,7 @@ function updateChrome(route = parseRoute()) {
   $('#bell-count').textContent = pending;
   $('#bell-count').hidden = !pending;
   $('#bell-dot').hidden = !!pending || !unseen;
-  document.title = `${pending ? `(${pending}) ` : ''}DevTrack · ${L('AI 개발 진행 현황')}`;
+  document.title = `${pending ? `(${pending}) ` : ''}DevTrack · ${L('AI 협업 작업 관리')}`;
 
   const chip = $('#mode-chip');
   if (state.loadError && idx) {
