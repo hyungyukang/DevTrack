@@ -36,6 +36,23 @@ pushes it to the target repository.
 > The CLI's messages and the agent rules ([docs/AGENT_PROTOCOL.md](docs/AGENT_PROTOCOL.md)) are in Korean, and the rules ask agents
 > to write their records and reports in Korean. Korean guide: [web/guide.md](web/guide.md).
 
+## Tasks that build on each other
+
+Real work rarely fits in one task, so DevTrack makes it easy to link tasks. Link a task when you create it (the **Related tasks**
+field on **New task**, or `devtrack new … --related T-ID`) or later with `devtrack link T-0008 T-0005`. Linked tasks appear on each
+other's pages, so you and the agents can follow the thread and build on earlier results. The agent rules also ask agents to link
+the follow-up tasks they create, such as an analysis made for a paper.
+
+In the demo data, for example:
+
+- **Data analysis → paper:** the analysis `T-0008` is linked to the paper `T-0005`. It is listed under **Linked data analysis** on
+  the Paper writing page, and the LaTeX preview of the manuscript finds its figures by file name.
+  **New analysis for this paper** starts the next analysis already linked.
+- **Analysis → brainstorming → new task:** `T-0009` turns that analysis into follow-up research ideas (I1, I2…). Tick the ones to
+  pursue, and **New task from these ideas** creates a task linked to the brainstorming.
+- **Paper → document review:** `T-0010` reviews the manuscript before submission. It is linked to the paper, so the review and the
+  writing stay side by side.
+
 ## What is in this repository
 
 | Component | Description |
