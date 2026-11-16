@@ -8,6 +8,18 @@ You see each task's **progress, issues and artifacts**, get **notified when some
 request changes or reject), and can give new instructions from the web. After you approve a code change, the agent commits and
 pushes it to the target repository.
 
+![The DevTrack dashboard showing the demo data in the English UI](docs/images/dashboard.png)
+
+1. **New task** — give an AI agent a task from the web (you can also just ask it in the chat).
+2. **Work areas** — tasks grouped by kind: code development, code review, paper writing, document review, data analysis, brainstorming.
+3. **At a glance** — how many tasks are in progress, waiting for your approval, have open issues, or are done.
+4. **Needs attention** — what the agents are asking you: commit and push, check a result, choose which review comments to post, pick an idea.
+   **Review** opens the diff or report so you can approve, request changes or reject.
+5. **Recent activity** — what the agents recorded, newest first.
+6. **Top bar** — `Live · local server` means your clicks on the web are saved directly. Next to it: refresh, **한** (switch to Korean), dark mode, and the bell with the number of pending approvals.
+
+<sub>The demo data from [Quick start](#quick-start-see-the-example-locally). Task titles and records are written by the agents — in Korean here, as the agent rules ask.</sub>
+
 ```text
  User ── instruction ──▶ AI agent (Claude, Codex)
    ▲                         │ records with the devtrack CLI
