@@ -181,7 +181,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    | Type | Code development · Code review · Paper writing · Document review · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
    | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
    | Repository path · Branch | The repository to change (optional) |
-   | Related tasks | e.g. the paper task that will use this analysis (optional) |
+   | Related tasks | e.g. the paper task that will use this analysis (optional). Pick several from the list one after another, or type task numbers in the box next to it (`T-0001, T-0002` or `1 2`) |
    | Instruction | Goal, references, definition of done, when approval is needed — the more specific, the better |
 
 3. Click **Submit task**, and Claude starts the task automatically within a few seconds.

@@ -1921,7 +1921,7 @@ function viewActivity({ q }) {
 function viewNewTask({ q = {} } = {}) {
   const type = TYPES[q.type] ? q.type : 'code';
   const tasks = [...state.index.tasks].sort((a, b) => Number(b.type === 'paper') - Number(a.type === 'paper'));
-  const relTask = tasks.find((t) => t.id === q.related);
+  const rel = parseTaskIds(q.related).ids.filter((id) => tasks.some((t) => t.id === id)); // ?related=T-0005,T-0008
   return html`
     <div class="crumbs"><a href="#/tasks">${L('작업')}</a><span>/</span><span>${L('새 작업 지시')}</span></div>
     <div class="page-head"><div><h1>${L('새 작업 지시')}</h1><p class="sub">${L('AI 에이전트에게 맡길 작업을 적어주세요. 에이전트는 진행 상황을 기록하고, 확인이 필요하면 알림으로 요청합니다.')}</p></div></div>
@@ -1943,11 +1943,14 @@ function viewNewTask({ q = {} } = {}) {
         <label class="field"><span>${L('대상 저장소 경로')}</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>${L('코드 작업일 때 결과를 커밋할 저장소')}</small></label>
         <label class="field"><span>${L('브랜치')}</span><input type="text" name="branch" placeholder="${L('(현재 브랜치)')}"></label>
       </div>
-      <label class="field"><span>${L('관련 작업 (선택)')}</span>
-        <select name="related"><option value="">${L('없음')}</option>${tasks.map((t) => html`<option value="${t.id}" ${t.id === q.related ? raw('selected') : ''}>${t.id} · ${pick(TYPES, t.type).label} · ${t.title}</option>`)}</select>
-        <small>${L('예: 논문에 쓸 데이터 분석이라면 해당 논문 작업을 선택하세요. 논문 작성 화면에 연결되어 표시됩니다.')}</small>
-      </label>
-      ${relTask ? html`<div class="alert alert-info" style="margin-bottom:14px">${icon('link')}<div class="alert-body"><b>${relTask.id} ${relTask.title}</b> ${L('에 연결된 작업으로 등록됩니다.')}</div></div>` : ''}
+      <div class="field rel-field"><span class="field-label">${L('관련 작업 (선택)')}</span>
+        <div class="rel-pick">
+          <select data-rel-add aria-label="${L('목록에서 관련 작업 추가')}"><option value="">${L('목록에서 고르기…')}</option>${tasks.map((t) => html`<option value="${t.id}" ${rel.includes(t.id) ? raw('disabled') : ''}>${t.id} · ${pick(TYPES, t.type).label} · ${t.title}</option>`)}</select>
+          <input type="text" name="related" value="${rel.join(', ')}" placeholder="T-0001, T-0002" aria-label="${L('관련 작업 번호')}" spellcheck="false">
+        </div>
+        <div class="rel-chips" data-rel-chips ${rel.length ? '' : raw('hidden')}>${rel.map((id) => relChip(id))}</div>
+        <small>${L('목록에서 여러 개를 차례로 고르거나 작업 번호를 직접 적으세요 (쉼표 · ; · 띄어쓰기로 구분, 3 = T-0003). 예: 논문에 쓸 데이터 분석이라면 그 논문 작업을 고르세요 — 논문 작성 화면에 연결되어 표시됩니다.')}</small>
+      </div>
       <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}"></textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <a class="btn btn-ghost" href="#/tasks">${L('취소')}</a>
@@ -1961,6 +1964,62 @@ const AGENTS = [['Claude', 'Claude'], ['Codex', 'Codex'], ['Gemini', 'Gemini'], 
 function agentOptions() {
   const last = LS.get('newAgent', 'Claude');
   return AGENTS.map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${L(label)}</option>`);
+}
+
+/** 관련 작업 칸의 글 → 작업 ID 목록 (중복 제거) 과 작업 번호로 읽을 수 없는 조각.
+ *  "T-0001, 2; t-3" → ids ['T-0001', 'T-0002', 'T-0003'] (store.normalize_task_id 와 같은 규칙) */
+function parseTaskIds(text) {
+  const ids = [];
+  const bad = [];
+  for (const part of String(text || '').split(/[\s,;]+/)) {
+    if (!part) continue;
+    const id = taskIdOf(part);
+    if (!id) bad.push(part);
+    else if (!ids.includes(id)) ids.push(id);
+  }
+  return { ids, bad };
+}
+function taskIdOf(token) {
+  const m = /^(?:T-?)?(\d+)$/i.exec(String(token).trim());
+  return m ? `T-${String(Number(m[1])).padStart(4, '0')}` : null;
+}
+
+/** 고른 관련 작업 하나 (없는 번호 · 읽을 수 없는 글은 빨갛게). × 로 뺀다 */
+function relChip(token) {
+  const id = taskIdOf(token);
+  const t = id && state.index.tasks.find((x) => x.id === id);
+  const x = html`<button type="button" class="rel-x" data-action="rel-remove" data-token="${token}" title="${L('빼기')}" aria-label="${L('빼기')}">${icon('x')}</button>`;
+  if (!t) return html`<span class="link-chip rel-chip bad">${icon('alert')}<span class="rel-t">${L('{id}: 없는 작업', { id: id || token })}</span>${x}</span>`;
+  return html`<span class="link-chip rel-chip"><span class="sdot tone-${pick(STATUS, t.status, 'queued').tone}"></span><span class="rel-t">${t.id} · ${pick(TYPES, t.type).label} · ${t.title}</span>${x}</span>`;
+}
+
+/** 관련 작업 칸이 바뀌면: 아래 표시를 다시 그리고, 목록에서 이미 고른 작업은 흐리게 */
+function syncRelated(form) {
+  const { ids, bad } = parseTaskIds(form.elements.related.value);
+  const box = $('[data-rel-chips]', form);
+  box.innerHTML = String(html`${ids.map((id) => relChip(id))}${bad.map((b) => relChip(b))}`);
+  box.hidden = !ids.length && !bad.length;
+  $$('[data-rel-add] option', form).forEach((o) => { o.disabled = !!o.value && ids.includes(o.value); });
+}
+
+/** 목록에서 고른 작업을 번호 칸 끝에 더한다 (여러 개를 차례로 고를 수 있게 목록은 다시 비운다) */
+function addRelated(select) {
+  const id = select.value;
+  select.value = '';
+  const input = select.form.elements.related;
+  if (id && !parseTaskIds(input.value).ids.includes(id)) {
+    const cur = input.value.trim().replace(/[\s,;]+$/, '');
+    input.value = cur ? `${cur}, ${id}` : id;
+  }
+  syncRelated(select.form);
+}
+
+function removeRelated(btn) {
+  const form = btn.closest('form');
+  const input = form.elements.related;
+  const target = taskIdOf(btn.dataset.token) || btn.dataset.token;
+  input.value = input.value.split(/[\s,;]+/).filter((p) => p && (taskIdOf(p) || p) !== target).join(', ');
+  syncRelated(form);
 }
 
 /** 작업 유형에 따라 보이는 칸: 문서 리뷰는 문서 경로 · 종류 · 목적, 그 밖에는 저장소 */
@@ -1988,18 +2047,27 @@ async function submitNewTask(ev) {
   const data = takeDocFields(Object.fromEntries(new FormData(form).entries()));
   data.title = (data.title || '').trim();
   if (!data.title) return;
+  const { ids: relIds, bad: relBad } = parseTaskIds(data.related);
+  const rels = relIds.map((id) => state.index.tasks.find((t) => t.id === id));
+  const missing = [...relBad, ...relIds.filter((id, i) => !rels[i])];
+  if (missing.length) {
+    toast({ title: L('관련 작업을 확인해 주세요'), meta: L('찾을 수 없는 작업: {ids}', { ids: missing.join(', ') }), tone: 'red' });
+    form.elements.related.focus();
+    return;
+  }
+  data.related = relIds;
   LS.set('newAgent', data.agent); // 다음 지시에도 같은 AI 를 기본으로
   const ai = aiName(data);
-  const rel = data.related ? state.index.tasks.find((t) => t.id === data.related) : null;
   if (state.mode === 'live') {
     const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     try {
-      const r = await api('api/tasks', { ...data, related: data.related ? [data.related] : [] });
+      const r = await api('api/tasks', data);
       form.reset();
       form.elements.agent.value = data.agent;
       form.elements.type.value = data.type;
       syncTypeFields(form);
+      syncRelated(form);
       toast({ title: L('작업 지시를 등록했습니다'), meta: `${r.task.id} — ${isUnassigned(data.agent) ? L('먼저 시작한 AI 가 맡습니다') : L('{ai}에게 devtrack inbox 로 전달됩니다', { ai })}`, tone: 'green' });
       await poll({ force: true });
       location.hash = `#/task/${r.task.id}`;
@@ -2014,7 +2082,7 @@ async function submitNewTask(ev) {
     'devtrack new', shellQuote(data.title), '-t', data.type, '--agent', shellQuote(data.agent),
     data.priority !== 'normal' ? `--priority ${data.priority}` : '',
     data.repo ? `--repo ${shellQuote(data.repo)}` : '', data.branch ? `--branch ${shellQuote(data.branch)}` : '',
-    data.related ? `--related ${data.related}` : '',
+    relIds.length ? `--related ${relIds.join(' ')}` : '',
     data.instruction ? `-i ${shellQuote(data.instruction)}` : '',
   ].filter(Boolean).join(' ');
   const msg = [
@@ -2024,7 +2092,7 @@ async function submitNewTask(ev) {
     `담당 AI: ${data.agent}`,
     data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : '',
     data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : '',
-    rel ? `관련 작업: ${rel.id} ${rel.title} (devtrack new 에 --related ${rel.id})` : '',
+    rels.length ? `관련 작업: ${rels.map((t) => `${t.id} ${t.title}`).join(', ')} (devtrack new 에 --related ${relIds.join(' ')})` : '',
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',
@@ -2316,6 +2384,7 @@ async function onAction(el, ev) {
       syncChoiceCount(box);
       return;
     }
+    case 'rel-remove': return removeRelated(el);
     case 'copy': {
       const ok = await copyText(el.dataset.copy || '');
       const prev = el.innerHTML;
@@ -2385,6 +2454,7 @@ function bindEvents() {
     if (row && !ev.target.closest('a')) location.hash = row.dataset.href;
   });
   document.addEventListener('input', (ev) => {
+    if (ev.target.matches('#new-task-form input[name="related"]')) return syncRelated(ev.target.form);
     if (ev.target.id !== 'del-confirm') return;
     const go = $('#del-go');
     if (go) go.disabled = ev.target.value.trim().toUpperCase() !== go.dataset.task;
@@ -2393,6 +2463,7 @@ function bindEvents() {
     const el = ev.target.closest('[data-change]');
     if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
     if (ev.target.matches('#new-task-form select[name="type"]')) syncTypeFields(ev.target.form);
+    if (ev.target.matches('#new-task-form [data-rel-add]')) addRelated(ev.target);
     const box = ev.target.closest('.choice-box');
     if (box) { box.dataset.dirty = '1'; syncChoiceCount(box); }
   });

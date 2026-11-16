@@ -269,6 +269,21 @@ label.field > span { display: block; font-weight: 600; font-size: 13px; margin-b
 label.field > small { display: block; color: var(--text-3); margin-top: 4px; font-size: 12px; }
 /* 작업 유형에 따라 숨기는 칸 (새 작업 지시) — display 규칙보다 우선 */
 #new-task-form [hidden] { display: none !important; }
+/* 관련 작업: 목록에서 고르기 + 번호 직접 입력, 고른 작업은 아래 칩으로 (× 로 빼기) */
+.rel-field { margin-bottom: 14px; }
+.rel-field > .field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.rel-field > small { display: block; color: var(--text-3); margin-top: 6px; font-size: 12px; }
+.rel-pick { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px; }
+.rel-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rel-chips .rel-chip { margin: 0; padding-right: 3px; }
+.rel-chips .rel-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-chips .rel-chip.bad { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+.rel-chips .rel-chip.bad svg { width: 13px; height: 13px; flex: none; }
+.rel-x { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer; }
+.rel-x:hover { background: var(--surface-3); color: var(--text); }
+.rel-x svg { width: 12px; height: 12px; }
+@media (max-width: 560px) { .rel-pick { grid-template-columns: 1fr; } }
 .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

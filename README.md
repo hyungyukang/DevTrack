@@ -38,8 +38,8 @@ pushes it to the target repository.
 
 ## Tasks that build on each other
 
-Real work rarely fits in one task, so DevTrack makes it easy to link tasks. Link a task when you create it (the **Related tasks**
-field on **New task**, or `devtrack new … --related T-ID`) or later with `devtrack link T-0008 T-0005`. Linked tasks appear on each
+Real work rarely fits in one task, so DevTrack makes it easy to link tasks. Link a task when you create it (pick one or more in the **Related tasks**
+field on **New task** or type their numbers, or `devtrack new … --related T-ID …`) or later with `devtrack link T-0008 T-0005`. Linked tasks appear on each
 other's pages, so you and the agents can follow the thread and build on earlier results. The agent rules also ask agents to link
 the follow-up tasks they create, such as an analysis made for a paper.
 
