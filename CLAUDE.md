@@ -29,6 +29,13 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
 - 기다리는 AI 표시: `inbox --wait` · `watch` 가 `_Listening` 으로 `.agent/listeners/<kind>-<agent>-<pid>.json` 을 남기고(30초 갱신),
   `Store.listeners()` 가 살아 있는 것만(같은 컴퓨터는 PID, 다른 컴퓨터는 120초) 돌려준다. 서버 `api/agents` → 웹 `waitingBox`.
   `seen_tasks` 는 그 프로세스가 이미 본 새 작업 — 다시 깨어나지 않으므로 '이미 확인함'으로 표시
+- 작업별 AI 모델: `devtrack/models.py` — 작업의 `model` · `effort`, 이름 정리(`normalize_model`), 맞는지(`spec_matches`),
+  고를 수 있는 목록(`catalog()` → `index.json` 의 `models`: Claude 목록 + Codex 의 `~/.codex/models_cache.json`, 웹은 `setModelCatalog`)과
+  모델별 강도(`allowed_efforts` · 웹 `effortsFor`, 저장할 때 `check_effort`),
+  지금 세션의 모델 · 강도(`session_model`: `$DEVTRACK_MODEL` > Claude Code · Codex 세션 기록 > `$CLAUDE_EFFORT`).
+  `inbox` 는 다른 모델의 작업을 `[다른 모델 지정]` 으로 빼고 `start` 는 거절(`--any-model`), `watch --claude` · `--codex` 는 그 모델로 실행
+  (`.agent/watch-sessions-<AI>.json` 으로 같은 작업을 같은 대화로 이어 감 — Claude `--resume`, Codex `exec resume` + `-c` 샌드박스 설정). 웹은 `util.js` 의 `specMatches` 로 기다리는 AI 를
+  거른다 — 이름 · 맞는지 규칙은 두 쪽을 함께 고칠 것
 - `devtrack/latex.py` LaTeX 컴파일 · 로그 분석 (`Store.record_build` 로 기록)
 - `devtrack/pdf.py` Markdown → PDF (web/vendor 렌더러 + 헤드리스 Chrome 인쇄, `review --pdf` · `devtrack pdf`)
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
@@ -53,5 +60,10 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
 - 훅 변경 후: 임시 데이터에서 `DEVTRACK_SESSION=s1 devtrack start` → 사용자 취소(`Store.cancel_task(author=USER)`) →
   `echo '{"session_id":"s1","tool_input":{"command":"ls"}}' | devtrack hook` 이 deny, devtrack 단독 명령은 통과하는지 본다
   (실제 Claude 는 `claude -p --settings <훅 설정>` 으로 필요할 때만).
+- 모델 지정 변경 후: 임시 데이터에 모델을 정한 작업을 만들고 `DEVTRACK_MODEL=… DEVTRACK_EFFORT=… devtrack inbox` · `start` 를 확인,
+  가짜 claude 스크립트(`DEVTRACK_CLAUDE=…`, `CLAUDE_CONFIG_DIR=…`)로 `watch --claude --once` 의 `--model` · `--effort`,
+  `--session-id` → 다음 입력 `--resume` 을 본다. Codex 는 가짜 codex(`DEVTRACK_CODEX=…`, `CODEX_HOME=…` 에 rollout 파일,
+  `--json` 출력에 `thread.started`)로 `exec --json` → 다음 입력 `exec resume <ID>` + `-c` 샌드박스 설정, 실패 시 새 대화를 본다
+  (실제 claude · codex 호출은 필요할 때만).
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

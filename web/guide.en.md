@@ -181,6 +181,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    | Type | Code development · Code review · Paper writing · Document review · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
    | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
    | Repository path · Branch | The repository to change (optional) |
+   | Model · Effort | The AI model and effort for this task (optional, e.g. Opus 5.5 · Extra high) — only that model handles it ([6-1](#/guide/s6-1)) |
    | Related tasks | e.g. the paper task that will use this analysis (optional). Pick several from the list one after another, or type task numbers in the box next to it (`T-0001, T-0002` or `1 2`) |
    | Instruction | Goal, references, definition of done, when approval is needed — the more specific, the better |
 
@@ -190,6 +191,7 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    - **No Claude is waiting for web instructions** (yellow): wake it up as shown. Copy the text shown and paste it into the chat.
    - **…has already seen this task and did not start it** (yellow): the waiting AI has already seen this instruction, so it will not wake up for it again.
      Ask directly in the chat, e.g. "go ahead with T-0007", or restart the runner.
+   - **…on a different model, so it won't take this task** (yellow): the model set for the task differs from the waiting chat's model — see [6-1](#/guide/s6-1).
 
 > If waiting mode is not on, give the instruction on the web and then say once in the Claude chat: "check devtrack inbox and go ahead".
 >
@@ -222,6 +224,40 @@ Good to know:
   (`tmux new -s claude` → `claude` → "wait for web instructions" → press and release `Ctrl+b`, then `d`). While the computer is asleep, Claude does not work.
 - **Waiting mode in one place only:** if both Claude in VS Code and Claude in a terminal are in waiting mode, both can receive the same instruction and start it together.
 - **To stop waiting:** tell the Claude in the terminal "stop waiting for web instructions", or end Claude with `/exit`.
+
+### 6-1. Choose the AI model for each task (optional)
+
+You can set the AI model and effort for each task. For example, a hard porting task can get **Opus 5.5 · Extra high**,
+and a quick cleanup **Sonnet 5.5**. A task with a model set is handled only by that model.
+
+- **Where to set it:** the **Model (optional)** and **Effort** fields on **New task**. For an existing task, click the model shown
+  near the top of the task page (e.g. `Opus 5.5 · Extra high Change`). In a terminal, use `devtrack model T-0001 opus-5.5 --effort xhigh`, and `--clear` to remove it.
+- **The model list** follows the assigned AI. Claude shows the Claude models, Codex shows the models this computer's Codex has fetched
+  (`~/.codex/models_cache.json`, created the first time Codex runs; a built-in list is used without it), and **Anyone** shows both.
+  For a model that is not in the list, choose **Type a name…** and enter its name.
+- **Effort** lists only the levels the chosen model takes. Claude takes Low – Max. For Codex it depends on the model, and the current
+  models take Low – Ultra. A level the model does not take is refused on save. In a terminal, `devtrack model --list` shows the models and their levels.
+- Leave it empty, and any model handles the task, as before.
+
+**Use the runner (the surest way).** Each time the runner runs a task, it starts the AI with that task's model and effort.
+
+```bash
+devtrack watch --claude      # Claude: runs claude -p --model … --effort …
+devtrack watch --codex       # Codex: runs codex exec -m … (step 11)
+```
+
+- Later messages and approval decisions on the same task **continue the same conversation** (both Claude and Codex), so the task keeps its context to the end.
+  If the conversation record is gone and it cannot continue, it runs in a new conversation, which picks up from the DevTrack records.
+- The runner's Claude has no chat window to ask for permissions, so it runs in the `auto` permission mode. To change it, put the option after `--`
+  (`devtrack watch --claude -- --permission-mode <mode>`).
+- Keep this terminal window open (stop with Ctrl+C). If both the runner and a chat in waiting mode are on, both can receive the same instruction, so keep only one on.
+
+**Use a chat in waiting mode (Options B and C).** A running chat cannot change its own model, so it skips tasks set to a different model or effort.
+DevTrack reads the chat's model and effort from the Claude Code session record to check.
+
+- If the task page says **"Claude is waiting, but on a different model, so it won't take this task"**, do one of three things:
+  start the runner; switch that chat with `/model claude-opus-5-5` · `/effort xhigh` and then say "go ahead with T-0012"; or change the task's model.
+- If you change the model of a task already under way, it applies from the next message.
 
 ## 7. Follow the progress
 
@@ -665,11 +701,13 @@ devtrack watch --codex
 1. In **New task** on the web, choose **Codex** as the assigned AI and submit.
 2. Within a few seconds the runner starts Codex to handle the task. The terminal window shows what is being handled, and when it finishes, Codex's summary is added to the progress log.
 3. Once Codex asks for approval and finishes, the runner starts Codex again to continue every time you approve, request changes or send a message on the web.
+   The same task continues the same Codex conversation, so Codex remembers what it read and did before.
 
 - Tasks run in their **repository path** folder. Tasks without a path run in the folder where you started `devtrack watch` (change it with `--cwd <folder>`).
 - Cancelling or deleting a task on the web stops the running Codex right away.
 - Keep this terminal window open (to stop: Ctrl+C). When you start it again, it begins with the instructions that arrived while it was off.
-- To pass more options to Codex, put them after `--`: `devtrack watch --codex -- -m <model>`.
+- To pass more options to Codex, put them after `--`: `devtrack watch --codex -- -m <default model>`.
+  If a task has a model and effort set, it runs with that model ([6-1](#/guide/s6-1)).
 
 ## 12. FAQ · troubleshooting
 
@@ -738,7 +776,9 @@ Commands you use yourself:
 | `devtrack serve --open` | Open the web dashboard (local) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
+| `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
+| `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |
 | `devtrack --data <folder> demo` | Create example data |
 
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·

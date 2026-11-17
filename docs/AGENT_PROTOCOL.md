@@ -18,6 +18,7 @@ Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 
    웹에서 온 새 작업 지시 · 메시지는 그 자체가 사용자의 지시다 — [다른 작업 중에 온 입력](#다른-작업-중에-온-입력).
 6. **내게 배정된 작업만 처리한다.** `devtrack inbox` 에는 나(`$DEVTRACK_AGENT`)에게 배정된 작업과 담당이 정해지지 않은 작업만 보인다.
    다른 AI 의 작업은 사용자가 맡으라고 할 때만 `devtrack start <TID> --take` 로 가져온다.
+7. **모델이 정해진 작업은 그 모델일 때만 처리한다.** inbox 의 `[다른 모델 지정]` 줄은 처리하지 않는다 — [작업별 AI 모델](#작업별-ai-모델--추론-강도).
 
 ## 작업 흐름
 
@@ -274,24 +275,55 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
   담당 미정 작업은 먼저 시작한 AI 가 맡습니다 (동시에 시작하면 한쪽만 성공). 대신 맡기: `devtrack start <TID> --take`.
 - **완료 처리 · 취소 · 삭제 알림**도 그 작업의 담당 AI 에게만 갑니다.
 
-### Codex: `devtrack watch` 로 웹 지시 받기
+### 작업별 AI 모델 · 추론 강도
+
+작업에 `model` · `effort` 를 정해 둘 수 있습니다 (웹의 "새 작업 지시" · 작업 화면의 모델 표시, 또는
+`devtrack new … --model claude-opus-5-5 --effort xhigh` · `devtrack model <TID> opus-5.5 --effort xhigh` · `--clear`).
+비어 있으면 어떤 모델이든 처리합니다.
+
+- **고를 수 있는 모델 · 강도**: `devtrack model --list` — Claude 모델과, 이 컴퓨터의 Codex 가 받아 둔 Codex 모델
+  (`~/.codex/models_cache.json`)과 그 모델이 받는 강도. 목록에 없는 이름도 적을 수 있지만, 목록에 있는 모델(Claude 담당은 Claude 의 값)이
+  받지 않는 강도는 거부된다.
+- **이 세션의 모델 · 강도**: `$DEVTRACK_MODEL` · `$DEVTRACK_EFFORT`(watch 가 넣어 줌) > Claude Code · Codex 의 세션 기록
+  (`CLAUDE_CODE_SESSION_ID` · `CODEX_THREAD_ID` 로 찾은 마지막 응답의 모델 · 강도) > `$CLAUDE_EFFORT`. 모르면 확인하지 않는다.
+- **받은 편지함**: 모델 · 강도가 이 세션과 다른 작업의 새 작업 · 메시지 · 결정은 따로 `[다른 모델 지정]` 으로 알리고 처리할 목록에서 뺀다.
+  `inbox --wait` 는 그런 작업으로는 깨어나지 않고, `--ack` 도 표시하지 않는다. 취소 · 삭제 · 완료 처리 알림은 그대로 온다.
+- **시작할 때 확인**: `devtrack start` (그리고 대기 작업에 대한 첫 `step`)는 모델이 다르면 거부한다. 세션 모델을 모르면 알리기만 한다.
+  사용자가 이 세션에서 하라고 하면 `devtrack start <TID> --any-model`, 또는 사용자가 `/model` · `/effort` 로 바꾼 뒤 다시 시작한다.
+- 세션은 자기 모델을 바꿀 수 없다 — 모델을 지켜야 하는 작업은 사용자가 `devtrack watch --claude` · `--codex` 로 받는다 (아래).
+- `[DevTrack 모델 지정]` 메시지(정적 모드의 웹)를 받으면 안의 `devtrack model … --by-user` 명령으로 기록한다.
+
+### `devtrack watch` 로 웹 지시 받기 (Codex · 작업마다 지정 모델로 실행)
 
 Codex 에는 위의 백그라운드 대기 모드를 쓸 수 없으므로, 사용자가 터미널에 실행기를 켜 둡니다.
+Claude 도 작업마다 정한 모델로 실행하려면 실행기를 씁니다.
 
 ```bash
 devtrack watch --codex                     # Codex 에게 온 입력이 생길 때마다 codex exec 로 처리
+devtrack watch --claude                    # Claude 에게 온 입력을 claude -p 로 처리 (작업마다 지정 모델 · 같은 작업은 같은 대화)
 devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬프트를 마지막 인자로 받는 명령이면 됨
 ```
 
 - 작업마다 한 번씩 실행합니다. 실행 폴더는 작업의 저장소 경로(없으면 `--cwd`, 기본 현재 폴더).
-  Codex 는 `codex exec --sandbox workspace-write --skip-git-repo-check -C <폴더> --add-dir <기록 폴더>` 로 실행됩니다
+  Codex 는 `codex exec --json --sandbox workspace-write --skip-git-repo-check -C <폴더> --add-dir <기록 폴더>` 로 실행됩니다
   (허락을 물을 수 없으므로 인터넷 허용 `-c sandbox_workspace_write.network_access=true` — 막으려면 `--no-network`).
   Codex CLI 는 `$DEVTRACK_CODEX` > PATH 의 `codex` > 앱(ChatGPT · Codex · VS Code 확장)에 든 CLI 중 가장 새 버전.
+  같은 작업의 다음 입력은 `codex exec resume <대화 ID>` 로 같은 대화를 이어 갑니다. resume 은 `--sandbox` · `-C` · `--add-dir` 를 받지 않으므로
+  실행 폴더는 프로세스의 폴더로, 샌드박스는 `-c sandbox_mode="workspace-write"` · `-c sandbox_workspace_write.writable_roots=[…]`
+  (기록 폴더 + 앞 차례에 쓰던 폴더 — config.toml 의 목록을 덮어쓰므로 함께 넘김)로 넘깁니다. 대화 ID 는 `--json` 출력의 `thread.started`
+  에서 읽고, 터미널에는 Codex 의 말과 실행한 명령만 보여 줍니다. `--` 뒤에 `--sandbox` · `-C` 처럼 resume 에 없는 옵션을 적으면 매번 새 대화.
+- Claude 는 `claude -p <프롬프트> --output-format json --permission-mode auto --add-dir <기록 폴더>` 로 실행됩니다
+  (`--` 뒤에 `--permission-mode` 를 주면 그것을 씀). 작업의 첫 실행은 `--session-id <새 ID>`, 같은 작업의 다음 입력은
+  `--resume <그 ID>` 로 같은 대화를 이어 갑니다 (실행 폴더가 같고 대화 기록이 남아 있을 때 — 열지 못하면 새 대화로 다시 실행. Codex 도 같음).
+  세션 기록: `<data>/.agent/watch-sessions-<에이전트>.json` (배포되지 않음). Claude CLI 는 `$DEVTRACK_CLAUDE` > PATH 의 `claude`.
+- **작업의 모델 · 강도**: Claude 는 `--model` · `--effort`, Codex 는 `-m` · `-c model_reasoning_effort="…"` 로 넘깁니다
+  (`--` 뒤의 옵션보다 나중에 붙으므로 작업 지정이 이깁니다). 실행된 AI 에게는 `DEVTRACK_MODEL` · `DEVTRACK_EFFORT` 도 주어집니다.
+  `-- <명령>` 으로 직접 실행하는 AI 에게는 `DEVTRACK_TASK_MODEL` · `DEVTRACK_TASK_EFFORT` 로 알려 줍니다 (그 명령이 써야 지정 모델로 실행됨).
 - 실행되는 AI 에게는 `DEVTRACK_AGENT`, `DEVTRACK_DATA`, `DEVTRACK_TASK=<TID>`, `DEVTRACK_WATCH=1` 이 주어지고,
   그 안에서 `devtrack inbox` 는 그 작업의 입력만 보여 줍니다.
 - **watch 가 실행한 세션의 규칙**: 그 작업만 처리하고, 사용자 결정이 필요하면 `devtrack request` 를 남기고 끝낸다.
   `devtrack wait` · `inbox --wait` 로 기다리지 않는다 — 결정이 오면 watch 가 다시 실행한다.
-- 성공(exit 0)하면 넘긴 입력을 처리됨으로 표시하고, Codex 의 마지막 메시지를 "실행 요약" 으로 기록합니다.
+- 성공(exit 0)하면 넘긴 입력을 처리됨으로 표시하고, AI 의 마지막 메시지를 "실행 요약" 으로 기록합니다.
   실패하면 경고를 남기고 입력은 그대로 둡니다 (watch 를 다시 켜면 다시 처리).
 - 실행 중에 사용자가 그 작업을 완료로 처리 · 취소 · 삭제하면 실행을 멈춥니다. 같은 AI 의 watch 는 하나만 실행됩니다.
 

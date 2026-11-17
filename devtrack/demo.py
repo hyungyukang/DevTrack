@@ -1093,7 +1093,7 @@ def _scenario(s, clk, tmp):
         instruction="압력 솔버(CPU 참조 구현)에 대해 **manufactured solution** 기반 단위 테스트를 추가하고 "
                     "GitHub Actions 에서 자동 실행되도록 해주세요.\n\n- 격자 32, 64 두 경우\n- 허용 오차 5e-3",
         plan=["기존 테스트 구조 확인", "manufactured solution 테스트 작성", "CI 워크플로 추가", "커밋 승인 요청"],
-        tags=["ci", "test"])
+        tags=["ci", "test"], model="gpt-6.1-sol", effort="high")
     tid1 = t1["id"]
     clk.at(2880); s.update_task(tid1, step="기존 테스트 구조 확인 — tests/ 디렉토리가 없어 새로 생성 예정", progress=10)
     clk.at(2870); s.check_plan(tid1, [1])
@@ -1323,7 +1323,7 @@ def _scenario(s, clk, tmp):
         instruction="`src/pressure_solver.cu` 를 HIP 으로 포팅해 AMD GPU(MI250X)에서 돌아가게 해주세요.\n\n"
                     "- CPU 결과 대비 상대오차 1e-10 이내\n- 오류 체크 매크로 추가\n- **커밋 전 승인 필수**",
         plan=["CUDA 커널 구조 분석", "hipify 변환 및 빌드 설정", "MI250X 단일 GCD 성능 측정", "수치 검증 (CPU 대비)", "커밋 승인 요청"],
-        tags=["hip", "hpc", "gpu"])
+        tags=["hip", "hpc", "gpu"], model="claude-opus-5-5", effort="xhigh")
     tid6 = t6["id"]
     clk.at(185); s.update_task(tid6, step="CUDA 커널 1개, 메모리 전송 5곳 확인", progress=5)
     clk.at(175); s.check_plan(tid6, [1])

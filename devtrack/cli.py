@@ -14,9 +14,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import uuid
 
-from . import DevTrackError, __version__, gitops
+from . import DevTrackError, __version__, gitops, models
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     Store, is_unassigned, normalize_item_id, normalize_task_id, pid_alive,
@@ -65,7 +67,7 @@ def cmd_new(store, args):
         type=args.type, agent=args.agent or args.author, repo=args.repo, branch=args.branch,
         repo_url=args.url, tags=args.tag, priority=args.priority,
         status="queued" if queued else "in_progress", created_by=USER if queued else None, plan=args.plan,
-        related=args.related,
+        related=args.related, model=args.model, effort=args.effort,
     )
     if not queued:  # AI 가 스스로 만들어 진행하는 작업 — 이 세션이 맡은 작업으로 적어 둔다
         _note_session(store, t["id"])
@@ -73,7 +75,27 @@ def cmd_new(store, args):
     _out(args, t, t["id"])
 
 
+def _check_model(store, tid, args):
+    """모델 · 강도가 지정된 작업을 다른 모델의 세션이 시작하지 않게 한다 (세션 모델을 모르면 알리기만)."""
+    t = store.load(tid)
+    want = models.spec_label(*models.task_spec(t))
+    if not want or getattr(args, "any_model", False):
+        return
+    have = models.session_model()
+    ok = models.spec_matches(t, *have)
+    if ok is False:
+        raise DevTrackError(
+            "{0} 은(는) {1} 로 지정된 작업입니다 — 이 세션({2})에서는 시작하지 않습니다. 지정한 모델의 세션이나 "
+            "devtrack watch 가 처리합니다. 이 세션에서 하려면 사용자가 /model · /effort 로 맞추거나 지정을 바꿔야 합니다 "
+            "(devtrack model {0} …). 사용자가 그래도 이 세션에서 하라고 하면 --any-model".format(
+                t["id"], want, models.spec_label(*have) or "모델 알 수 없음"))
+    if ok is None:
+        _info("참고: {} 은(는) {} 로 지정된 작업입니다 — 이 세션의 모델 · 강도를 확인하지 못했습니다. "
+              "지정과 다르면 진행하지 마세요".format(t["id"], want))
+
+
 def cmd_start(store, args):
+    _check_model(store, args.task, args)
     t = store.update_task(args.task, status="in_progress", step=args.step, author=args.author,
                           claim=args.author, take=args.take)
     _out(args, t, "{} 진행 중".format(t["id"]))
@@ -82,6 +104,8 @@ def cmd_start(store, args):
 def cmd_step(store, args):
     t = store.load(args.task)
     status = "in_progress" if t["status"] in ("queued", "changes_requested", "blocked") else None
+    if t["status"] == "queued":
+        _check_model(store, args.task, args)
     t = store.update_task(args.task, status=status, step=args.text, progress=args.progress, author=args.author,
                           claim=args.author if status else None, claim_queued_only=True)
     _out(args, t, "{} [{}%] {}".format(t["id"], t.get("progress", 0), args.text))
@@ -93,6 +117,41 @@ def cmd_status(store, args):
     t = store.update_task(args.task, status=args.status, progress=args.progress, message=args.message,
                           author=args.author)
     _out(args, t, "{} {} {}%".format(t["id"], STATUSES[t["status"]], t.get("progress", 0)))
+
+
+def cmd_model(store, args):
+    """작업을 처리할 AI 모델 · 추론 강도 보기 / 정하기 / 해제."""
+    if args.list:
+        cat = models.catalog()
+        lines = []
+        for title, key in (("Claude (claude --model)", "claude"),
+                           ("Codex (codex -m) — {}".format(
+                               models.codex_cache_path() if cat["codex_source"] == "cache" else "기본 목록 (Codex 의 모델 목록 파일 없음)"),
+                            "codex")):
+            lines.append(title)
+            wid = max([len(m["id"]) for m in cat[key]] or [0])
+            wlabel = max([len(m["label"]) for m in cat[key]] or [0])
+            lines += ["  {}  {}  강도: {}".format(m["id"].ljust(wid), m["label"].ljust(wlabel), ", ".join(m["efforts"]) or "-")
+                      for m in cat[key]]
+        lines.append("목록에 없는 모델도 이름을 그대로 적으면 됩니다 (예: devtrack model T-0001 <모델> --effort high)")
+        _out(args, cat, "\n".join(lines))
+        return
+    if not args.task:
+        raise DevTrackError("작업 ID 를 적어 주세요 (예: devtrack model T-0001 opus-5.5 --effort xhigh), 목록은 --list")
+    author = USER if args.by_user else args.author
+    if args.clear:
+        if args.model or args.effort:
+            raise DevTrackError("--clear 와 모델 · 강도를 함께 지정할 수 없습니다")
+        t = store.set_model(args.task, None, None, author=author)
+    elif args.model is None and args.effort is None:
+        t = store.load(args.task)
+    else:
+        t = store.load(args.task)
+        t = store.set_model(args.task, t.get("model") if args.model is None else args.model,
+                            t.get("effort") if args.effort is None else args.effort, author=author)
+    label = models.spec_label(*models.task_spec(t))
+    _out(args, {"id": t["id"], "model": t.get("model"), "effort": t.get("effort")},
+         "{} 모델: {}".format(t["id"], label or "지정 안 함 (어떤 모델이든)"))
 
 
 def cmd_link(store, args):
@@ -354,6 +413,9 @@ def _format_inbox(items):
     for it in items:
         if it["type"] == "new_task":
             who = "담당 미정 — 먼저 시작한 AI 가 맡음" if is_unassigned(it.get("agent")) else "담당 " + it["agent"]
+            spec = models.spec_label(it.get("model"), it.get("effort"))
+            if spec:
+                who += " · 모델 " + spec
             out.append("[새 작업] {} {} ({} · {})".format(it["task_id"], it["title"], it["task_type"], who))
             if it.get("instruction"):
                 out.append(_indent(it["instruction"]))
@@ -396,6 +458,44 @@ def _print_inbox(items, hint=True):
                 "devtrack inbox --task {} --ack".format(t) for t in tids)))
 
 
+def _session_me(args):
+    """이 세션의 (모델, 강도) — 모델 지정이 다른 작업을 거르는 데 쓴다. --any-model 이거나 둘 다 모르면 None."""
+    if getattr(args, "any_model", False):
+        return None
+    me = models.session_model()
+    return me if (me[0] or me[1]) else None
+
+
+def _split_by_model(items, me):
+    """모델 · 강도 지정이 이 세션(me)과 다른 작업의 새 작업 · 메시지 · 결정을 따로 뺀다 → (처리할 것, 뺀 것).
+    취소 · 삭제 · 완료 처리 알림은 늘 처리할 것에 둔다."""
+    if not me:
+        return items, []
+    ok, held = [], []
+    for it in items:
+        if it["type"] not in NOTICE_TYPES and models.spec_matches(it, *me) is False:
+            held.append(it)
+        else:
+            ok.append(it)
+    return ok, held
+
+
+def _held_lines(held, me):
+    out, seen = [], []
+    for it in held:
+        if it["task_id"] in seen:
+            continue
+        seen.append(it["task_id"])
+        n = sum(1 for x in held if x["task_id"] == it["task_id"])
+        out.append("[다른 모델 지정] {} {} — {} 로 지정된 작업이라 이 세션({})에서는 처리하지 않습니다 (입력 {}건)".format(
+            it["task_id"], it["title"], models.spec_label(it.get("model"), it.get("effort")),
+            models.spec_label(*me) or "모델 알 수 없음", n))
+    if out:
+        out.append(_indent("지정한 모델의 세션이나 devtrack watch 가 처리합니다. 이 세션에서 하려면 사용자가 /model · /effort 로 "
+                           "맞추거나 지정을 바꿔야 합니다 (devtrack model <작업> …)."))
+    return out
+
+
 def _inbox_scope(args):
     """받은 편지함 범위: 기본은 나($DEVTRACK_AGENT / --as)에게 배정된 작업과 담당이 정해지지 않은 작업.
     devtrack watch 가 실행한 세션은 DEVTRACK_TASK 의 작업만 본다.
@@ -412,8 +512,9 @@ class _Listening(object):
     바뀌면 깨울 대상이 없으므로 기록만 지운다 (기다리기 자체는 그대로)."""
     EVERY = 30  # 초: 기록 갱신 간격 (다른 컴퓨터에서 볼 때 끝났는지 판단하는 기준)
 
-    def __init__(self, store, kind, agent, task=None, seen=None):
+    def __init__(self, store, kind, agent, task=None, seen=None, model=None, effort=None):
         self.store, self.kind, self.agent, self.task, self.seen = store, kind, agent or "", task, seen
+        self.model, self.effort = model, effort
         self.started = None
         self.last = 0.0
         self.state, self.running = "waiting", None
@@ -423,7 +524,8 @@ class _Listening(object):
     def _write(self):
         try:
             self.store.touch_listener(self.kind, self.agent, task=self.task, started_at=self.started,
-                                      state=self.state, running=self.running, seen=self.seen)
+                                      state=self.state, running=self.running, seen=self.seen,
+                                      model=self.model, effort=self.effort)
             self.started = self.started or now_iso()
         except (OSError, DevTrackError):
             pass
@@ -454,8 +556,9 @@ class _Listening(object):
         return False
 
 
-def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_tick=None):
-    """seen_name 기준으로 아직 보지 않은 입력이 생길 때까지 기다려 그 항목들을 돌려준다 (시간 초과면 None)."""
+def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_tick=None, keep=None):
+    """seen_name 기준으로 아직 보지 않은 입력이 생길 때까지 기다려 그 항목들을 돌려준다 (시간 초과면 None).
+    keep: 받은 편지함 항목 중 기다릴 것만 남기는 함수 (예: 모델 지정이 다른 작업 빼기)."""
     deadline = time.time() + timeout if timeout else None
     last = object()
     while True:
@@ -465,6 +568,8 @@ def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_
         if token != last:
             last = token
             items = store.inbox(agent=agent, task=task)
+            if keep:
+                items = keep(items)
             seen = store.inbox_seen(seen_name)
             new = [it for it in items if store.inbox_key(it) not in seen]
             if new:
@@ -480,11 +585,16 @@ def _inbox_wait(store, args):
     if args.ack:
         raise DevTrackError("--wait 와 --ack 는 함께 쓸 수 없습니다 (처리한 뒤 devtrack inbox --ack)")
     agent, task = _inbox_scope(args)
+    me = _session_me(args)
     scope = task or ("{} 에게 배정된 작업".format(agent) if agent else "모든 AI 의 작업")
     _info("새 사용자 입력을 기다리는 중 ({} — 웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C".format(scope))
-    with _Listening(store, "wait", agent, task=task, seen=args.author) as listening:
+    if me:
+        _info("이 세션: {} — 다른 모델 · 강도로 지정된 작업은 받지 않습니다".format(models.spec_label(*me)))
+    keep = (lambda items: _split_by_model(items, me)[0]) if me else None
+    with _Listening(store, "wait", agent, task=task, seen=args.author, model=me and me[0],
+                    effort=me and me[1]) as listening:
         new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval,
-                            on_tick=listening.tick)
+                            on_tick=listening.tick, keep=keep)
     if new is None:
         _out(args, [])
         _info("시간 초과: 새 입력이 없습니다")
@@ -502,7 +612,10 @@ def cmd_inbox(store, args):
     if args.wait:
         return _inbox_wait(store, args)
     agent, task = _inbox_scope(args)
-    items = store.inbox(ack=args.ack, agent=agent, task=task)
+    me = _session_me(args)
+    items, held = _split_by_model(store.inbox(agent=agent, task=task), me)
+    if args.ack:
+        store.ack_inbox(items)
     store.mark_inbox_seen(args.author, items, merge=bool(task))
     if args.json:
         _out(args, items)
@@ -510,12 +623,14 @@ def cmd_inbox(store, args):
     if not items:
         print("처리할 사용자 입력이 없습니다.")
         if agent:
-            others = len(store.inbox(task=task))
-            if others:
+            others = len(store.inbox(task=task)) - len(held)
+            if others > 0:
                 print("(다른 AI 에게 배정된 입력 {}건은 그 AI 가 처리합니다 — 모두 보기: devtrack inbox --all-agents)".format(
                     others))
-        return 0
-    _print_inbox(items, hint=not args.ack)
+    else:
+        _print_inbox(items, hint=not args.ack)
+    for line in _held_lines(held, me):
+        print(line)
     return 0
 
 
@@ -689,10 +804,21 @@ def find_codex():
     raise DevTrackError("codex 명령을 찾을 수 없습니다 — Codex CLI 를 설치하거나 DEVTRACK_CODEX 에 경로를 지정하세요")
 
 
+def find_claude():
+    """Claude Code CLI 찾기: $DEVTRACK_CLAUDE > PATH 의 claude > 기본 설치 위치."""
+    for c in (os.environ.get("DEVTRACK_CLAUDE"), shutil.which("claude"), "~/.local/bin/claude",
+              "~/.claude/local/claude"):
+        if c:
+            c = os.path.expanduser(c)
+            if os.path.isfile(c) and os.access(c, os.X_OK):
+                return c
+    raise DevTrackError("claude 명령을 찾을 수 없습니다 — Claude Code CLI 를 설치하거나 DEVTRACK_CLAUDE 에 경로를 지정하세요")
+
+
 def _watch_prompt(agent, tid, items):
     lines = [
         "DevTrack 에 {} 에게 온 새 입력이 있습니다. (devtrack watch 가 이 세션을 실행했습니다)".format(agent),
-        "이번 실행에서는 {} 작업만 처리하세요. 기록 규칙은 AGENTS.md 의 DevTrack 규칙"
+        "이번 실행에서는 {} 작업만 처리하세요. 기록 규칙은 AGENTS.md · CLAUDE.md 의 DevTrack 규칙"
         "(또는 DevTrack 저장소의 docs/AGENT_PROTOCOL.md)을 따릅니다.".format(tid),
         "",
         "- 작업 내용과 지금까지의 기록: devtrack show {}".format(tid),
@@ -703,7 +829,7 @@ def _watch_prompt(agent, tid, items):
         "- 처리한 입력은 devtrack inbox --ack 로 처리됨 표시합니다 (이 실행에서는 {} 의 입력만 보입니다).".format(tid),
         "- 사용자 결정이 필요하면 devtrack request 로 요청을 남기고 이번 실행을 끝내세요. devtrack wait 나 "
         "devtrack inbox --wait 로 기다리지 마세요 — 결정이 오면 devtrack watch 가 다시 실행합니다.",
-        "- 마지막에 무엇을 했는지 두세 문장으로 요약해 주세요.",
+        "- 마지막에 무엇을 했는지 한국어로 두세 문장 요약해 주세요.",
         "",
         "[입력]",
     ]
@@ -753,45 +879,38 @@ def _stamp(msg):
     sys.stdout.flush()
 
 
-def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd, tick=None):
-    t = store.load(tid)
-    repo = (t.get("repo") or {}).get("path")
-    cwd = repo if repo and os.path.isdir(repo) else default_cwd
-    prompt = _watch_prompt(agent, tid, items)
-    tmpdir = tempfile.mkdtemp(prefix="devtrack-watch-")
-    last_msg = os.path.join(tmpdir, "last-message.txt")
-    if codex:
-        cmd = [codex, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd,
-               "--add-dir", store.root]
-        if store.publish_dir:
-            cmd += ["--add-dir", store.publish_dir]
-        if not args.no_network:  # 대화창이 없어 허락을 물을 수 없으므로 gh · git push 에 필요한 인터넷을 미리 허용
-            cmd += ["-c", "sandbox_workspace_write.network_access=true"]
-        cmd += ["-o", last_msg] + extra + [prompt]
-    else:
-        cmd = extra + [prompt]
-    # watch 를 실행한 쪽(예: Claude 대화)의 세션 ID 가 넘어가면 실행한 AI 의 작업이 그 세션 것으로 적힌다
-    env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}
-    env.update({"DEVTRACK_AGENT": agent, "DEVTRACK_DATA": store.root, "DEVTRACK_TASK": tid, "DEVTRACK_WATCH": "1"})
-    env["PATH"] = os.path.join(REPO_ROOT, "bin") + os.pathsep + env.get("PATH", "")
+def _pump(stream, path, echo):
+    """AI 의 출력을 한 줄씩 파일에 적으면서 echo 로 터미널에 보여 준다."""
+    with open(path, "wb") as out:
+        for raw in iter(stream.readline, b""):
+            out.write(raw)
+            out.flush()
+            try:
+                echo(raw)
+            except Exception:  # 보여 주기만 하는 부분 — 형식이 달라도 실행은 그대로
+                pass
+    stream.close()
 
-    _stamp("{} 실행 — {} {} (폴더: {})".format(agent, tid, t["title"], cwd))
-    print(_indent("\n".join(_format_inbox(items))))
-    sys.stdout.flush()
-    stopped = None
+
+def _run_ai(store, args, tid, cmd, cwd, env, stdout_path=None, tick=None, echo=None):
+    """AI 를 실행하고 끝나기를 기다린다. 사용자가 그사이 작업을 취소 · 삭제 · 완료 처리하면 멈춘다 → (종료 코드, 멈춘 이유).
+    stdout_path: AI 의 표준 출력을 적을 파일. echo 를 주면 출력을 한 줄씩 echo 에도 넘긴다."""
+    out = open(stdout_path, "wb") if stdout_path and not echo else None
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, start_new_session=True)
-    except OSError as e:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        _watch_log(store, tid, "{} 을(를) 실행하지 못했습니다".format(agent), kind="error", detail=str(e),
-                   author=agent)
-        _stamp("실행 실패: {}".format(e))
-        return None
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE if echo and stdout_path else out, start_new_session=True)
+    finally:
+        if out:
+            out.close()
+    reader = None
+    if echo and stdout_path:
+        reader = threading.Thread(target=_pump, args=(proc.stdout, stdout_path, echo))
+        reader.daemon = True
+        reader.start()
     try:
         while True:
             try:
-                rc = proc.wait(timeout=max(1, args.interval))
-                break
+                return proc.wait(timeout=max(1, args.interval)), None
             except subprocess.TimeoutExpired:
                 pass
             if tick:
@@ -799,19 +918,227 @@ def _watch_run(store, args, agent, tid, items, codex, extra, default_cwd, tick=N
             stopped = _stop_reason(store, tid)
             if stopped:
                 _terminate(proc)
-                rc = None
-                break
+                return None, stopped
     except KeyboardInterrupt:
         _terminate(proc)
-        shutil.rmtree(tmpdir, ignore_errors=True)
         raise
-    summary = ""
+    finally:
+        if reader:
+            reader.join(10)
+
+
+def _claude_result(path):
+    """claude -p --output-format json 의 결과 → (요약, 세션 ID, 오류 여부). JSON 이 아니면 출력 그대로를 요약으로."""
     try:
-        with open(last_msg, encoding="utf-8", errors="replace") as fh:
-            summary = fh.read().strip()
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read().strip()
+    except OSError:
+        return "", None, False
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text, None, False
+    if not isinstance(data, dict):
+        return text, None, False
+    return (data.get("result") or "").strip(), data.get("session_id"), bool(data.get("is_error"))
+
+
+def _codex_thread(path):
+    """codex exec --json 의 이벤트에서 대화 ID (thread.started 의 thread_id). 없으면 None."""
+    try:
+        with open(path, "rb") as fh:
+            for raw in fh:
+                if b"thread_id" not in raw and b"session_id" not in raw:
+                    continue
+                try:
+                    ev = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                tid = isinstance(ev, dict) and (ev.get("thread_id") or ev.get("session_id"))
+                if isinstance(tid, str) and tid:
+                    return tid
     except OSError:
         pass
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    return None
+
+
+def _codex_echo(raw):
+    """codex exec --json 의 이벤트를 사람이 읽는 줄로: AI 의 말과 실행한 명령, 오류만 보여 준다."""
+    line = raw.decode("utf-8", "replace").rstrip("\n")
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        ev = None
+    if not isinstance(ev, dict):
+        if line.strip():
+            print(_indent(line))
+        return
+    kind = ev.get("type")
+    item = ev.get("item") if isinstance(ev.get("item"), dict) else {}
+    text = None
+    if kind == "item.completed" and item.get("type") == "agent_message":
+        text = (item.get("text") or "").strip()
+    elif kind == "item.started" and item.get("type") == "command_execution":
+        cmd = re.sub(r"^\S*/(?:ba|z)?sh -lc ", "", str(item.get("command") or ""))
+        if len(cmd) > 1 and cmd[0] == cmd[-1] and cmd[0] in "'\"":
+            cmd = cmd[1:-1].replace('\\"', '"') if cmd[0] == '"' else cmd[1:-1]
+        text = "$ " + (cmd if len(cmd) <= 200 else cmd[:200] + "…")
+    elif kind in ("error", "turn.failed"):
+        err = ev.get("error") if isinstance(ev.get("error"), dict) else ev
+        text = "오류: {}".format(err.get("message") or line)
+    if text:
+        print(_indent(text))
+        sys.stdout.flush()
+
+
+# codex exec 에만 있고 exec resume 에는 없는 옵션 — -- 뒤에 이런 옵션을 적었으면 대화를 이어 가지 않는다
+CODEX_EXEC_ONLY = ("-s", "--sandbox", "-C", "--cd", "--add-dir", "--oss", "--local-provider", "-p", "--profile",
+                   "--profile-v2", "--color", "--full-auto")
+
+
+def _has_flag(extra, *names):
+    return any(a in names or any(a.startswith(n + "=") for n in names) for a in extra)
+
+
+def _watch_run(store, args, agent, tid, items, runner, extra, default_cwd, tick=None):
+    """runner: ("codex", 경로) · ("claude", 경로) · None(-- 뒤에 적은 명령). 작업에 모델 · 강도가 지정되어 있으면
+    codex · claude 는 그 모델로 실행하고, 직접 적은 명령에는 DEVTRACK_TASK_MODEL · DEVTRACK_TASK_EFFORT 로 알려 준다."""
+    t = store.load(tid)
+    repo = (t.get("repo") or {}).get("path")
+    cwd = repo if repo and os.path.isdir(repo) else default_cwd
+    want_model, want_effort = models.task_spec(t)
+    spec = models.spec_label(want_model, want_effort)
+    kind, exe = runner or (None, None)
+    prompt = _watch_prompt(agent, tid, items)
+    tmpdir = tempfile.mkdtemp(prefix="devtrack-watch-")
+    last_msg = os.path.join(tmpdir, "last-message.txt")
+    # watch 를 실행한 쪽(예: Claude 대화)의 세션 ID 가 넘어가면 실행한 AI 의 작업이 그 세션 것으로 적힌다
+    env = {k: v for k, v in os.environ.items()
+           if k not in SESSION_ENV + ("DEVTRACK_MODEL", "DEVTRACK_EFFORT", "CLAUDE_EFFORT")}
+    env.update({"DEVTRACK_AGENT": agent, "DEVTRACK_DATA": store.root, "DEVTRACK_TASK": tid, "DEVTRACK_WATCH": "1"})
+    env["PATH"] = os.path.join(REPO_ROOT, "bin") + os.pathsep + env.get("PATH", "")
+    if kind:  # 지정 모델로 실행한다 — 실행된 AI 의 devtrack 명령이 모델 확인에 쓴다
+        if want_model:
+            env["DEVTRACK_MODEL"] = want_model
+        if want_effort:
+            env["DEVTRACK_EFFORT"] = want_effort
+    else:
+        env["DEVTRACK_TASK_MODEL"] = want_model or ""
+        env["DEVTRACK_TASK_EFFORT"] = want_effort or ""
+
+    resume = None
+    events = os.path.join(tmpdir, "events.jsonl")
+    if kind == "codex":
+        # 같은 작업의 다음 입력은 같은 대화로 이어 간다 (codex exec resume). resume 은 --sandbox · -C · --add-dir 를
+        # 받지 않으므로 같은 설정을 -c 로 넘기고, 실행 폴더는 프로세스의 폴더(cwd)로 정한다
+        sess = store.runner_session(agent, tid)
+        if (sess and sess.get("cwd") == cwd and models.codex_transcript(sess["id"])
+                and not _has_flag(extra, *CODEX_EXEC_ONLY)):
+            resume = sess["id"]
+        roots = [store.root] + ([store.publish_dir] if store.publish_dir else [])
+
+        def codex_cmd(session):
+            if session:
+                # -c 의 writable_roots 는 config.toml 의 목록을 덮어쓰므로, 앞 차례에 쓰던 목록(config 의 폴더 + --add-dir)을 함께 넘긴다
+                sandbox = models.codex_turn_context(session).get("sandbox_policy")
+                prev = sandbox.get("writable_roots") if isinstance(sandbox, dict) else None
+                keep = list(roots) + [r for r in prev or [] if isinstance(r, str) and r and r not in roots]
+                c = [exe, "exec", "resume", "--json", "--skip-git-repo-check",
+                     "-c", 'sandbox_mode="workspace-write"',
+                     "-c", "sandbox_workspace_write.writable_roots=[{}]".format(", ".join(json.dumps(r) for r in keep))]
+            else:
+                c = [exe, "exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd]
+                for r in roots:
+                    c += ["--add-dir", r]
+            if not args.no_network:  # 대화창이 없어 허락을 물을 수 없으므로 gh · git push 에 필요한 인터넷을 미리 허용
+                c += ["-c", "sandbox_workspace_write.network_access=true"]
+            c += ["-o", last_msg] + extra
+            if want_model:
+                c += ["-m", want_model]
+            if want_effort:
+                c += ["-c", 'model_reasoning_effort="{}"'.format(want_effort)]
+            return c + ([session] if session else []) + [prompt]
+        session = resume
+        cmd = codex_cmd(session)
+    elif kind == "claude":
+        # 같은 작업의 다음 입력은 같은 대화로 이어 간다 (대화 기록이 그대로 있고 실행 폴더가 같을 때)
+        sess = store.runner_session(agent, tid)
+        if sess and sess.get("cwd") == cwd and models.claude_transcript(sess["id"]):
+            resume = sess["id"]
+
+        def claude_cmd(session, cont):
+            c = [exe, "-p", prompt, "--output-format", "json"]
+            c += ["--resume", session] if cont else ["--session-id", session]
+            if not _has_flag(extra, "--permission-mode", "--dangerously-skip-permissions"):
+                c += ["--permission-mode", "auto"]  # 대화창이 없어 허락을 물을 수 없다
+            c += extra
+            if want_model:
+                c += ["--model", want_model]
+            if want_effort:
+                c += ["--effort", want_effort]
+            c += ["--add-dir", store.root] + ([store.publish_dir] if store.publish_dir else [])
+            return c
+        session = resume or str(uuid.uuid4())
+        cmd = claude_cmd(session, bool(resume))
+    else:
+        cmd = extra + [prompt]
+
+    _stamp("{} 실행 — {} {} (폴더: {}{}{})".format(agent, tid, t["title"], cwd, " · 모델 " + spec if spec else "",
+                                               " · 이전 대화 이어 감" if resume else ""))
+    print(_indent("\n".join(_format_inbox(items))))
+    sys.stdout.flush()
+    summary = ""
+    try:
+        try:
+            out_path = last_msg if kind == "claude" else events if kind == "codex" else None
+            echo = _codex_echo if kind == "codex" else None
+            rc, stopped = _run_ai(store, args, tid, cmd, cwd, env, stdout_path=out_path, tick=tick, echo=echo)
+            if kind == "codex":
+                got = _codex_thread(events)
+                if resume and rc not in (0, None) and not got:
+                    # 이전 대화를 열지 못함 (기록이 지워졌거나 옮겨짐, resume 이 없는 옛 Codex) — 새 대화로 한 번 더
+                    _watch_log(store, tid, "이전 {} 대화를 이어 가지 못해 새 대화로 실행합니다".format(agent),
+                               kind="warning", author=agent)
+                    _stamp("이전 대화를 이어 가지 못해 새 대화로 실행합니다 — {}".format(tid))
+                    store.set_runner_session(agent, tid, None)
+                    resume = None
+                    cmd = codex_cmd(None)
+                    rc, stopped = _run_ai(store, args, tid, cmd, cwd, env, stdout_path=events, tick=tick, echo=echo)
+                    got = _codex_thread(events)
+                if got:
+                    store.set_runner_session(agent, tid, {"id": got, "cwd": cwd, "model": want_model,
+                                                          "effort": want_effort})
+                try:
+                    with open(last_msg, encoding="utf-8", errors="replace") as fh:
+                        summary = fh.read().strip()
+                except OSError:
+                    pass
+            elif kind == "claude":
+                summary, got, err = _claude_result(last_msg)
+                if resume and rc not in (0, None) and not got:
+                    # 이전 대화를 열지 못함 (기록이 지워졌거나 옮겨짐) — 새 대화로 한 번 더
+                    _watch_log(store, tid, "이전 {} 대화를 이어 가지 못해 새 대화로 실행합니다".format(agent),
+                               kind="warning", detail=summary[:2000] or None, author=agent)
+                    _stamp("이전 대화를 이어 가지 못해 새 대화로 실행합니다 — {}".format(tid))
+                    store.set_runner_session(agent, tid, None)
+                    resume, session = None, str(uuid.uuid4())
+                    cmd = claude_cmd(session, False)
+                    rc, stopped = _run_ai(store, args, tid, cmd, cwd, env, stdout_path=last_msg, tick=tick)
+                    summary, got, err = _claude_result(last_msg)
+                if rc == 0 and err:
+                    rc = 1
+                if got or models.claude_transcript(session):
+                    store.set_runner_session(agent, tid, {"id": got or session, "cwd": cwd, "model": want_model,
+                                                          "effort": want_effort})
+                if summary:
+                    print(_indent(summary))
+        except OSError as e:
+            _watch_log(store, tid, "{} 을(를) 실행하지 못했습니다".format(agent), kind="error", detail=str(e),
+                       author=agent)
+            _stamp("실행 실패: {}".format(e))
+            return None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     if stopped:
         # 취소 · 삭제 알림은 실행을 멈춘 것으로 처리됨
@@ -848,19 +1175,28 @@ _pid_alive = pid_alive
 
 
 def cmd_watch(store, args):
-    agent = (args.agent or ("Codex" if args.codex else args.author) or "").strip()
+    if args.codex and args.claude:
+        raise DevTrackError("--codex 와 --claude 는 함께 쓸 수 없습니다 — AI 마다 devtrack watch 를 하나씩 켜세요")
+    agent = (args.agent or ("Codex" if args.codex else "Claude" if args.claude else args.author) or "").strip()
     if is_unassigned(agent):
         raise DevTrackError("--agent 에 AI 이름을 지정하세요 (예: --agent Codex)")
     extra = list(args.command or [])
     if extra and extra[0] == "--":
         extra = extra[1:]
-    codex = None
+    runner = None
     if args.codex:
         codex, ver = find_codex()
+        runner = ("codex", codex)
         _info("Codex CLI: {} ({}) · 인터넷 {}".format(codex, ".".join(map(str, ver)) if ver else "버전 확인 안 됨",
                                                     "차단 (--no-network)" if args.no_network else "허용"))
-    if not codex and not extra:
-        raise DevTrackError("실행할 AI 를 지정하세요: devtrack watch --codex   또는   "
+    elif args.claude:
+        claude = find_claude()
+        runner = ("claude", claude)
+        _info("Claude Code CLI: {} · 권한 모드 {}".format(
+            claude, "-- 뒤에 지정한 대로" if _has_flag(extra, "--permission-mode", "--dangerously-skip-permissions")
+            else "auto (바꾸려면 -- --permission-mode <모드>)"))
+    if not runner and not extra:
+        raise DevTrackError("실행할 AI 를 지정하세요: devtrack watch --claude   ·   devtrack watch --codex   또는   "
                             "devtrack watch --agent 이름 -- 명령 [인자…]")
     default_cwd = os.path.abspath(os.path.expanduser(args.cwd)) if args.cwd else os.getcwd()
     if not os.path.isdir(default_cwd):
@@ -883,9 +1219,17 @@ def cmd_watch(store, args):
     # 켤 때마다 처음부터: 꺼져 있던 동안 쌓인 입력과, 지난번에 실패해 처리되지 않은 입력을 다시 처리한다
     store.mark_inbox_seen(seen_name, [])
     _info("devtrack watch — {} 에게 온 입력(새 작업 지시 · 메시지 · 결정)을 기다렸다가 {} 로 처리합니다".format(
-        agent, "codex exec" if codex else extra[0]))
+        agent, {"codex": "codex exec", "claude": "claude -p"}.get(runner and runner[0]) or extra[0]))
     _info("데이터: {} · 저장소 경로가 없는 작업의 실행 폴더: {} · 멈추기: Ctrl+C".format(store.root, default_cwd))
-    listening = _Listening(store, "watch", agent, seen=seen_name).__enter__()
+    if runner:
+        _info("모델 · 추론 강도가 지정된 작업은 그 모델로 실행합니다{}".format(
+            "" if runner[0] == "codex" and _has_flag(extra, *CODEX_EXEC_ONLY)
+            else " · 같은 작업의 다음 입력은 같은 대화로 이어 갑니다"))
+    else:
+        _info("작업에 지정된 모델 · 강도는 DEVTRACK_TASK_MODEL · DEVTRACK_TASK_EFFORT 로 명령에 전달합니다 "
+              "(명령이 그 값을 써야 지정 모델로 실행됩니다)")
+    # 실행기가 작업마다 지정 모델로 띄우면 어떤 지정이든 받는다 ('*')
+    listening = _Listening(store, "watch", agent, seen=seen_name, model="*" if runner else None).__enter__()
     try:
         while True:
             new = _wait_for_new(store, agent, seen_name, timeout=args.timeout, interval=args.interval,
@@ -908,7 +1252,7 @@ def cmd_watch(store, args):
                 if pending:
                     listening.set("running", tid)
                     try:
-                        _watch_run(store, args, agent, tid, pending, codex, extra, default_cwd, tick=listening.tick)
+                        _watch_run(store, args, agent, tid, pending, runner, extra, default_cwd, tick=listening.tick)
                     finally:
                         listening.set("waiting")
             if args.once:
@@ -975,6 +1319,9 @@ def cmd_show(store, args):
     print("{}  {}".format(t["id"], t["title"]))
     print("  {} · {} · {}% · 에이전트 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
                                              t.get("progress", 0), t.get("agent")))
+    spec = models.spec_label(*models.task_spec(t))
+    if spec:
+        print("  모델: {} (이 모델의 세션 · devtrack watch 만 처리)".format(spec))
     if repo:
         print("  저장소: {}{}".format(repo.get("path") or repo.get("url"),
                                     " ({})".format(repo["branch"]) if repo.get("branch") else ""))
@@ -1105,12 +1452,26 @@ def build_parser():
     sp.add_argument("--priority", default="normal", choices=PRIORITIES)
     sp.add_argument("--plan", nargs="+", metavar="STEP", help="초기 작업 계획 단계들")
     sp.add_argument("--related", nargs="+", metavar="T-ID", help="관련 작업 (예: 이 분석을 사용할 논문 작업)")
+    sp.add_argument("--model", help="이 작업을 처리할 AI 모델 (예: claude-opus-5-5, opus-5.5, gpt-6-sol) — "
+                                    "devtrack watch 는 이 모델로 실행하고, 다른 모델의 대화는 받지 않음")
+    sp.add_argument("--effort", help="추론 강도: " + ", ".join(models.EFFORTS) + " (xhigh = Extra high)")
     sp.add_argument("--queued", action="store_true", help="사용자 지시로 '대기' 상태 생성")
 
     sp = add("start", cmd_start, "대기 중인 작업을 진행 중으로 전환 (다른 AI 에게 배정된 작업은 --take 로만)")
     sp.add_argument("task")
     sp.add_argument("step", nargs="?", help="시작하며 기록할 현재 단계")
     sp.add_argument("--take", action="store_true", help="다른 AI 에게 배정된 작업이라도 내가 맡기 (담당 AI 변경)")
+    sp.add_argument("--any-model", action="store_true",
+                    help="작업에 지정된 모델 · 강도와 이 세션이 달라도 시작 (사용자가 그렇게 하라고 한 경우만)")
+
+    sp = add("model", cmd_model, "작업을 처리할 AI 모델 · 추론 강도 보기 / 정하기 (예: devtrack model T-0003 opus-5.5 --effort xhigh), "
+                                 "고를 수 있는 모델은 --list")
+    sp.add_argument("task", nargs="?")
+    sp.add_argument("model", nargs="?", help="모델 (예: claude-opus-5-5, opus-5.5, sonnet, gpt-6-sol). 생략하면 강도만 바꾸거나 지금 지정을 보여 줌")
+    sp.add_argument("--effort", help="추론 강도: " + ", ".join(models.EFFORTS) + " (모델마다 받는 값이 다름 — --list)")
+    sp.add_argument("--list", action="store_true", help="고를 수 있는 모델 · 강도 목록 (Claude + 이 컴퓨터의 Codex 가 받아 둔 목록)")
+    sp.add_argument("--clear", action="store_true", help="지정 해제 — 어떤 모델이든 처리")
+    sp.add_argument("--by-user", action="store_true", help="사용자가 정한 것으로 기록 (웹에서 보낸 지정을 대신 기록할 때)")
 
     sp = add("step", cmd_step, "현재 진행 단계 기록 (지금 무엇을 하는지)")
     sp.add_argument("task")
@@ -1260,12 +1621,19 @@ def build_parser():
     sp.add_argument("--interval", type=int, default=3, help="--wait 확인 간격 초")
     sp.add_argument("--task", metavar="T-ID", help="이 작업의 입력만, 담당 AI 와 상관없이 (기본: $DEVTRACK_TASK)")
     sp.add_argument("--all-agents", action="store_true", help="다른 AI 에게 배정된 작업의 입력까지 모두 보기")
+    sp.add_argument("--any-model", action="store_true",
+                    help="모델 · 강도 지정이 이 세션과 다른 작업의 입력도 보기 (기본은 따로 알리고 처리하지 않음)")
 
     add("hook", cmd_hook, "AI 도구 실행 전 확인 (Claude Code · Codex 의 PreToolUse 훅) — 하던 작업을 사용자가 "
                           "취소 · 삭제했으면 멈추게 한다. 훅 입력(JSON)을 표준입력으로 받는다")
 
-    sp = add("watch", cmd_watch, "AI 실행기 — 웹에서 온 입력(새 작업 · 메시지 · 결정)마다 AI 를 실행해 처리 (예: Codex)")
-    sp.add_argument("--codex", action="store_true", help="Codex 로 처리 (codex exec 실행, 담당 AI 이름 Codex)")
+    sp = add("watch", cmd_watch, "AI 실행기 — 웹에서 온 입력(새 작업 · 메시지 · 결정)마다 AI 를 실행해 처리 (예: Claude · Codex)")
+    sp.add_argument("--claude", action="store_true",
+                    help="Claude Code 로 처리 (claude -p 실행, 담당 AI 이름 Claude) — 작업에 지정된 모델 · 강도로 실행하고, "
+                         "같은 작업의 다음 입력은 같은 대화로 이어 감")
+    sp.add_argument("--codex", action="store_true",
+                    help="Codex 로 처리 (codex exec 실행, 담당 AI 이름 Codex) — 작업에 지정된 모델 · 강도로 실행하고, "
+                         "같은 작업의 다음 입력은 같은 대화로 이어 감 (codex exec resume)")
     sp.add_argument("--agent", help="담당 AI 이름 — 이 AI 에게 배정된 작업만 처리 (기본: --codex 면 Codex, 아니면 $DEVTRACK_AGENT)")
     sp.add_argument("--cwd", metavar="DIR", help="저장소 경로가 없는 작업을 실행할 폴더 (기본: 현재 폴더)")
     sp.add_argument("--no-network", action="store_true",
@@ -1274,7 +1642,8 @@ def build_parser():
     sp.add_argument("--timeout", type=int, default=0, help="새 입력을 기다리는 최대 초 (0 = 무제한, 시간 초과 시 exit 3)")
     sp.add_argument("--interval", type=int, default=3, help="확인 간격 초")
     sp.add_argument("command", nargs=argparse.REMAINDER, metavar="-- 명령",
-                    help="실행할 AI 명령 (프롬프트를 마지막 인자로 붙여 실행). --codex 와 함께 쓰면 codex exec 에 더할 옵션")
+                    help="실행할 AI 명령 (프롬프트를 마지막 인자로 붙여 실행). --claude · --codex 와 함께 쓰면 "
+                         "claude -p · codex exec 에 더할 옵션")
 
     sp = add("cancel", cmd_cancel, "작업 취소 (기록은 남김, 대기 중인 승인 요청은 철회)")
     sp.add_argument("task")

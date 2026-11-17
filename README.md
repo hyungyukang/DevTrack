@@ -53,6 +53,19 @@ In the demo data, for example:
 - **Paper → document review:** `T-0010` reviews the manuscript before submission. It is linked to the paper, so the review and the
   writing stay side by side.
 
+## The right model for each task
+
+Each task can name the AI model and effort that should handle it: say **Opus 5.5 · Extra high** for a hard port and **Sonnet 5.5**
+for a quick cleanup. Set it in the **Model** and **Effort** fields on **New task**, or with `devtrack new … --model claude-opus-5-5 --effort xhigh`.
+Change it later from the task page or with `devtrack model T-0006 sonnet-5.5`.
+The list holds the Claude models and the Codex models this computer's Codex has fetched, and each model offers only the effort levels it
+takes (`devtrack model --list` shows them). Any other model name can be typed in.
+
+- **The runner keeps to it:** `devtrack watch --claude` (or `--codex`) starts the AI with each task's own model and effort every time it runs
+  that task. Later messages and decisions on the task continue the same conversation, for Claude and Codex alike.
+- **A chat in wait mode skips the tasks that are not its own:** a running chat can't switch its own model, so it leaves tasks set to
+  another model or effort alone, and the task page says why and what to do. The demo task `T-0006` is set to Opus 5.5 · Extra high.
+
 ## What is in this repository
 
 | Component | Description |
@@ -89,6 +102,7 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Dashboard** — counts of in progress / awaiting approval / open issues / done, the items that need attention, cards for tasks in progress, recent activity
 - **Task details** — instruction, current step and progress, plan checklist, progress log timeline, issues, artifacts, approval requests.
   At the top right: **Mark as done** (moves an unfinished task to done, with an optional note) · **Cancel task** · **Delete**.
+  Next to the assigned AI, the model and effort set for the task (click to change).
   For a task not started yet, it shows whether the assigned AI is waiting for web instructions right now (wait mode · `devtrack watch`) and, if not, how to wake it (local server mode)
 - **Approvals** — open the commit diff or the report, then **Approve / Request changes / Reject** with a comment
 - **Code development** — a card per code development task (type `code`) with the target repository · branch and what the agent is working on, the commits made (commit · push records after approval, with GitHub links), code · diff artifacts. The `Awaiting approval` filter shows only tasks that need your check
@@ -103,7 +117,7 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Artifacts** — Markdown, PDF, images/SVG, diff, code/LaTeX (highlighted), CSV tables, Jupyter notebooks, HTML.
   On the Artifacts page and a task's Artifacts tab, the button at the top right switches between **cards** and a **list** (full titles, one per row)
 - **Activity** — the records of all tasks, by date
-- **New task** — create a task with a title, type, repository and instruction
+- **New task** — create a task with a title, type, assigned AI, model and effort, repository and instruction
 - **Guide** — a step-by-step manual for first-time users (install → set up Claude → give a task → approve → use by field → HPC). Source: [web/guide.en.md](web/guide.en.md), Korean: [web/guide.md](web/guide.md)
 - **Notifications** — the bell at the top (number awaiting approval), pop-ups for new approval requests / issues / completions, and desktop notifications if you turn them on. Refreshes every 10 seconds
 - **Display language** — the page opens in English. The `한` / `EN` button at the top switches the page frame (menus, headings, buttons, status labels) between English and Korean,
@@ -148,6 +162,7 @@ devtrack inbox                              # new instructions · messages · de
 | `step` / `status` / `log` | Current step / change status · progress / add a log entry |
 | `plan` / `check` | Set the plan / mark a step done |
 | `link` | Link tasks (e.g. data analysis → paper). `new --related T-ID` links them when the task is created |
+| `model` | Show or set the AI model and effort for a task (`devtrack model T-0006 opus-5.5 --effort xhigh`, `--clear`, `--list` for the models and levels). `new --model --effort` sets it when the task is created |
 | `issue` / `resolve` | Record an issue / resolve it |
 | `artifact` / `review` | Attach an artifact (file, `--url`, `--git-diff`, `--source` = the original under review in a document review) / register a code or document review report: `--findings` records the findings (R1, R2…) (plus `doc` · `checks` · `strengths` for document reviews), `--pdf` also makes and attaches a PDF. Uploading under the same name replaces it with a new version (earlier versions are kept; `artifact --replace` does the same) |
 | `text` | Extract a document's text — Word (`.docx`) → Markdown (standard library), PDF → text (when `pdftotext` is installed). The AI uses it to read the original in a document review |
@@ -157,7 +172,7 @@ devtrack inbox                              # new instructions · messages · de
 | `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (in static mode the agent records them for the user) |
 | `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task) |
 | `hook` | PreToolUse hook for Claude Code · Codex: if the user marked the session's task as done, cancelled or deleted it, the next tool call is blocked so the agent stops. Always hook up `bin/devtrack-hook`, which always exits 0 (setup: Guide 5-4 and step 11 ⑤) |
-| `watch` | AI runner: runs the AI for each input sent to it from the web (`--codex` = `codex exec`, or `-- command`), for AIs without a wait mode such as Codex |
+| `watch` | AI runner: runs the AI for each input sent to it from the web (`--claude` = `claude -p`, `--codex` = `codex exec`, or `-- command`). With `--claude` · `--codex`, each task runs with its own model and effort, and the same task continues the same conversation. For AIs without a wait mode, such as Codex, and for keeping each task on its model |
 | `show` / `list` | Task details / task list |
 | `serve` / `publish` / `demo` | Local server / static publish / example data |
 

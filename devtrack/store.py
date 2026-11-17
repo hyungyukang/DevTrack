@@ -26,7 +26,7 @@ try:
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
-from . import DevTrackError, gitops
+from . import DevTrackError, gitops, models
 
 # 데모 데이터 생성 시 시간을 조작하기 위한 훅 (callable -> datetime)
 _clock = None
@@ -480,13 +480,15 @@ class Store:
     # ------------------------------------------------------------------ 작업
     def create_task(self, title, instruction="", type="code", agent="Claude", repo=None, branch=None,
                     repo_url=None, tags=None, priority="normal", status="in_progress", created_by=None,
-                    plan=None, related=None):
+                    plan=None, related=None, model=None, effort=None):
         if type not in TASK_TYPES:
             raise DevTrackError("알 수 없는 작업 유형: {} ({})".format(type, ", ".join(TASK_TYPES)))
         if status not in STATUSES:
             raise DevTrackError("알 수 없는 상태: {}".format(status))
         if priority not in PRIORITIES:
             raise DevTrackError("우선순위는 {} 중 하나여야 합니다".format(", ".join(PRIORITIES)))
+        model, effort = models.normalize_model(model), models.normalize_effort(effort)
+        models.check_effort(agent, model, effort)
         repo_info = {}
         if repo:
             repo_info["path"] = os.path.abspath(os.path.expanduser(repo))
@@ -518,6 +520,8 @@ class Store:
                 "plan": [{"text": p, "done": False} for p in (plan or [])],
                 "tags": list(tags or []),
                 "related": related,
+                "model": model,  # 이 작업을 처리할 AI 모델 · 추론 강도 (None = 어떤 모델이든)
+                "effort": effort,
                 "created_by": created_by or agent or "Claude",
                 "created_at": ts,
                 "updated_at": ts,
@@ -613,6 +617,20 @@ class Store:
                 self._log(t, step, kind="step", author=author, meta={"progress": t.get("progress")})
             if message:
                 self._log(t, message, kind=kind, author=author)
+            return t
+
+    def set_model(self, tid, model=None, effort=None, author=None):
+        """작업을 처리할 AI 모델 · 추론 강도를 정한다 (둘 다 None 이면 지정 해제). 바뀐 경우만 기록한다."""
+        model, effort = models.normalize_model(model), models.normalize_effort(effort)
+        with self.edit(tid) as t:
+            old = models.task_spec(t)
+            models.check_effort(t.get("agent"), model, effort)
+            if old != (model, effort):
+                t["model"], t["effort"] = model, effort
+                label = models.spec_label(model, effort)
+                self._log(t, "모델 지정: " + label if label else "모델 지정 해제 — 어떤 모델이든 처리", kind="info",
+                          author=author, meta={"model": model, "effort": effort,
+                                               "from": {"model": old[0], "effort": old[1]}})
             return t
 
     def _claim(self, t, agent, take=False):
@@ -1238,7 +1256,8 @@ class Store:
         for t in self.all_tasks():
             if (task and t["id"] != task) or not agent_matches(t.get("agent"), agent):
                 continue
-            base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent")}
+            base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent"),
+                    "model": t.get("model"), "effort": t.get("effort")}
             c = t.get("cancelled") or {}
             if t["status"] == "cancelled" and c.get("agent_ack") is False:
                 items.append(dict(base, type="cancelled", reason=c.get("reason", ""), ts=c.get("at")))
@@ -1385,6 +1404,35 @@ class Store:
                         "at": d.get("at")}
         return None
 
+    # ------------------------------------------------------------------ devtrack watch 가 작업별로 이어 가는 AI 세션
+    # 같은 작업의 다음 입력(메시지 · 결정)을 같은 대화로 이어 가도록 실행기가 세션 ID 를 적어 둔다 (점 디렉토리 — 배포 안 됨)
+    def _runner_path(self, agent):
+        return os.path.join(self.root, ".agent", "watch-sessions-{}.json".format(_safe_name(agent or "agent")))
+
+    def _runner_sessions(self, agent):
+        try:
+            with open(self._runner_path(agent), encoding="utf-8") as fh:
+                data = json.load(fh).get("tasks", {})
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def runner_session(self, agent, tid):
+        info = self._runner_sessions(agent).get(normalize_task_id(tid))
+        return info if isinstance(info, dict) and info.get("id") else None
+
+    def set_runner_session(self, agent, tid, info):
+        """info 가 None 이면 지운다. 지운 작업(.deleted)의 기록은 이때 함께 정리한다."""
+        tid = normalize_task_id(tid)
+        with self.locked():
+            data = self._runner_sessions(agent)
+            if info:
+                data[tid] = dict(info, updated_at=now())
+            else:
+                data.pop(tid, None)
+            data = {k: v for k, v in data.items() if os.path.exists(os.path.join(self.tasks_dir, k, "task.json"))}
+            self._write_json(self._runner_path(agent), {"agent": agent, "tasks": data})
+
     # ------------------------------------------------------------------ 웹 입력을 기다리는 AI (inbox --wait · watch)
     # 기다리는 프로세스가 .agent/listeners/ 에 기록을 남기고 주기적으로 갱신한다. 웹(로컬 서버)은 이것으로
     # "지금 이 AI 가 웹 지시를 기다리는지"를 보여 준다. 점(.) 디렉토리라 배포 · 웹 서버에는 나가지 않는다.
@@ -1394,12 +1442,15 @@ class Store:
         return os.path.join(self.root, ".agent", "listeners",
                             "{}-{}-{}.json".format(kind, _safe_name(agent or "all"), pid))
 
-    def touch_listener(self, kind, agent, task=None, started_at=None, state="waiting", running=None, seen=None):
+    def touch_listener(self, kind, agent, task=None, started_at=None, state="waiting", running=None, seen=None,
+                       model=None, effort=None):
         """이 프로세스가 웹 입력을 기다린다고 적어 둔다 (kind: wait | watch, agent: 빈 값이면 모든 AI).
         state 는 waiting, 또는 watch 가 AI 를 실행하는 동안 running (running = 그 작업 ID).
-        seen 은 이 프로세스가 '이미 본 입력' 기록 이름 — 본 입력으로는 다시 깨어나지 않으므로 웹이 구분한다."""
+        seen 은 이 프로세스가 '이미 본 입력' 기록 이름 — 본 입력으로는 다시 깨어나지 않으므로 웹이 구분한다.
+        model · effort: 대기 중인 대화의 모델 · 강도 (모르면 None). 실행기가 작업마다 지정 모델로 띄우면 model 이 '*'."""
         data = {"kind": kind, "agent": agent or "", "pid": os.getpid(), "host": socket.gethostname(),
                 "task": task or None, "state": state, "running": running, "seen": seen,
+                "model": model or None, "effort": effort or None,
                 "started_at": started_at or now(), "updated_at": now()}
         self._write_json(self._listener_path(kind, agent, os.getpid()), data)
         return data
@@ -1441,8 +1492,8 @@ class Store:
                 except OSError:
                     pass
                 continue
-            item = {k: data.get(k) for k in ("kind", "agent", "task", "state", "running", "started_at",
-                                              "updated_at")}
+            item = {k: data.get(k) for k in ("kind", "agent", "task", "state", "running", "model", "effort",
+                                              "started_at", "updated_at")}
             # 이미 본 새 작업 지시: 이 프로세스는 이 지시로는 다시 깨어나지 않는다 (예: 실행했지만 시작하지 못한 작업)
             seen = self.inbox_seen(data["seen"]) if data.get("seen") else set()
             item["seen_tasks"] = sorted(k.split(":", 1)[1] for k in seen if k.startswith("task:"))
@@ -1478,6 +1529,7 @@ class Store:
                 "priority": t.get("priority", "normal"), "agent": t.get("agent"),
                 "progress": t.get("progress", 0), "current_step": t.get("current_step", ""),
                 "repo": t.get("repo") or {}, "tags": t.get("tags") or [], "related": t.get("related") or [],
+                "model": t.get("model"), "effort": t.get("effort"),
                 "created_at": t["created_at"], "updated_at": t["updated_at"],
                 "completed_at": t.get("completed_at"),
                 "plan_total": len(plan), "plan_done": sum(1 for p in plan if p.get("done")),
@@ -1525,6 +1577,7 @@ class Store:
             "activity": activity[:300],
             "reviews": reviews,
             "artifacts": artifacts,
+            "models": models.catalog(),  # 웹의 모델 선택 목록 (Codex 는 이 컴퓨터의 Codex 가 받아 둔 목록)
         }
         os.makedirs(self.root, exist_ok=True)
         self._write_json(self.index_path, index)

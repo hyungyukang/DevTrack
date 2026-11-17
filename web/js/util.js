@@ -74,6 +74,7 @@ const ICONS = {
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>',
   slash: '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>',
+  sliders: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
 };
 export const icon = (name, cls = '') =>
@@ -254,6 +255,97 @@ export const isUnassigned = (a) => UNASSIGNED_AGENTS.includes(String(a ?? '').tr
 export const aiName = (t) => (isUnassigned(t?.agent) ? 'AI' : t.agent);
 /** 목록 · 머리글에 보여 줄 담당 AI */
 export const agentLabel = (t) => (isUnassigned(t?.agent) ? L('담당 미정') : t.agent);
+
+// ---------------------------------------------------------------- 작업별 AI 모델 · 추론 강도 (devtrack/models.py 와 같은 규칙)
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // claude --effort
+const CODEX_ALL = [...CLAUDE_EFFORTS, 'ultra'];
+const CODEX_NO_ULTRA = CLAUDE_EFFORTS;
+/** 모델 선택 목록. index.json 의 models (devtrack/models.py 의 catalog() — Codex 는 그 컴퓨터의 Codex 가 받아 둔 목록)를 받으면
+ *  setModelCatalog 로 바꾼다. 아래는 index.json 에 목록이 없을 때 쓰는 기본값 */
+export const MODELS = {
+  claude: [['claude-fable-5-2', 'Fable 5.2'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'],
+    ['claude-haiku-5-5', 'Haiku 5.5']].map(([id, label]) => ({ id, label, efforts: CLAUDE_EFFORTS })),
+  codex: [['gpt-6.1-sol', 'GPT-6.1-Sol', CODEX_ALL], ['gpt-6-astra', 'GPT-6-Astra', CODEX_ALL], ['gpt-6.1-terra', 'GPT-6.1 Terra', CODEX_ALL],
+    ['gpt-6-sol', 'GPT-6-Sol', CODEX_ALL], ['gpt-6-luna', 'GPT-6-Luna', CODEX_NO_ULTRA], ['gpt-5.6-sol', 'GPT-5.6-Sol', CODEX_ALL],
+    ['gpt-5.6-terra', 'GPT-5.6-Terra', CODEX_ALL], ['gpt-5.6-luna', 'GPT-5.6-Luna', CODEX_NO_ULTRA]].map(([id, label, efforts]) => ({ id, label, efforts })),
+};
+export function setModelCatalog(cat) {
+  const clean = (list) => (Array.isArray(list) ? list : [])
+    .filter((m) => m && typeof m.id === 'string' && m.id)
+    .map((m) => ({ id: m.id, label: String(m.label || m.id), efforts: (Array.isArray(m.efforts) ? m.efforts : []).filter((e) => /^[a-z]{1,16}$/.test(e)) }));
+  for (const key of ['claude', 'codex']) {
+    const list = clean(cat?.[key]);
+    if (list.length) MODELS[key] = list;
+  }
+}
+const CLAUDE_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku'];
+// Claude Code: low – max, Codex: low – ultra (예전 Codex 모델은 minimal 도 받는다). 설정 이름 그대로 보여 준다
+const EFFORT_NAMES = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
+const knownEfforts = () => {
+  const all = Object.keys(EFFORT_NAMES);
+  for (const m of MODELS.codex) for (const e of m.efforts) if (!all.includes(e)) all.push(e);
+  return all;
+};
+export const effortLabel = (e) => EFFORT_NAMES[e] || (e ? e.charAt(0).toUpperCase() + e.slice(1) : '');
+const isClaudeModel = (m) => CLAUDE_FAMILIES.includes(m) || m.startsWith('claude-');
+/** 이 모델 · 담당 AI 가 받는 추론 강도 [[값, 이름]] (models.allowed_efforts 와 같은 규칙):
+ *  Claude 모델 · Claude 담당은 claude --effort 의 값, 목록에 있는 Codex 모델은 그 모델이 받는 값,
+ *  모델을 모르는 Codex 담당은 Codex 목록의 값 + minimal, 그 밖에는 모든 값 */
+export function effortsFor(agent, model) {
+  const m = String(model ?? '').trim().toLowerCase();
+  const a = String(agent ?? '').trim().toLowerCase();
+  let list = null;
+  if (m && isClaudeModel(m)) list = CLAUDE_EFFORTS;
+  else if (m) list = MODELS.codex.find((x) => x.id.toLowerCase() === m && x.efforts.length)?.efforts || null;
+  if (!list && a === 'claude') list = CLAUDE_EFFORTS;
+  if (!list && a === 'codex') {
+    const union = new Set(['minimal', ...MODELS.codex.flatMap((x) => x.efforts)]);
+    list = knownEfforts().filter((e) => union.has(e));
+  }
+  return (list || knownEfforts()).map((e) => [e, effortLabel(e)]);
+}
+
+const squash = (v) => String(v ?? '').toLowerCase().replace(/[\s_-]+/g, '');
+/** 'Opus 5.5' · 'opus-5.5' → claude-opus-5-5, 'opus' 는 그대로 (최신 Opus 별칭), Codex 목록의 표시 이름 'GPT-6.1 Terra' → gpt-6.1-terra,
+ *  다른 이름은 그대로. 지정 없음이면 '' */
+export function normalizeModel(name) {
+  const s = String(name ?? '').trim();
+  if (['', '-', 'none', 'default', 'any', '*'].includes(s.toLowerCase())) return '';
+  const m = /^(?:claude[\s_-]*)?(fable|opus|sonnet|haiku)(?:[\s_-]*(\d+)(?:[\s._-]+(\d+))?)?(.*)$/.exec(s.toLowerCase());
+  if (m && (m[2] || !m[4])) return m[2] ? `claude-${m[1]}-${m[2]}${m[3] ? '-' + m[3] : ''}${m[4]}` : m[1];
+  const key = squash(s);
+  const codex = MODELS.codex.find((x) => squash(x.id) === key || squash(x.label) === key);
+  return codex ? codex.id : s;
+}
+export const modelLabel = (m) => {
+  const low = String(m ?? '').toLowerCase();
+  const hit = MODELS.claude.find((x) => x.id === m) || (!isClaudeModel(low) && MODELS.codex.find((x) => x.id.toLowerCase() === low));
+  return hit ? hit.label : m || '';
+};
+/** 'Opus 5.5 · Extra high' (지정 없으면 '') */
+export const specLabel = (model, effort) => [model ? modelLabel(model) : '', effort ? effortLabel(effort) : ''].filter(Boolean).join(' · ');
+
+/** 지정한 모델과 세션 모델이 맞는지 — true / false, 세션 모델을 모르면 null */
+export function modelMatches(want, have) {
+  if (!want) return true;
+  if (!have) return null;
+  const w = normalizeModel(want).toLowerCase();
+  const h = normalizeModel(have).toLowerCase();
+  if (w === h) return true;
+  if (h.startsWith(w) && ['-', '['].includes(h.charAt(w.length))) return true;
+  if (CLAUDE_FAMILIES.includes(w)) return new RegExp(`^claude-${w}(-|\\[|$)`).test(h);
+  return false;
+}
+/** 작업(t.model · t.effort)과 기다리는 AI(l.model · l.effort)가 맞는지 — true / false / null(모름). l.model '*' = 작업마다 지정 모델로 실행 */
+export function specMatches(t, l) {
+  if (!t?.model && !t?.effort) return true;
+  if (l?.model === '*') return true;
+  const r = [];
+  if (t.model) r.push(modelMatches(t.model, l?.model));
+  if (t.effort) r.push(l?.effort ? l.effort === t.effort : null);
+  if (r.includes(false)) return false;
+  return r.includes(null) ? null : true;
+}
 
 export function shellQuote(s) {
   s = String(s ?? '');

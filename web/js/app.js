@@ -2,7 +2,7 @@
 import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
   FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, DOC_KIND, CHECK_RATING, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
-  isUnassigned, aiName, agentLabel,
+  isUnassigned, aiName, agentLabel, MODELS, setModelCatalog, effortsFor, effortLabel, normalizeModel, specLabel, specMatches,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 import { L, translated, translatedStrings, getLang, setLang, applyStatic, locale } from './i18n.js';
@@ -216,7 +216,7 @@ async function refreshListeners() {
       if (r.ok) next = (await r.json()).listeners || [];
     } catch { /* 서버 연결 끊김 */ }
   }
-  const key = (ls) => (ls ? JSON.stringify(ls.map((l) => [l.kind, l.agent, l.task, l.state, l.running, l.seen_tasks])) : 'null');
+  const key = (ls) => (ls ? JSON.stringify(ls.map((l) => [l.kind, l.agent, l.task, l.state, l.running, l.model, l.effort, l.seen_tasks])) : 'null');
   const changed = key(next) !== key(state.listeners);
   state.listeners = next;
   return changed;
@@ -224,16 +224,23 @@ async function refreshListeners() {
 
 const sameAgent = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 
-/** 이 작업을 가져갈 수 있는, 지금 기다리는 AI 목록 (null = 알 수 없음) */
+/** 이 작업의 담당 AI 로 지금 기다리는 AI (모델은 따지지 않음) */
+const agentListeners = (t) => state.listeners.filter((l) => (!l.task || l.task === t.id)
+  && (isUnassigned(t.agent) || !l.agent || sameAgent(l.agent, t.agent)));
+
+/** 이 작업을 가져갈 수 있는, 지금 기다리는 AI 목록 (null = 알 수 없음). 작업에 모델 · 강도가 지정되어 있으면
+ *  다른 모델로 기다리는 대화는 빠진다 (모델을 모르는 대화 · 작업마다 지정 모델로 띄우는 실행기는 포함) */
 function listenersFor(t) {
   if (!state.listeners) return null;
-  return state.listeners.filter((l) => (!l.task || l.task === t.id)
-    && (isUnassigned(t.agent) || !l.agent || sameAgent(l.agent, t.agent)));
+  return agentListeners(t).filter((l) => specMatches(t, l) !== false);
 }
+/** 담당 AI 는 맞지만 모델 · 강도가 달라 이 작업을 받지 않는, 기다리는 대화 */
+const listenersOtherModel = (t) => (state.listeners ? agentListeners(t).filter((l) => specMatches(t, l) === false) : []);
 
 function listenerText(l) {
   const how = l.kind === 'watch' ? L('실행기') : L('대기 모드');
-  return `${l.agent || L('모든 AI')} (${how}${l.state === 'running' && l.running ? L(', {id} 처리 중', { id: l.running }) : ''})`;
+  const model = l.model === '*' ? L('지정 모델로 실행') : specLabel(l.model, l.effort);
+  return `${l.agent || L('모든 AI')} (${how}${model ? ` · ${model}` : ''}${l.state === 'running' && l.running ? L(', {id} 처리 중', { id: l.running }) : ''})`;
 }
 const listenersText = (ls) => ls.map(listenerText).join(', ');
 
@@ -247,8 +254,10 @@ function wakeHow(t) {
     — ${LH('대기 모드를 켜면 앞으로 웹 지시를 바로 받습니다. 한 번만 하려면 <b>"devtrack inbox 확인하고 진행해줘"</b>')}</li>`;
   const watch = (name, cmd) => html`<li>${name ? `${name}: ` : ''}${L('터미널에서 실행기를 켜 두세요')} — <code>${cmd}</code> ${copyBtn(cmd)}
     (<a href="#/guide/s11">${L('사용 방법 11단계')}</a>)</li>`;
-  if (any) return html`<ul class="how">${claude}${watch('Codex', 'devtrack watch --codex')}</ul>`;
-  if (sameAgent(a, 'Claude')) return html`<ul class="how">${claude}</ul>`;
+  // 모델이 지정된 작업은 실행기가 그 모델로 띄우므로 Claude 에도 실행기를 먼저 안내한다
+  const pinned = !!(t.model || t.effort);
+  if (any) return html`<ul class="how">${claude}${watch('Claude', 'devtrack watch --claude')}${watch('Codex', 'devtrack watch --codex')}</ul>`;
+  if (sameAgent(a, 'Claude')) return html`<ul class="how">${pinned ? html`${watch('', 'devtrack watch --claude')}${claude}` : html`${claude}${watch('', 'devtrack watch --claude')}`}</ul>`;
   if (sameAgent(a, 'Codex')) return html`<ul class="how">${watch('', 'devtrack watch --codex')}</ul>`;
   return html`<ul class="how">${watch('', `devtrack watch --agent ${a} -- ${L('<AI 실행 명령>')}`)}</ul>`;
 }
@@ -281,6 +290,21 @@ function waitingBox(t) {
         ${ls.some((l) => l.kind === 'watch') ? html`<li>${L('실행기가 실행했지만 시작되지 않았다면 진행 기록의 경고를 확인한 뒤 실행기를 다시 켜세요 — 다시 켜면 남은 지시를 다시 처리합니다')}</li>` : ''}
       </ul></div></div>`;
   }
+  const other = listenersOtherModel(t);
+  if (other.length) {
+    const spec = specLabel(t.model, t.effort);
+    const ask = `${t.id} 진행해줘`;
+    const cmds = [t.model ? `/model ${t.model}` : '', t.effort ? `/effort ${t.effort}` : ''].filter(Boolean);
+    const watchCmd = sameAgent(t.agent, 'Codex') ? 'devtrack watch --codex' : 'devtrack watch --claude';
+    return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
+      <b>${L('{who}가 기다리고 있지만, 지정한 모델과 달라 이 작업을 받지 않습니다', { who })}</b>
+      <p>${L('이 작업: {spec}', { spec })} · ${L('기다리는 AI')}: ${listenersText(other)}</p>
+      <ul class="how">
+        <li>${L('터미널에서 실행기를 켜 두면 지정한 모델로 실행합니다')} — <code>${watchCmd}</code> ${copyBtn(watchCmd)}</li>
+        ${other.some((l) => l.kind === 'wait') ? html`<li>${LH('또는 그 대화에서 {cmds} 로 모델을 바꾼 뒤 채팅에서 요청하세요', { cmds: raw(cmds.map((c) => String(html`<code>${c}</code>`)).join(' · ')) })} — <b>"${ask}"</b> ${copyBtn(ask)}</li>` : ''}
+        <li>${L('또는 위의 모델 표시를 눌러 지정을 바꾸거나 해제하세요')}</li>
+      </ul></div></div>`;
+  }
   return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
     <b>${L('지금 웹 지시를 기다리는 {who}가 없습니다', { who })}</b>
     <p>${L('이 작업은 {who}가 받은 편지함을 확인해야 시작됩니다. 대화 중인 AI 는 작업 단계 사이에만 확인하므로, 지금 다른 일을 하고 있지 않다면 직접 깨워 주세요.', { who })}</p>
@@ -310,6 +334,7 @@ async function poll({ force = false } = {}) {
     }
     changed.forEach((id) => state.tasks.delete(id));
     state.index = idx;
+    setModelCatalog(idx.models);
     const hadError = !!state.loadError;
     state.loadError = null;
     processNotifications(idx);
@@ -1121,6 +1146,13 @@ function nowCard(t) {
   </section>`;
 }
 
+/** 작업 머리말의 모델 표시 — 진행 중인 작업은 눌러서 바꾼다 */
+function modelChip(t) {
+  const spec = specLabel(t.model, t.effort);
+  if (!ACTIVE.includes(t.status)) return spec ? html`<span title="${L('모델 · 추론 강도')}">${icon('sliders')} ${spec}</span>` : '';
+  return html`<button type="button" class="th-model ${spec ? 'set' : ''}" data-action="task-model" data-task="${t.id}" title="${L('이 작업을 처리할 AI 모델 · 추론 강도')}">${icon('sliders')} ${spec || L('모델 지정 안 함')}<span class="th-model-edit">${L('변경§버튼')}</span></button>`;
+}
+
 async function viewTask({ rest }) {
   const [id, tabArg] = rest;
   const t = await loadTask(id);
@@ -1154,6 +1186,7 @@ async function viewTask({ rest }) {
       <h1><span class="th-id">${t.id}</span>${t.title}</h1>
       <div class="th-meta">
         <span title="${L('담당 AI')}">${icon('cpu')} ${agentLabel(t)}</span>
+        ${modelChip(t)}
         ${repo ? html`<span>${icon('folder')} ${repo.href ? html`<a href="${repo.href}" target="_blank" rel="noopener">${repo.text}</a>` : repo.text}</span>` : ''}
         ${t.repo?.branch ? html`<span>${icon('branch')} ${t.repo.branch}</span>` : ''}
         <span>${icon('clock')} ${L('시작')} ${fmtAbs(t.created_at)}</span>
@@ -1934,6 +1967,7 @@ function viewNewTask({ q = {} } = {}) {
         <label class="field"><span>${L('우선순위')}</span><select name="priority"><option value="normal">${L('보통')}</option><option value="high">${L('높음')}</option><option value="low">${L('낮음')}</option></select></label>
       </div>
       ${listenersSummary()}
+      ${modelFields(LS.get('newAgent', 'Claude'))}
       <div class="field-row" data-type-only="docreview" ${type === 'docreview' ? '' : raw('hidden')}>
         <label class="field" style="flex:2"><span>${L('검토할 문서 경로')}</span><input type="text" name="doc_path" placeholder="~/Documents/proposal_v3.docx"><small>${L('PDF · Word(.docx) · LaTeX(.tex) — AI 가 일하는 컴퓨터의 경로')}</small></label>
         <label class="field"><span>${L('문서 종류')}</span><select name="doc_kind">${Object.entries(DOC_KIND).map(([k, v]) => html`<option value="${k}">${v.label}</option>`)}</select></label>
@@ -1965,6 +1999,78 @@ function agentOptions() {
   const last = LS.get('newAgent', 'Claude');
   return AGENTS.map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${L(label)}</option>`);
 }
+
+/** 담당 AI 에 맞는 모델 목록 묶음: Claude 는 Claude 목록, Codex 는 Codex 목록, Gemini 는 직접 입력만, 누구나 · 그 밖에는 둘 다 */
+function modelGroups(agent) {
+  const a = String(agent ?? '').trim().toLowerCase();
+  if (a === 'gemini') return [];
+  if (a === 'claude') return [['Claude', MODELS.claude]];
+  if (a === 'codex') return [['Codex', MODELS.codex]];
+  return [['Claude', MODELS.claude], ['Codex', MODELS.codex]];
+}
+
+/** 추론 강도 선택지. keep: 이 모델이 받지 않는 지금 값도 남겨 둔다 (이미 정해 둔 값을 창을 열기만 해서 바꾸지 않게) */
+function effortOptions(agent, model, effort, keep) {
+  const list = effortsFor(agent, model);
+  if (effort && !list.some(([k]) => k === effort)) {
+    if (keep) list.push([effort, effortLabel(effort)]);
+    else effort = '';
+  }
+  return html`<option value="">${L('지정 안 함')}</option>${list.map(([k, label]) => html`<option value="${k}" ${k === effort ? raw('selected') : ''}>${label}</option>`)}`;
+}
+
+/** 모델 · 추론 강도 칸 (새 작업 지시 · 모델 변경 창). 담당 AI 의 모델 목록에서 고르고, 목록에 없는 모델은 직접 입력.
+ *  추론 강도는 고른 모델이 받는 값만 보여 준다 */
+function modelFields(agent, model = '', effort = '', { keep = true, custom: forceCustom = false } = {}) {
+  const groups = modelGroups(agent);
+  const listed = groups.some(([, list]) => list.some((m) => m.id === model));
+  const custom = forceCustom || (!!model && !listed);
+  return html`<div class="model-fields" data-model-fields data-agent="${agent || ''}">
+    <div class="field-row">
+      <div class="field mf-model"><span class="field-label">${L('모델 (선택)')}</span>
+        <select name="model_pick" aria-label="${L('모델 (선택)')}">
+          <option value="">${L('지정 안 함 — 어떤 모델이든')}</option>
+          ${groups.map(([name, list]) => html`<optgroup label="${name}">${list.map((m) => html`<option value="${m.id}" ${!custom && m.id === model ? raw('selected') : ''}>${m.label}</option>`)}</optgroup>`)}
+          <option value="__custom" ${custom ? raw('selected') : ''}>${L('직접 입력…')}</option>
+        </select>
+        <input type="text" name="model_custom" value="${custom ? model : ''}" placeholder="${L('모델 이름 (예: gpt-6-sol)')}" aria-label="${L('모델 이름')}" spellcheck="false" ${custom ? '' : raw('hidden')}>
+      </div>
+      <label class="field"><span>${L('추론 강도')}</span><select name="effort">${effortOptions(agent, model, effort, keep)}</select></label>
+    </div>
+    <small class="mf-note">${L('지정하면 이 작업은 그 모델로만 처리합니다. 실행기(devtrack watch)는 이 모델로 AI 를 띄우고, 다른 모델로 켜 둔 대화는 이 작업을 받지 않습니다.')}</small>
+  </div>`;
+}
+
+/** 모델 칸에서 고른 값 → { model, effort } (지정 안 함은 '') */
+function readModelFields(box) {
+  const pickEl = box.querySelector('[name="model_pick"]');
+  const model = pickEl.value === '__custom' ? box.querySelector('[name="model_custom"]').value.trim() : pickEl.value;
+  return { model: normalizeModel(model), effort: box.querySelector('[name="effort"]').value };
+}
+
+/** 담당 AI 를 바꾸면 모델 목록 · 강도 목록을 그 AI 에 맞게 다시 그린다 (고른 모델은 유지 — 새 목록에 없으면 직접 입력 칸으로) */
+function syncModelFields(box, agent) {
+  const { model, effort } = readModelFields(box);
+  const custom = box.querySelector('[name="model_pick"]').value === '__custom';
+  box.outerHTML = String(modelFields(agent, model, effort, { keep: false, custom }));
+}
+
+/** 고른 모델이 받는 강도로 강도 목록을 바꾼다 (지금 값이 없으면 '지정 안 함') */
+function syncEfforts(box) {
+  const sel = box.querySelector('[name="effort"]');
+  const { model, effort } = readModelFields(box);
+  sel.innerHTML = String(effortOptions(box.dataset.agent, model, effort, false));
+}
+
+function onModelPick(select) {
+  const box = select.closest('[data-model-fields]');
+  const input = box.querySelector('[name="model_custom"]');
+  input.hidden = select.value !== '__custom';
+  syncEfforts(box);
+  if (!input.hidden) input.focus();
+}
+
+const modelArgs = ({ model, effort }) => [model ? `--model ${shellQuote(model)}` : '', effort ? `--effort ${effort}` : ''].filter(Boolean).join(' ');
 
 /** 관련 작업 칸의 글 → 작업 ID 목록 (중복 제거) 과 작업 번호로 읽을 수 없는 조각.
  *  "T-0001, 2; t-3" → ids ['T-0001', 'T-0002', 'T-0003'] (store.normalize_task_id 와 같은 규칙) */
@@ -2056,6 +2162,14 @@ async function submitNewTask(ev) {
     return;
   }
   data.related = relIds;
+  Object.assign(data, readModelFields(form.querySelector('[data-model-fields]')));
+  delete data.model_pick;
+  delete data.model_custom;
+  if (/\s/.test(data.model)) {
+    toast({ title: L('모델 이름에 공백을 넣을 수 없습니다'), meta: data.model, tone: 'red' });
+    form.elements.model_custom.focus();
+    return;
+  }
   LS.set('newAgent', data.agent); // 다음 지시에도 같은 AI 를 기본으로
   const ai = aiName(data);
   if (state.mode === 'live') {
@@ -2068,6 +2182,7 @@ async function submitNewTask(ev) {
       form.elements.type.value = data.type;
       syncTypeFields(form);
       syncRelated(form);
+      syncModelFields(form.querySelector('[data-model-fields]'), data.agent);
       toast({ title: L('작업 지시를 등록했습니다'), meta: `${r.task.id} — ${isUnassigned(data.agent) ? L('먼저 시작한 AI 가 맡습니다') : L('{ai}에게 devtrack inbox 로 전달됩니다', { ai })}`, tone: 'green' });
       await poll({ force: true });
       location.hash = `#/task/${r.task.id}`;
@@ -2083,6 +2198,7 @@ async function submitNewTask(ev) {
     data.priority !== 'normal' ? `--priority ${data.priority}` : '',
     data.repo ? `--repo ${shellQuote(data.repo)}` : '', data.branch ? `--branch ${shellQuote(data.branch)}` : '',
     relIds.length ? `--related ${relIds.join(' ')}` : '',
+    modelArgs(data),
     data.instruction ? `-i ${shellQuote(data.instruction)}` : '',
   ].filter(Boolean).join(' ');
   const msg = [
@@ -2090,14 +2206,15 @@ async function submitNewTask(ev) {
     `제목: ${data.title}`,
     `유형: ${typeLabel} (${data.type})`,
     `담당 AI: ${data.agent}`,
-    data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : '',
-    data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : '',
-    rels.length ? `관련 작업: ${rels.map((t) => `${t.id} ${t.title}`).join(', ')} (devtrack new 에 --related ${relIds.join(' ')})` : '',
+    data.repo ? `저장소: ${data.repo}${data.branch ? ` (브랜치 ${data.branch})` : ''}` : null,
+    data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : null,
+    rels.length ? `관련 작업: ${rels.map((t) => `${t.id} ${t.title}`).join(', ')} (devtrack new 에 --related ${relIds.join(' ')})` : null,
+    data.model || data.effort ? `모델: ${specLabel(data.model, data.effort)} (devtrack new 에 ${modelArgs(data)})` : null,
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',
     'devtrack 으로 작업을 등록하고, 진행 단계·문제점·결과물을 기록하면서 진행해 주세요. 커밋/푸시 전에는 반드시 승인 요청을 올려 주세요.',
-  ].filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
+  ].filter((x) => x !== null).filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
   openModal({
     title: L('{ai}에게 보낼 작업 지시', { ai }),
     body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 등록'), cmd)}`,
@@ -2225,6 +2342,51 @@ async function actCancelTask(btn) {
     await poll({ force: true });
   } catch (e) {
     toast({ title: L('취소하지 못했습니다'), meta: e.message, tone: 'red' });
+    btn.disabled = false;
+  }
+}
+
+function openModelTask(id) {
+  const t = state.tasks.get(id);
+  if (!t) return;
+  openModal({
+    title: `${L('모델 · 추론 강도')} — ${t.id}`,
+    body: html`<p>${LH('<b>{task}</b> 을(를) 처리할 AI 모델과 추론 강도를 정합니다.', { task: `${t.id} · ${t.title}` })}</p>
+      <ul class="m-list">
+        <li>${LH('<code>devtrack watch</code> 실행기는 이 작업을 실행할 때마다 이 모델 · 강도로 AI 를 띄우고, 같은 작업의 다음 메시지는 같은 대화로 이어 갑니다.')}</li>
+        <li>${L('대기 모드로 켜 둔 대화는 모델이나 강도가 다르면 이 작업을 받지 않습니다. 이미 진행 중이면 다음 메시지부터 적용됩니다.')}</li>
+      </ul>
+      <div id="model-form">${modelFields(t.agent, t.model || '', t.effort || '')}</div>
+      <div class="m-actions"><button class="btn btn-primary" data-action="task-model-go" data-task="${t.id}">${icon('check')} ${L('저장')}</button>
+        <span class="hint">${state.mode === 'live' ? '' : L('정적 모드: {ai}에게 보낼 메시지가 만들어집니다', { ai: aiName(t) })}</span></div>`,
+  });
+}
+
+async function actModelTask(btn) {
+  const id = btn.dataset.task;
+  const t = state.tasks.get(id);
+  const spec = readModelFields($('#model-form [data-model-fields]'));
+  if (/\s/.test(spec.model)) {
+    toast({ title: L('모델 이름에 공백을 넣을 수 없습니다'), meta: spec.model, tone: 'red' });
+    return;
+  }
+  const label = specLabel(spec.model, spec.effort);
+  if (state.mode !== 'live') {
+    const cmd = `devtrack model ${id} ${spec.model || spec.effort ? [spec.model ? shellQuote(spec.model) : '', spec.effort ? `--effort ${spec.effort}` : ''].filter(Boolean).join(' ') : '--clear'} --by-user`;
+    const msg = `[DevTrack 모델 지정] ${id} "${t?.title || ''}" → ${label || '지정 해제 (어떤 모델이든)'}\n\n이 지정을 기록해 주세요(${cmd}). 이 세션의 모델 · 강도가 다르면 이 작업은 더 진행하지 말고 알려 주세요.`;
+    const ai = aiName(t);
+    openModal({ title: `${L('모델 · 추론 강도')} — ${L('{ai}에게 전달', { ai })}`, body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 메시지를 {ai} 세션에 붙여넣으세요.', { ai })}</p>${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 기록'), cmd)}` });
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`api/tasks/${id}/model`, spec);
+    closeModal();
+    state.tasks.delete(id);
+    toast({ title: label ? L('{id} 모델: {spec}', { id, spec: label }) : L('{id} 모델 지정을 해제했습니다', { id }), tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: L('저장하지 못했습니다'), meta: e.message, tone: 'red' });
     btn.disabled = false;
   }
 }
@@ -2375,6 +2537,8 @@ async function onAction(el, ev) {
     case 'task-complete-go': return actCompleteTask(el);
     case 'task-cancel': return openCancelTask(el.dataset.task);
     case 'task-cancel-go': return actCancelTask(el);
+    case 'task-model': return openModelTask(el.dataset.task);
+    case 'task-model-go': return actModelTask(el);
     case 'task-delete': return openDeleteTask(el.dataset.task);
     case 'task-delete-go': return actDeleteTask(el);
     case 'choices': {
@@ -2464,6 +2628,9 @@ function bindEvents() {
     if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
     if (ev.target.matches('#new-task-form select[name="type"]')) syncTypeFields(ev.target.form);
     if (ev.target.matches('#new-task-form [data-rel-add]')) addRelated(ev.target);
+    if (ev.target.matches('#new-task-form select[name="agent"]')) syncModelFields(ev.target.form.querySelector('[data-model-fields]'), ev.target.value);
+    if (ev.target.matches('[data-model-fields] select[name="model_pick"]')) onModelPick(ev.target);
+    if (ev.target.matches('[data-model-fields] input[name="model_custom"]')) syncEfforts(ev.target.closest('[data-model-fields]'));
     const box = ev.target.closest('.choice-box');
     if (box) { box.dataset.dirty = '1'; syncChoiceCount(box); }
   });

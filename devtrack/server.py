@@ -120,12 +120,20 @@ def make_handler(store, web_root, verbose=False):
                             branch=(body.get("branch") or "").strip() or None,
                             priority=body.get("priority") or "normal",
                             status="queued", created_by=USER, related=[r for r in related if r],
+                            model=(body.get("model") or "").strip() or None,
+                            effort=(body.get("effort") or "").strip() or None,
                         )
                         return self._json({"ok": True, "task": {"id": t["id"]}}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/comments$", path)
                     if m:
                         e = store.add_user_comment(m.group(1), body.get("message") or "")
                         return self._json({"ok": True, "entry": e}, 201)
+                    m = re.match(r"^/api/tasks/(T-\d+)/model$", path)
+                    if m:
+                        t = store.set_model(m.group(1), (body.get("model") or "").strip() or None,
+                                            (body.get("effort") or "").strip() or None, author=USER)
+                        return self._json({"ok": True, "task": {"id": t["id"], "model": t.get("model"),
+                                                                "effort": t.get("effort")}})
                     m = re.match(r"^/api/tasks/(T-\d+)/cancel$", path)
                     if m:
                         t = store.cancel_task(m.group(1), reason=body.get("reason") or "", author=USER)
