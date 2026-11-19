@@ -60,7 +60,7 @@ DevTrack is the user's progress dashboard (web): it shows what you are doing, th
   ```
   Store the TID as `devtrack_task` in the state file.
 - **Progress.** At each phase: `devtrack step <TID> "<지금 하는 일, 쉬운 한국어>" -p <0-100>`; when plan step k is done: `devtrack check <TID> <k>`. Something that limits the review (no access to a file, parts of a huge PR skipped, CI logs unavailable) → `devtrack issue <TID> "<무엇이 문제인지>" -s medium`.
-- `devtrack` commands that create something print only the new ID on stdout. Do not pass `--data`; the user's `$DEVTRACK_DATA` decides where records go.
+- `devtrack` commands that create something print only the new ID on stdout. Do not pass `--data`; the user's DevTrack setting (`devtrack config` or `$DEVTRACK_DATA`) decides where records go.
 
 ## Phase 1: Collect
 

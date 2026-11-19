@@ -18,6 +18,10 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   작업 내용 · 결과물 · AI 에게 보내는 메시지(`[DevTrack 결정]` 등)는 번역하지 않는다.
 
 ## 구조
+- 기록 위치: `cli.data_location` — `--data` > `$DEVTRACK_DATA` > 설정 파일(`config_path()` = `$XDG_CONFIG_HOME` 또는
+  `~/.config/devtrack/config.json`, `devtrack config`) > `<저장소>/data`. 웹 공개 폴더도 같은 순서(`publish_location`, 설정 파일 값은
+  설정한 기록 폴더를 쓸 때만). 환경 변수는 그 셸에서 켠 프로세스에만 있으므로(먼저 켠 serve, VS Code 의 AI · 훅) 설정 파일이 기본 수단.
+  `_warn_other_data` 가 init · serve · watch · `inbox --wait` 에서 다른 곳의 기록을 알린다 (`--data` 일 때는 조용히)
 - `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화)
 - `devtrack/cli.py` argparse CLI, `devtrack/server.py` 로컬 서버(정적 + POST API), `devtrack/gitops.py` diff/commit/push, `devtrack/demo.py` 예시 데이터
 - 담당 AI: 작업의 `agent` (`누구나` = 미정). `Store.inbox(agent=, task=)` 는 그 AI 의 입력만, `update_task(claim=)` 는 시작할 때 담당 확인.
@@ -82,5 +86,8 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   논문 심사는 임시 폴더에 `\input` 이 있는 LaTeX 원고를 두고 `new -t paper --review-by Codex --review-doc main.tex` → `review-request` →
   `review --findings` · `review-done --verdict major` → 원고 수정 → `--response` 없이 거절 · 함께 2차 → `지난 심사 이후 바뀐 부분` diff 를 본다.
   같은 AI 리뷰는 `DEVTRACK_SESSION=s1` 로 개발 · 요청한 뒤 s1 의 inbox (`[다른 대화가 리뷰]`) · `start` 거절 · `inbox --wait` 안 깨어남, s2 는 처리되는지 본다.
+- 기록 위치 변경 후: `XDG_CONFIG_HOME=<임시>` 로 실제 `~/.config` 를 건드리지 않고 `config data` · `config publish` →
+  환경 변수 없이 `new` 가 그곳에 쓰고 공개 폴더로 반영되는지, 훅(`bin/devtrack-hook`)이 그곳의 취소를 보는지, `$DEVTRACK_DATA` 가 다르면
+  `config` 가 경고하는지, `--data` 로 연 폴더에서는 공개 · 경고가 꺼지는지 본다.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

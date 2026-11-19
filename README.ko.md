@@ -91,6 +91,7 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `web/` | 대시보드. 빌드 없는 정적 HTML/JS — 그대로 정적 호스팅 가능 |
 | `devtrack serve` | 로컬 웹 서버. 웹에서 바로 승인 · 피드백 · 작업 지시 저장 |
 | `devtrack publish` | 웹 + 데이터를 정적 디렉토리(예: 웹 서버의 공개 폴더)로 배포 |
+| `devtrack config` | 기록 폴더 · 웹 공개 폴더 확인 · 설정. `devtrack config data <폴더>` 로 정하면 어느 터미널 · 프로그램에서 실행하든 같은 곳에 기록 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
 | `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`) |
@@ -194,7 +195,7 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `show` / `list` | 작업 상세 / 목록 |
 | `serve` / `publish` / `demo` | 로컬 서버 / 정적 배포 / 예시 데이터 |
 
-공통 옵션: `--data DIR`(기본 `$DEVTRACK_DATA` 또는 `<저장소>/data`), `--as NAME`(기록자 · 나의 AI 이름, 기본 `$DEVTRACK_AGENT` 또는 Claude), `--json`.
+공통 옵션: `--data DIR`(기본: `$DEVTRACK_DATA` → `devtrack config data` 로 정한 곳 → `<저장소>/data` 순), `--as NAME`(기록자 · 나의 AI 이름, 기본 `$DEVTRACK_AGENT` 또는 Claude), `--json`.
 
 **여러 AI 함께 쓰기**: 작업마다 담당 AI(Claude · Codex · Gemini · 누구나)가 있고, 각 AI 는 자기에게 배정된 작업만 가져갑니다
 (`start` 가 담당을 확인, 다른 AI 의 작업은 `start --take`). Codex 설정은 웹의 사용 방법 11단계와

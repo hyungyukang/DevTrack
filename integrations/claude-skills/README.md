@@ -38,7 +38,7 @@ ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.co
 ```
 
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`
-(`~/bin` 이 PATH 에 있어야 함). 기록 위치는 `$DEVTRACK_DATA` 로 정합니다.
+(`~/bin` 이 PATH 에 있어야 함). 기록 위치는 `devtrack config data <폴더>`(또는 `$DEVTRACK_DATA`)로 정합니다.
 
 스킬의 `allowed-tools` 에 `Bash(devtrack *)` 가 들어 있어 스킬 실행 중 `devtrack` 명령은 매번 묻지 않고 실행됩니다.
 원하지 않으면 그 항목을 지우세요.

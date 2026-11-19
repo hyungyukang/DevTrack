@@ -58,7 +58,11 @@ source ~/.zshrc
 devtrack --version                                           # → devtrack 0.1.0
 ```
 
-기록은 기본으로 `~/devtrack/data/` 에 저장됩니다. 다른 곳에 두려면 같은 파일에 `export DEVTRACK_DATA=~/devtrack-data` 를 추가하세요.
+기록은 기본으로 `~/devtrack/data/` 에 저장됩니다. 다른 곳에 두려면 `devtrack config data ~/devtrack-data` 를 한 번 실행하세요.
+설정 파일(`~/.config/devtrack/config.json`)에 저장되어, 어느 터미널 · 프로그램에서 실행한 devtrack 이든 같은 곳에 기록합니다.
+지금 쓰는 곳은 `devtrack config` 로 봅니다.
+`export DEVTRACK_DATA=…` 로도 정할 수 있지만, 그 변수가 없는 곳에서 실행된 devtrack 은 기본 폴더에 기록합니다.
+변수를 정하기 전에 연 터미널, VS Code 의 Claude 와 훅이 그런 예입니다.
 
 ## 4. 웹 대시보드 열기
 
@@ -465,11 +469,11 @@ git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 cat >> ~/.bashrc <<'EOF'
 module load python
 export PATH="$HOME/devtrack/bin:$PATH"
-export DEVTRACK_DATA=$HOME/devtrack-data
-export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # 웹 공개 위치 (환경에 맞게)
 EOF
 source ~/.bashrc
 devtrack --version
+devtrack config data $HOME/devtrack-data
+devtrack config publish $HOME/www/devtrack     # 웹 공개 위치 (환경에 맞게)
 devtrack publish               # 처음 한 번 (웹 화면을 업데이트했을 때도)
 ```
 
@@ -478,8 +482,12 @@ devtrack publish               # 처음 한 번 (웹 화면을 업데이트했�
   Claude 와 취소 훅(5-4)도 이 파이썬을 써야 합니다 ([10-3](#/guide/s10-3)).
 - `git clone` 을 하려면 HPC 에 GitHub SSH 키가 등록되어 있어야 합니다.
 - 이후 Claude 가 기록할 때마다 공개 디렉토리에 자동으로 반영됩니다.
-  센터가 웹 공개 폴더를 제공하지 않으면 `DEVTRACK_PUBLISH_DIR` 줄과 `devtrack publish` 는 빼고 실시간 방식([10-5](#/guide/s10-5))으로 보세요.
-- **기록 폴더(`DEVTRACK_DATA`)는 홈에 두세요.** 스크래치(scratch) 같은 병렬 파일 시스템의 작업 공간은 한동안 읽거나 고치지 않은 파일을 지우는(purge) 경우가 많아 오래된 작업 기록이 사라질 수 있습니다.
+  센터가 웹 공개 폴더를 제공하지 않으면 `devtrack config publish` 와 `devtrack publish` 는 빼고 실시간 방식([10-5](#/guide/s10-5))으로 보세요.
+- 기록 · 공개 폴더는 설정 파일(`~/.config/devtrack/config.json`)에 저장됩니다. 그래서 셸 설정을 읽지 않고 켜진 프로그램도 같은 곳을 씁니다.
+  VS Code 의 Claude 와 훅, tmux, 먼저 켜 둔 `serve` 가 그런 예입니다. `devtrack config` 로 확인하세요.
+  전에 `~/.bashrc` 에 `export DEVTRACK_DATA` · `DEVTRACK_PUBLISH_DIR` 를 넣었다면 그 줄은 지우세요.
+  환경 변수가 있으면 그쪽이 먼저 쓰여서, 값이 다르면 기록이 두 곳으로 나뉩니다.
+- **기록 폴더는 홈에 두세요.** 스크래치(scratch) 같은 병렬 파일 시스템의 작업 공간은 한동안 읽거나 고치지 않은 파일을 지우는(purge) 경우가 많아 오래된 작업 기록이 사라질 수 있습니다.
   프로젝트 공유 공간은 같은 프로젝트 구성원도 들어올 수 있습니다.
   홈은 보통 지워지지 않고 백업됩니다. 자세한 정책은 쓰는 센터의 안내를 확인하세요.
 
@@ -499,7 +507,7 @@ rsync -av --exclude '.agent/' --exclude '.lock' \
   ~/devtrack/data/ <사용자 ID>@<HPC 로그인 주소>:~/devtrack-data/
 ```
 
-- 내 컴퓨터의 기록 폴더(`$DEVTRACK_DATA`, 기본 `~/devtrack/data/`)를 HPC 의 `$DEVTRACK_DATA` 로 복사합니다.
+- 내 컴퓨터의 기록 폴더(`devtrack config` 로 확인, 기본 `~/devtrack/data/`)를 HPC 의 기록 폴더로 복사합니다.
 - `.agent/` 는 그 컴퓨터의 대화 · 대기 상태라 옮기지 않습니다. `.lock` 은 잠금 파일입니다.
 - 처리 여부(확인한 지시 · 결정)는 각 작업 파일에 들어 있어서, 이미 처리한 지시가 HPC 에서 다시 뜨지 않습니다.
   지운 작업 번호 목록(`.deleted.json`)도 함께 옮겨지므로 번호가 다시 쓰이지 않습니다.
@@ -696,7 +704,7 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
 ```
 
 **② Codex 설정 파일** — `~/.codex/config.toml` 맨 아래에 추가합니다. `/Users/me/devtrack/data` 는 기록 폴더
-(`$DEVTRACK_DATA`, 기본 `~/devtrack/data`)의 **전체 경로**로 바꿉니다.
+(`devtrack config` 에 나오는 곳, 기본 `~/devtrack/data`)의 **전체 경로**로 바꿉니다.
 
 ```toml
 [shell_environment_policy.set]
@@ -821,8 +829,17 @@ devtrack --data ~/devtrack-demo serve --port 8766 --open
 PDF 는 컴퓨터에 설치된 Chrome(또는 Chromium · Edge)으로 만듭니다. 브라우저가 없으면 Markdown 리포트만 올라가고 활동 기록에 경고가 남습니다.
 다른 위치에 설치했다면 `export DEVTRACK_CHROME=<브라우저 실행 파일 경로>` 를 지정하세요. 이미 올라온 리포트는 `devtrack pdf <리포트.md>` 로 따로 만들 수 있습니다.
 
+**기록이 두 폴더에 나뉘어 쌓여요 (`DEVTRACK_DATA` 를 정했는데 `~/devtrack/data/` 에도 생겨요).**
+`DEVTRACK_DATA` 같은 환경 변수는 그것을 정한 셸에서 켠 프로그램에만 전달됩니다. 다음 경우에는 그 변수를 몰라 기본 폴더에 기록합니다.
+- 변수를 정하기 전에 켠 `devtrack serve` · `watch` · 대기 모드
+- 다른 터미널 · tmux
+- VS Code 에서 실행된 Claude 와 훅
+
+`devtrack config data <기록 폴더>` 로 설정 파일에 정해 두면 어디서 실행하든 같은 곳을 씁니다. 그 뒤 켜 둔 `serve` · `watch` · 대기 모드를 다시 켜세요.
+`devtrack config` 는 지금 쓰는 곳과, 다른 폴더에도 작업이 있는지 보여 줍니다. 그쪽 작업은 `devtrack --data <그 폴더> list` 로 볼 수 있습니다.
+
 **기록은 어디에 있고, 백업은 어떻게 하나요?**
-`$DEVTRACK_DATA` (기본 `~/devtrack/data/`) 폴더가 전부입니다. 이 폴더를 복사하면 백업이 됩니다.
+기록 폴더(`devtrack config` 로 확인, 기본 `~/devtrack/data/`)가 전부입니다. 이 폴더를 복사하면 백업이 됩니다.
 
 **Claude 가 내 승인 없이 커밋할 수 있나요?**
 DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 승인한 diff 와 실제 변경이 다르면 실행을 거부합니다.

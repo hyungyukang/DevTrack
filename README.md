@@ -99,6 +99,7 @@ revision in `T-0013`.
 | `web/` | The dashboard. Static HTML/JS with no build step, so it can be hosted as is |
 | `devtrack serve` | Local web server. Approvals, feedback and new tasks from the web are saved directly |
 | `devtrack publish` | Publishes the dashboard and the data to a static directory (e.g. a web server's public folder) |
+| `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
 | `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`) |
@@ -203,7 +204,7 @@ devtrack inbox                              # new instructions · messages · de
 | `show` / `list` | Task details / task list |
 | `serve` / `publish` / `demo` | Local server / static publish / example data |
 
-Common options: `--data DIR` (default `$DEVTRACK_DATA` or `<repository>/data`), `--as NAME` (who records, i.e. my AI's name; default `$DEVTRACK_AGENT` or Claude), `--json`.
+Common options: `--data DIR` (default: `$DEVTRACK_DATA`, then the folder set with `devtrack config data`, then `<repository>/data`), `--as NAME` (who records, i.e. my AI's name; default `$DEVTRACK_AGENT` or Claude), `--json`.
 
 **Several AIs together:** each task has an assigned AI (Claude · Codex · Gemini · anyone), and each AI takes only the tasks assigned to it
 (`start` checks the assignment; `start --take` takes another AI's task). For Codex setup, see step 11 of the Guide and

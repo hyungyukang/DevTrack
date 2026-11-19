@@ -58,7 +58,11 @@ source ~/.zshrc
 devtrack --version                                           # → devtrack 0.1.0
 ```
 
-Records are saved in `~/devtrack/data/` by default. To keep them elsewhere, add `export DEVTRACK_DATA=~/devtrack-data` to the same file.
+Records are saved in `~/devtrack/data/` by default. To keep them elsewhere, run `devtrack config data ~/devtrack-data` once.
+It is saved in a settings file (`~/.config/devtrack/config.json`), so devtrack writes to the same place whichever terminal or program runs it.
+`devtrack config` shows where records go now.
+`export DEVTRACK_DATA=…` also works, but devtrack run where that variable is missing writes to the default folder.
+Examples are a terminal opened before you set it, and Claude and its hooks in VS Code.
 
 ## 4. Open the web dashboard
 
@@ -467,11 +471,11 @@ git clone git@github.com:hyungyukang/DevTrack.git ~/devtrack
 cat >> ~/.bashrc <<'EOF'
 module load python
 export PATH="$HOME/devtrack/bin:$PATH"
-export DEVTRACK_DATA=$HOME/devtrack-data
-export DEVTRACK_PUBLISH_DIR=$HOME/www/devtrack     # where the web page is published (adjust for your site)
 EOF
 source ~/.bashrc
 devtrack --version
+devtrack config data $HOME/devtrack-data
+devtrack config publish $HOME/www/devtrack     # where the web page is published (adjust for your site)
 devtrack publish               # once at first (and again after updating the web pages)
 ```
 
@@ -480,8 +484,12 @@ devtrack publish               # once at first (and again after updating the web
   Claude and the cancellation hook (5-4) must use this Python too ([10-3](#/guide/s10-3)).
 - `git clone` needs a GitHub SSH key registered on the HPC system.
 - From then on, every record Claude makes is copied to the published directory automatically.
-  If your center does not offer a public web folder, leave out the `DEVTRACK_PUBLISH_DIR` line and `devtrack publish`, and use the live mode ([10-5](#/guide/s10-5)).
-- **Keep the records folder (`DEVTRACK_DATA`) in your home directory.** Work areas on parallel file systems such as scratch often delete (purge) files that have not been read or modified for a while, so old task records can disappear.
+  If your center does not offer a public web folder, leave out `devtrack config publish` and `devtrack publish`, and use the live mode ([10-5](#/guide/s10-5)).
+- The records and publish folders are saved in a settings file (`~/.config/devtrack/config.json`). Programs started without reading your shell settings use the same place.
+  Examples are Claude and its hooks in VS Code, tmux, and a `serve` you started earlier. Check with `devtrack config`.
+  If you put `export DEVTRACK_DATA` or `DEVTRACK_PUBLISH_DIR` in `~/.bashrc` before, remove those lines.
+  An environment variable takes precedence, so a different value splits the records between two places.
+- **Keep the records folder in your home directory.** Work areas on parallel file systems such as scratch often delete (purge) files that have not been read or modified for a while, so old task records can disappear.
   Project-shared areas are also open to other members of the same project.
   Home directories are usually not purged and are backed up. Check your center's documentation for its policies.
 
@@ -501,7 +509,7 @@ rsync -av --exclude '.agent/' --exclude '.lock' \
   ~/devtrack/data/ <user ID>@<HPC login address>:~/devtrack-data/
 ```
 
-- Copies the records folder on your computer (`$DEVTRACK_DATA`, default `~/devtrack/data/`) to `$DEVTRACK_DATA` on the HPC system.
+- Copies the records folder on your computer (see `devtrack config`; default `~/devtrack/data/`) to the records folder on the HPC system.
 - `.agent/` holds that computer's conversation and waiting state, so it is not moved. `.lock` is a lock file.
 - Whether instructions and decisions were already handled is stored in each task file, so handled instructions do not show up again on the HPC system.
   The list of deleted task numbers (`.deleted.json`) is moved too, so those numbers are not reused.
@@ -698,7 +706,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 ```
 
 **② Codex configuration file** — add this at the end of `~/.codex/config.toml`. Replace `/Users/me/devtrack/data` with the **full path**
-of the records folder (`$DEVTRACK_DATA`, default `~/devtrack/data`).
+of the records folder (shown by `devtrack config`; default `~/devtrack/data`).
 
 ```toml
 [shell_environment_policy.set]
@@ -823,8 +831,17 @@ devtrack --data ~/devtrack-demo serve --port 8766 --open
 The PDF is made with Chrome (or Chromium · Edge) installed on the computer. Without a browser, only the Markdown report is posted and a warning is left in the activity log.
 If the browser is installed somewhere else, set `export DEVTRACK_CHROME=<path to the browser executable>`. For a report already posted, run `devtrack pdf <report.md>` separately.
 
+**Records pile up in two folders (I set `DEVTRACK_DATA`, but `~/devtrack/data/` fills up too).**
+An environment variable such as `DEVTRACK_DATA` only reaches programs started from the shell where it was set. In these cases devtrack does not see it and writes to the default folder:
+- `devtrack serve`, `watch` or waiting mode started before you set the variable
+- Other terminals and tmux
+- Claude and its hooks run from VS Code
+
+Set the folder in the settings file with `devtrack config data <records folder>`, and devtrack uses the same place wherever it runs. Then restart any `serve`, `watch` or waiting mode you left running.
+`devtrack config` shows where records go now and whether other folders also have tasks. To see the tasks there, run `devtrack --data <that folder> list`.
+
 **Where are the records, and how do I back them up?**
-Everything is in the `$DEVTRACK_DATA` folder (default `~/devtrack/data/`). Copying this folder is a backup.
+Everything is in the records folder (see `devtrack config`; default `~/devtrack/data/`). Copying this folder is a backup.
 
 **Can Claude commit without my approval?**
 For DevTrack tasks, Claude commits only through approved requests (`devtrack apply`). If the actual change differs from the diff you approved, it refuses to run.

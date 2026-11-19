@@ -30,8 +30,135 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_ROOT = os.path.join(REPO_ROOT, "web")
 
 
+# ---------------------------------------------------------------------------- 기록 위치 · 설정 파일
+# 기록 폴더 · 웹 공개 폴더는 --data > 환경 변수 > 설정 파일 > 기본값 순서로 정한다. 환경 변수는 그것을 정한 셸에서 켠
+# 프로세스에만 있으므로, 먼저 켠 serve · watch, 다른 터미널 · tmux, VS Code 의 AI · 훅은 모를 수 있다 — 설정 파일은 모두에 적용된다
+CONFIG_KEYS = {"data": ("DEVTRACK_DATA", "기록 폴더"), "publish": ("DEVTRACK_PUBLISH_DIR", "웹 공개 폴더")}
+SRC_CONFIG = "설정 파일"
+SRC_DEFAULT = "기본값"
+
+
+def config_path():
+    """설정 파일: $XDG_CONFIG_HOME/devtrack/config.json (기본 ~/.config/devtrack/config.json)."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "devtrack", "config.json")
+
+
+def load_config():
+    try:
+        with open(config_path(), encoding="utf-8") as fh:
+            obj = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _save_config(cfg):
+    path = config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _repo_data():
+    return os.path.join(REPO_ROOT, "data")
+
+
+def _real(path):
+    return os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+
+
+def data_location(explicit=None):
+    """기록 폴더와 그것을 정한 곳: (경로, '--data' · '$DEVTRACK_DATA' · '설정 파일' · '기본값')."""
+    if explicit:
+        return explicit, "--data"
+    if os.environ.get("DEVTRACK_DATA"):
+        return os.environ["DEVTRACK_DATA"], "$DEVTRACK_DATA"
+    saved = load_config().get("data")
+    if saved:
+        return saved, SRC_CONFIG
+    return _repo_data(), SRC_DEFAULT
+
+
 def default_data_dir():
-    return os.environ.get("DEVTRACK_DATA") or os.path.join(REPO_ROOT, "data")
+    return data_location()[0]
+
+
+def publish_location(data_root):
+    """웹 공개 폴더와 정한 곳 ((None, None) = 없음). 설정 파일의 값은 설정한 기록 폴더(없으면 기본 폴더)를 쓸 때만
+    — --data 로 연 예시 · 시험 기록이 실제 공개 폴더로 나가지 않게."""
+    if os.environ.get("DEVTRACK_PUBLISH_DIR"):
+        return os.environ["DEVTRACK_PUBLISH_DIR"], "$DEVTRACK_PUBLISH_DIR"
+    cfg = load_config()
+    if cfg.get("publish") and _real(data_root) == _real(cfg.get("data") or _repo_data()):
+        return cfg["publish"], SRC_CONFIG
+    return None, None
+
+
+def _store_summary(root):
+    """기록 폴더의 작업 수 · 마지막 기록 시각. 작업이 없으면 None."""
+    tasks = os.path.join(root, "tasks")
+    try:
+        names = [n for n in os.listdir(tasks) if re.match(r"^T-\d{4,}$", n)]
+    except OSError:
+        return None
+    times = []
+    for n in names:
+        try:
+            times.append(os.path.getmtime(os.path.join(tasks, n, "task.json")))
+        except OSError:
+            pass
+    return {"tasks": len(times), "updated": max(times)} if times else None
+
+
+def other_data_dirs(root):
+    """지금 쓰는 곳 말고 작업이 있는 기록 폴더 — 환경 변수 · 설정 파일 · 기본값이 가리키는 곳 중에서.
+    [{"path", "source", "tasks", "updated"}]"""
+    seen = {_real(root)}
+    out = []
+    for path, src in ((os.environ.get("DEVTRACK_DATA"), "$DEVTRACK_DATA"), (load_config().get("data"), SRC_CONFIG),
+                      (_repo_data(), SRC_DEFAULT)):
+        if not path or _real(path) in seen:
+            continue
+        seen.add(_real(path))
+        info = _store_summary(_real(path))
+        if info:
+            out.append(dict(info, path=_real(path), source=src))
+    return out
+
+
+def _clock(ts):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+def _other_lines(others):
+    return ["    {} ({}) — 작업 {}개, 마지막 기록 {}".format(o["path"], o["source"], o["tasks"], _clock(o["updated"]))
+            for o in others]
+
+
+def _warn_other_data(store, args):
+    """다른 기록 폴더에도 작업이 있으면 알린다 — 기록 폴더를 모르는 프로세스가 따로 쓰고 있을 수 있다.
+    --data 로 일부러 고른 폴더(예시 · 시험)에서는 알리지 않는다."""
+    if getattr(args, "data_from", None) == "--data":
+        return
+    try:
+        others = other_data_dirs(store.root)
+    except OSError:
+        return
+    if not others:
+        return
+    _info("⚠ 다른 기록 폴더에도 작업이 있습니다 (지금 쓰는 곳: {} — {})".format(store.root, args.data_from))
+    for line in _other_lines(others):
+        _info(line)
+    _info("  기록 폴더를 모르는 프로세스가 따로 쓰고 있을 수 있습니다 — devtrack config 로 확인하세요")
 
 
 def _text(value, file_value):
@@ -57,7 +184,77 @@ def _info(msg):
 # ---------------------------------------------------------------------------- 명령 구현
 def cmd_init(store, args):
     store.ensure()
-    _out(args, {"data": store.root}, "데이터 디렉토리 준비 완료: {}".format(store.root))
+    _out(args, {"data": store.root}, "데이터 디렉토리 준비 완료: {} ({})".format(store.root, args.data_from))
+    sys.stdout.flush()
+    _warn_other_data(store, args)
+
+
+def _config_show(store, args):
+    cfg = load_config()
+    pub, pub_from = publish_location(store.root)
+    others = other_data_dirs(store.root)
+    obj = {"data": {"path": store.root, "source": args.data_from},
+           "publish": {"path": pub and os.path.abspath(os.path.expanduser(pub)), "source": pub_from},
+           "config": config_path(), "saved": cfg, "others": others}
+    if args.json:
+        return _out(args, obj)
+    lines = ["기록 폴더:    {} ({})".format(store.root, args.data_from),
+             "웹 공개 폴더: {}".format("{} ({})".format(obj["publish"]["path"], pub_from) if pub else "없음"),
+             "설정 파일:    {}{}".format(config_path(), "" if os.path.exists(config_path()) else " (아직 없음)")]
+    for key, (env, label) in sorted(CONFIG_KEYS.items()):
+        if os.environ.get(env) and cfg.get(key) and _real(os.environ[env]) != _real(cfg[key]):
+            lines.append("⚠ 이 셸의 ${} 가 설정 파일의 {}({})보다 먼저 쓰입니다 — 이 변수가 없는 프로세스는 설정 파일 쪽을 "
+                         "씁니다. 셸 설정(~/.bashrc 등)에서 그 줄을 지우거나 같은 경로로 맞추세요".format(env, label, cfg[key]))
+    if others:
+        lines.append("⚠ 다른 기록 폴더에도 작업이 있습니다:")
+        lines += _other_lines(others)
+        lines.append("  기록 폴더를 모르는 프로세스(먼저 켠 serve · watch, 다른 터미널 · tmux, VS Code 의 AI · 훅 등)가 "
+                     "따로 쓴 기록일 수 있습니다.")
+        lines.append("  내용 보기: devtrack --data <그 폴더> list")
+    if args.data_from not in (SRC_CONFIG, "--data") and not cfg.get("data") and (
+            others or args.data_from == "$DEVTRACK_DATA"):
+        lines.append("모든 프로세스가 같은 곳을 쓰게 하려면: devtrack config data {}".format(shlex.quote(store.root)))
+    print("\n".join(lines))
+
+
+def cmd_config(store, args):
+    if not args.key:
+        if args.value or args.unset:
+            raise DevTrackError("정할 항목을 쓰세요: devtrack config data <폴더>   ·   devtrack config publish <폴더>")
+        return _config_show(store, args)
+    env, label = CONFIG_KEYS[args.key]
+    cfg = load_config()
+    if args.unset:
+        if args.value:
+            raise DevTrackError("--unset 과 값은 함께 쓸 수 없습니다")
+        had = cfg.pop(args.key, None)
+        _save_config(cfg)
+        return _out(args, {"key": args.key, "value": None, "config": config_path()},
+                    "{} 설정을 지웠습니다{}".format(label, "" if had else " (원래 없었음)"))
+    if not args.value:
+        return _out(args, {"key": args.key, "value": cfg.get(args.key), "config": config_path()},
+                    cfg.get(args.key) or "(설정 없음)")
+    path = os.path.abspath(os.path.expanduser(args.value))
+    if args.key == "data":
+        if os.path.exists(path) and not os.path.isdir(path):
+            raise DevTrackError("폴더가 아닙니다: {}".format(path))
+        Store(path).ensure()
+    cfg[args.key] = path
+    _save_config(cfg)
+    _out(args, {"key": args.key, "value": path, "config": config_path()},
+         "{} = {} (저장: {})".format(label, path, config_path()))
+    sys.stdout.flush()
+    if not args.json:
+        if os.environ.get(env) and _real(os.environ[env]) != _real(path):
+            _info("⚠ 이 셸의 ${}({}) 가 이 설정보다 먼저 쓰입니다 — 셸 설정(~/.bashrc 등)에서 그 줄을 지우거나 같은 경로로 "
+                  "맞추세요".format(env, os.environ[env]))
+        if args.key == "data":
+            others = [o for o in other_data_dirs(path) if o["source"] != SRC_CONFIG]
+            if others:
+                _info("다른 기록 폴더에도 작업이 있습니다 — 필요하면 옮기세요:")
+                for line in _other_lines(others):
+                    _info(line)
+        _info("이미 켜 둔 devtrack serve · watch · 대기 모드는 다시 켜야 새 위치를 씁니다")
 
 
 def cmd_new(store, args):
@@ -662,6 +859,7 @@ def _inbox_wait(store, args):
     me = _session_me(args)
     scope = task or ("{} 에게 배정된 작업".format(agent) if agent else "모든 AI 의 작업")
     _info("새 사용자 입력을 기다리는 중 ({} — 웹의 새 작업 지시 · 메시지 · 승인 결정) — 중단: Ctrl+C".format(scope))
+    _warn_other_data(store, args)
     if me:
         _info("이 세션: {} — 다른 모델 · 강도로 지정된 작업은 받지 않습니다".format(models.spec_label(*me)))
     def keep(items):  # 다른 모델의 작업 · 이 대화가 개발한 작업의 리뷰로는 깨어나지 않는다
@@ -1355,6 +1553,7 @@ def cmd_watch(store, args):
     _info("devtrack watch — {} 에게 온 입력(새 작업 지시 · 메시지 · 결정)을 기다렸다가 {} 로 처리합니다".format(
         agent, {"codex": "codex exec", "claude": "claude -p"}.get(runner and runner[0]) or extra[0]))
     _info("데이터: {} · 저장소 경로가 없는 작업의 실행 폴더: {} · 멈추기: Ctrl+C".format(store.root, default_cwd))
+    _warn_other_data(store, args)
     if runner:
         _info("모델 · 추론 강도가 지정된 작업은 그 모델로 실행합니다{}".format(
             "" if runner[0] == "codex" and _has_flag(extra, *CODEX_EXEC_ONLY)
@@ -1554,13 +1753,15 @@ def cmd_list(store, args):
 
 def cmd_serve(store, args):
     from .server import serve
+    _warn_other_data(store, args)
     serve(store, WEB_ROOT, host=args.host, port=args.port, open_browser=args.open, verbose=args.verbose)
 
 
 def cmd_publish(store, args):
-    dest = args.to or os.environ.get("DEVTRACK_PUBLISH_DIR")
+    dest = args.to or publish_location(store.root)[0]
     if not dest:
-        raise DevTrackError("배포할 디렉토리를 --to 또는 $DEVTRACK_PUBLISH_DIR 로 지정하세요")
+        raise DevTrackError("배포할 디렉토리를 --to 로 지정하거나 devtrack config publish <폴더> 로 정해 두세요 "
+                            "($DEVTRACK_PUBLISH_DIR 도 됨)")
     path = store.publish(WEB_ROOT, dest)
     _out(args, {"published": path}, "배포 완료: {}".format(path))
 
@@ -1585,7 +1786,7 @@ def _indent(text, n=4):
 def build_parser():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--data", default=argparse.SUPPRESS, metavar="DIR",
-                        help="데이터 디렉토리 (기본: $DEVTRACK_DATA 또는 <저장소>/data)")
+                        help="데이터 디렉토리 (기본: $DEVTRACK_DATA > devtrack config data > <저장소>/data)")
     common.add_argument("--as", dest="author", default=argparse.SUPPRESS, metavar="NAME",
                         help="기록 작성자 이름 (기본: $DEVTRACK_AGENT 또는 Claude)")
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="결과를 JSON 으로 출력")
@@ -1601,6 +1802,13 @@ def build_parser():
         return sp
 
     add("init", cmd_init, "데이터 디렉토리 초기화")
+
+    sp = add("config", cmd_config, "기록 폴더 · 웹 공개 폴더 확인 · 설정 (환경 변수와 달리 모든 프로세스에 적용)",
+             epilog="예: devtrack config   ·   devtrack config data ~/devtrack-data   ·   "
+                    "devtrack config publish ~/www/devtrack   ·   devtrack config data --unset")
+    sp.add_argument("key", nargs="?", choices=sorted(CONFIG_KEYS), help="data (기록 폴더) · publish (웹 공개 폴더)")
+    sp.add_argument("value", nargs="?", metavar="PATH", help="정할 폴더 (없으면 지금 값 출력)")
+    sp.add_argument("--unset", action="store_true", help="설정 지우기")
 
     sp = add("new", cmd_new, "새 작업 생성 (작업 ID 출력)")
     sp.add_argument("title", help="작업 제목")
@@ -1877,7 +2085,7 @@ def build_parser():
     sp.add_argument("-v", "--verbose", action="store_true", help="요청 로그 출력")
 
     sp = add("publish", cmd_publish, "정적 웹사이트 배포 (예: 웹 서버의 공개 폴더)")
-    sp.add_argument("--to", metavar="DIR", help="배포 디렉토리 (기본: $DEVTRACK_PUBLISH_DIR)")
+    sp.add_argument("--to", metavar="DIR", help="배포 디렉토리 (기본: $DEVTRACK_PUBLISH_DIR > devtrack config publish)")
 
     sp = add("demo", cmd_demo, "예시 데이터 생성")
     sp.add_argument("--force", action="store_true", help="기존 데이터 디렉토리를 비우고 생성")
@@ -1891,10 +2099,10 @@ def main(argv=None):
     if not getattr(args, "func", None):
         parser.print_help()
         return 1
-    args.data = getattr(args, "data", None) or default_data_dir()
+    args.data, args.data_from = data_location(getattr(args, "data", None))
     args.author = getattr(args, "author", None) or os.environ.get("DEVTRACK_AGENT") or "Claude"
     args.json = getattr(args, "json", False)
-    publish_dir = os.environ.get("DEVTRACK_PUBLISH_DIR") if args.cmd not in ("publish", "demo") else None
+    publish_dir = publish_location(args.data)[0] if args.cmd not in ("publish", "demo") else None
     store = Store(args.data, publish_dir=publish_dir)
     try:
         if args.cmd in TASK_WORK_CMDS:
