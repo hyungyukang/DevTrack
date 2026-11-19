@@ -2,7 +2,7 @@
 import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
   FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, DOC_KIND, CHECK_RATING, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
-  isUnassigned, aiName, agentLabel, MODELS, setModelCatalog, effortsFor, effortLabel, normalizeModel, specLabel, specMatches,
+  isUnassigned, aiName, agentLabel, MODELS, setModelCatalog, REVIEW_STATE, effortsFor, effortLabel, normalizeModel, specLabel, specMatches,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 import { L, translated, translatedStrings, getLang, setLang, applyStatic, locale } from './i18n.js';
@@ -587,7 +587,9 @@ function timelineItem(e, { taskLink = false } = {}) {
     <div class="body">
       ${e.kind === 'user'
         ? html`<div class="head"><span class="msg">${L('사용자 메시지')}</span></div><div class="msg-box markdown-body compact">${raw(renderMarkdown(e.message))}</div>`
-        : html`<div class="head"><span class="msg">${e.message}</span></div>`}
+        : e.kind === 'agent'
+          ? html`<div class="head"><span class="msg">${L('{from} → {to} AI 메시지', { from: authorName(e.author), to: e.meta?.to || 'AI' })}</span></div><div class="msg-box agent-msg">${e.message}</div>`
+          : html`<div class="head"><span class="msg">${e.message}</span></div>`}
       <div class="meta">${authorName(e.author)} · ${ago(e.ts)}${e.ref ? ` · ${e.ref}` : ''}${commit}${taskLink ? html` · <a href="#/task/${e.task_id}">${e.task_id} ${e.task_title}</a>` : ''}</div>
       ${e.detail ? html`<div class="detail markdown-body compact">${raw(renderMarkdown(e.detail))}</div>` : ''}
     </div>
@@ -612,15 +614,16 @@ function artRow(tid, a, { showTask = false, thumb = false } = {}) {
   const img = thumb && a.kind === 'image' && a.path ? artifactUrl(tid, a) : null;
   return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
     <span class="ic ${img ? 'has-img' : ''}">${img ? html`<img src="${img}" alt="" loading="lazy">` : icon(k.icon)}</span>
-    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : a.category === 'source' ? ` · ${L('검토할 문서')}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : a.category === 'source' ? ` · ${sourceLabel(a)}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
     ${icon('chev')}
   </a>`;
 }
 
-/** 결과물 분류 표시: 리뷰 리포트 · 검토할 문서(문서 리뷰의 원본) */
+/** 결과물 분류 표시: 리뷰 리포트 · 검토할 문서(문서 리뷰의 원본) · 리뷰할 변경(AI 리뷰의 diff) */
+const sourceLabel = (a) => (a.kind === 'diff' ? L('리뷰할 변경') : L('검토할 문서'));
 function catBadge(a) {
   if (a.category === 'review') return html`<span class="badge tone-violet">${L('리뷰')}</span>`;
-  if (a.category === 'source') return html`<span class="badge tone-orange">${L('검토할 문서')}</span>`;
+  if (a.category === 'source') return html`<span class="badge tone-orange">${sourceLabel(a)}</span>`;
   return '';
 }
 
@@ -699,8 +702,28 @@ function commitBox(act) {
       <dt>${L('저장소')}</dt><dd class="mono">${repo?.href ? html`<a href="${repo.href}" target="_blank" rel="noopener">${repo.text}</a>` : repo?.text || act.repo}</dd>
       ${act.remote_url ? html`<dt>${L('경로')}</dt><dd class="mono">${act.repo}</dd>` : ''}
       ${act.files?.length ? html`<dt>${L('대상 파일')}</dt><dd class="mono">${act.files.join(', ')}</dd>` : ''}
+      ${act.excluded?.length ? html`<dt>${L('뺀 빌드 결과물')}</dt><dd>${excludedText(act.excluded)}</dd>` : ''}
     </dl>
   </div>`;
+}
+
+/** diff · 커밋에서 뺀 빌드 결과물: 'build/ (CMake 빌드 폴더) 1,234개 · *.o (컴파일 결과물) 3개' */
+function excludedText(list, limit = 6) {
+  const parts = list.slice(0, limit).map((e) => `${e.path} (${L(e.reason)})${e.count > 1 ? ' ' + L('{n}개', { n: e.count.toLocaleString() }) : ''}`);
+  if (list.length > limit) parts.push(L('외 {n}곳', { n: list.length - limit }));
+  return parts.join(' · ');
+}
+
+/** 커밋 승인 요청에 붙은 리뷰 요약 (리뷰받기로 한 작업) */
+function approvalReview(rv) {
+  if (!rv) return '';
+  const st = pick(REVIEW_STATE, rv.state, 'planned');
+  const who = `${rv.reviewer}${rv.model || rv.effort ? ` (${specLabel(rv.model, rv.effort)})` : ''}`;
+  const text = rv.skipped ? L('리뷰 없이 요청 (사용자가 리뷰를 건너뛰라고 함)')
+    : rv.state === 'approved' ? L('{who} 의 {n}차 리뷰를 통과한 코드입니다', { who, n: rv.round })
+      : rv.state === 'exhausted' ? L('{who} 의 리뷰를 {n}번 받았지만 아직 수정 필요 — 남은 항목 {ids}', { who, n: rv.round, ids: (rv.open || []).join(', ') || '-' })
+        : st.label;
+  return html`<div class="ap-review tone-${rv.skipped ? 'amber' : st.tone}">${icon(rv.skipped ? 'alert' : st.icon)} <span>${text}</span>${rv.task ? html` <a href="#/task/${rv.task}">${rv.task}</a>` : ''}</div>`;
 }
 
 // ---------------------------------------------------------------------- 코드 리뷰 검토 항목 (R1, R2…)
@@ -818,6 +841,7 @@ function approvalCard(t, ap, { showTask = false, skip = [] } = {}) {
     </header>
     <div class="ap-body">
       ${ap.description ? html`<div class="ap-desc markdown-body compact">${raw(renderMarkdown(ap.description))}</div>` : ''}
+      ${approvalReview(ap.review)}
       ${ap.action ? commitBox(ap.action) : ''}
       ${linked.length ? html`<div class="ap-linked">${linked.map((a, i) => html`
         <details data-key="ap:${t.id}:${ap.id}:${a.id}" ${ap.status === 'pending' && i === 0 ? raw('open') : ''}>
@@ -1208,12 +1232,65 @@ async function viewTask({ rest }) {
     ${body}`;
 }
 
+// ---------------------------------------------------------------------- AI 끼리 리뷰 반복
+const verdictBadge = (v) => (v === 'approve' ? html`<span class="badge tone-green">${icon('check')} ${L('통과')}</span>`
+  : v === 'request_changes' ? html`<span class="badge tone-amber">${icon('edit')} ${L('수정 필요§리뷰')}</span>`
+    : html`<span class="badge tone-blue">${icon('eye')} ${L('리뷰 중')}</span>`);
+
+/** 개발 작업: 누가 리뷰하는지, 차례마다 결과, 지금 누구 차례인지 */
+function reviewLoopPanel(t) {
+  const loop = t.review_loop;
+  if (!loop?.reviewer) return '';
+  const st = pick(REVIEW_STATE, loop.state, 'planned');
+  const hist = loop.history || [];
+  const used = hist.length - (loop.cycle_start || 0);
+  const spec = specLabel(loop.model, loop.effort);
+  const dev = aiName(t);
+  const next = {
+    planned: L('개발이 끝나면 {dev} 가 {who} 에게 리뷰를 요청합니다.', { dev, who: loop.reviewer }),
+    reviewing: L('{who} 가 리뷰하는 중입니다. {who} 가 켜져 있어야 이어집니다 (실행기 devtrack watch 또는 대기 모드).', { who: loop.reviewer }),
+    changes: L('{dev} 가 지적을 고친 뒤 다시 리뷰를 요청합니다.', { dev }),
+    approved: L('리뷰를 통과했습니다. {dev} 가 커밋 승인을 요청합니다 — 커밋 · 푸시는 승인해야만 진행됩니다.', { dev }),
+    exhausted: L('리뷰를 정한 횟수만큼 받았지만 아직 수정이 필요합니다. {dev} 가 남은 지적과 함께 결정을 요청합니다.', { dev }),
+  }[loop.state] || '';
+  return html`<section class="card review-loop">
+    <div class="card-head"><h2>${icon('eye')} ${L('AI 리뷰')}</h2><span class="badge tone-${st.tone}">${icon(st.icon)} ${st.label}</span></div>
+    <div class="card-body">
+      <div class="rl-who">${L('리뷰어')} <b>${loop.reviewer}</b>${spec ? html` <span class="muted">· ${spec}</span>` : ''} · ${L('최대 {n}번', { n: loop.rounds })}${hist.length ? html` · ${L('{n}번 받음', { n: used })}` : ''}${loop.task ? html` · <a href="#/task/${loop.task}">${L('리뷰 작업')} ${loop.task}</a>` : ''}</div>
+      ${hist.length ? html`<ol class="rl-rounds">${hist.map((h) => html`<li>
+        <span class="rl-n">${L('{n}차', { n: h.round })}</span>${verdictBadge(h.verdict)}
+        <span class="muted">${L('{n}개 파일', { n: h.stat?.files ?? '?' })} <span class="add">+${h.stat?.additions ?? 0}</span> <span class="del">−${h.stat?.deletions ?? 0}</span></span>
+        ${h.open?.length ? html`<span class="rl-open">${L('열린 항목')} ${h.open.map((id) => html`<span class="fid">${id}</span>`)}</span>` : ''}
+        <span class="rl-links">${h.diff ? html`<a href="#/artifact/${h.task}/${h.diff}">${L('변경 내용')}</a>` : ''}${h.since ? html` · <a href="#/artifact/${h.task}/${h.since}">${L('지난 리뷰 이후')}</a>` : ''}</span>
+        ${h.summary ? html`<div class="rl-sum">${h.summary}</div>` : ''}
+        ${h.excluded?.length ? html`<div class="rl-ex muted">${L('빌드 결과물 제외')}: ${excludedText(h.excluded, 3)}</div>` : ''}
+      </li>`)}</ol>` : ''}
+      <p class="rl-next muted">${next}</p>
+    </div>
+  </section>`;
+}
+
+/** 리뷰 작업: 무엇을 리뷰하는지 (개발 작업 · 차례) */
+function reviewOfPanel(t) {
+  const of = t.review_of;
+  if (!of?.task) return '';
+  const rounds = t.review_rounds || [];
+  return html`<section class="card review-loop">
+    <div class="card-head"><h2>${icon('eye')} ${L('리뷰 대상')}</h2><span class="muted">${L('{n}차', { n: t.review_round || 1 })}</span></div>
+    <div class="card-body">
+      <div class="rl-who"><a href="#/task/${of.task}">${of.task} · ${of.title || ''}</a> · ${L('개발')} <b>${of.agent || 'AI'}</b>${of.model || of.effort ? html` <span class="muted">(${specLabel(of.model, of.effort)})</span>` : ''}</div>
+      ${rounds.length ? html`<ol class="rl-rounds">${rounds.map((r) => html`<li><span class="rl-n">${L('{n}차', { n: r.round })}</span>${verdictBadge(r.verdict)}${r.open?.length ? html`<span class="rl-open">${L('열린 항목')} ${r.open.map((id) => html`<span class="fid">${id}</span>`)}</span>` : ''}${r.summary ? html`<div class="rl-sum">${r.summary}</div>` : ''}</li>`)}</ol>` : ''}
+    </div>
+  </section>`;
+}
+
 function taskOverview(t, openIssues) {
   const plan = t.plan || [];
   const recent = [...t.log].reverse().slice(0, 8);
   const arts = [...t.artifacts].reverse().slice(0, 6);
   return html`<div class="detail-grid">
     <div>
+      ${reviewLoopPanel(t)}${reviewOfPanel(t)}
       ${t.type === 'docreview' || t.review?.doc ? (t.review ? docReviewPanel(t) : '') : reviewPanel(t)}
       <section class="card">
         <div class="card-head"><h2>${icon('message')} ${L('작업 지시')}</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
@@ -1977,6 +2054,7 @@ function viewNewTask({ q = {} } = {}) {
         <label class="field"><span>${L('대상 저장소 경로')}</span><input type="text" name="repo" placeholder="/ccs/home/user/project"><small>${L('코드 작업일 때 결과를 커밋할 저장소')}</small></label>
         <label class="field"><span>${L('브랜치')}</span><input type="text" name="branch" placeholder="${L('(현재 브랜치)')}"></label>
       </div>
+      ${reviewFields(type)}
       <div class="field rel-field"><span class="field-label">${L('관련 작업 (선택)')}</span>
         <div class="rel-pick">
           <select data-rel-add aria-label="${L('목록에서 관련 작업 추가')}"><option value="">${L('목록에서 고르기…')}</option>${tasks.map((t) => html`<option value="${t.id}" ${rel.includes(t.id) ? raw('disabled') : ''}>${t.id} · ${pick(TYPES, t.type).label} · ${t.title}</option>`)}</select>
@@ -1994,6 +2072,40 @@ function viewNewTask({ q = {} } = {}) {
 }
 
 const AGENTS = [['Claude', 'Claude'], ['Codex', 'Codex'], ['Gemini', 'Gemini'], ['누구나', '누구나 (먼저 시작한 AI)']];
+
+/** 코드 작업의 '리뷰 받기' 칸: 끝나면 다른 AI 에게 리뷰받고, 수정이 필요하면 고친 뒤 다시 리뷰 (최대 횟수까지) */
+function reviewFields(type) {
+  const last = LS.get('newReviewer', '');
+  const same = !!last && String(LS.get('newAgent', 'Claude')).toLowerCase() === last.toLowerCase();
+  return html`<div class="review-fields" data-type-only="code" data-review-fields ${type === 'code' ? '' : raw('hidden')}>
+    <div class="field-row">
+      <label class="field"><span>${L('리뷰 받기 (선택)')}</span><select name="review_by">
+        <option value="">${L('안 받음')}</option>${AGENTS.filter(([v]) => !isUnassigned(v)).map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${L(label)}</option>`)}
+      </select></label>
+      <label class="field"><span>${L('리뷰 최대 횟수')}</span><select name="review_rounds">${[1, 2, 3, 4, 5].map((n) => html`<option value="${n}" ${n === 3 ? raw('selected') : ''}>${L('{n}번', { n })}</option>`)}</select></label>
+    </div>
+    <div data-review-model ${last ? '' : raw('hidden')}>${modelFields(last || 'Codex', '', '', { prefix: 'review_', label: L('리뷰어 모델 (선택)') })}</div>
+    <small class="mf-note">${L('개발이 끝나면 이 AI 가 변경된 코드(빌드 결과물 제외)를 리뷰합니다. 수정이 필요하면 담당 AI 가 고친 뒤 다시 리뷰받고, 통과하면 커밋 승인을 요청합니다. 두 AI 가 모두 켜져 있어야 저절로 이어집니다.')}</small>
+    <div class="alert alert-info review-same" data-review-same ${same ? '' : raw('hidden')}>${icon('info')}<div class="alert-body"><p>${LH('같은 AI 가 리뷰합니다. 리뷰는 개발한 대화와 다른 <b>새 대화</b>에서 하므로, 실행기(<code>devtrack watch</code>)를 켜 두세요 — 작업마다 따로 대화를 엽니다.')}</p></div></div>
+  </div>`;
+}
+
+/** 리뷰어가 담당 AI 와 같으면 '리뷰는 다른 대화에서' 안내를 보여 준다 */
+function syncReviewSame(form) {
+  const note = form.querySelector('[data-review-same]');
+  if (!note) return;
+  const a = form.elements.agent.value;
+  note.hidden = !(form.elements.review_by.value && !isUnassigned(a) && a.toLowerCase() === form.elements.review_by.value.toLowerCase());
+}
+
+function syncReviewFields(form) {
+  const box = form.querySelector('[data-review-fields]');
+  if (!box) return;
+  const reviewer = form.elements.review_by.value;
+  const wrap = box.querySelector('[data-review-model]');
+  wrap.hidden = !reviewer;
+  if (reviewer) syncModelFields(wrap.querySelector('[data-model-fields]'), reviewer);
+}
 
 function agentOptions() {
   const last = LS.get('newAgent', 'Claude');
@@ -2021,56 +2133,64 @@ function effortOptions(agent, model, effort, keep) {
 
 /** 모델 · 추론 강도 칸 (새 작업 지시 · 모델 변경 창). 담당 AI 의 모델 목록에서 고르고, 목록에 없는 모델은 직접 입력.
  *  추론 강도는 고른 모델이 받는 값만 보여 준다 */
-function modelFields(agent, model = '', effort = '', { keep = true, custom: forceCustom = false } = {}) {
+function modelFields(agent, model = '', effort = '', { keep = true, custom: forceCustom = false, prefix = '', label = '' } = {}) {
   const groups = modelGroups(agent);
   const listed = groups.some(([, list]) => list.some((m) => m.id === model));
   const custom = forceCustom || (!!model && !listed);
-  return html`<div class="model-fields" data-model-fields data-agent="${agent || ''}">
+  const title = label || L('모델 (선택)');
+  return html`<div class="model-fields" data-model-fields data-agent="${agent || ''}" ${prefix ? raw(`data-prefix="${prefix}"`) : ''}>
     <div class="field-row">
-      <div class="field mf-model"><span class="field-label">${L('모델 (선택)')}</span>
-        <select name="model_pick" aria-label="${L('모델 (선택)')}">
+      <div class="field mf-model"><span class="field-label">${title}</span>
+        <select name="${prefix}model_pick" aria-label="${title}">
           <option value="">${L('지정 안 함 — 어떤 모델이든')}</option>
           ${groups.map(([name, list]) => html`<optgroup label="${name}">${list.map((m) => html`<option value="${m.id}" ${!custom && m.id === model ? raw('selected') : ''}>${m.label}</option>`)}</optgroup>`)}
           <option value="__custom" ${custom ? raw('selected') : ''}>${L('직접 입력…')}</option>
         </select>
-        <input type="text" name="model_custom" value="${custom ? model : ''}" placeholder="${L('모델 이름 (예: gpt-6-sol)')}" aria-label="${L('모델 이름')}" spellcheck="false" ${custom ? '' : raw('hidden')}>
+        <input type="text" name="${prefix}model_custom" value="${custom ? model : ''}" placeholder="${L('모델 이름 (예: gpt-6-sol)')}" aria-label="${L('모델 이름')}" spellcheck="false" ${custom ? '' : raw('hidden')}>
       </div>
-      <label class="field"><span>${L('추론 강도')}</span><select name="effort">${effortOptions(agent, model, effort, keep)}</select></label>
+      <label class="field"><span>${L('추론 강도')}</span><select name="${prefix}effort">${effortOptions(agent, model, effort, keep)}</select></label>
     </div>
-    <small class="mf-note">${L('지정하면 이 작업은 그 모델로만 처리합니다. 실행기(devtrack watch)는 이 모델로 AI 를 띄우고, 다른 모델로 켜 둔 대화는 이 작업을 받지 않습니다.')}</small>
+    ${prefix ? '' : html`<small class="mf-note">${L('지정하면 이 작업은 그 모델로만 처리합니다. 실행기(devtrack watch)는 이 모델로 AI 를 띄우고, 다른 모델로 켜 둔 대화는 이 작업을 받지 않습니다.')}</small>`}
   </div>`;
 }
 
+/** 모델 칸 안의 입력 (prefix 가 붙은 칸도 같은 이름 규칙) */
+const mfEl = (box, name) => box.querySelector(`[name="${box.dataset.prefix || ''}${name}"]`);
+
 /** 모델 칸에서 고른 값 → { model, effort } (지정 안 함은 '') */
 function readModelFields(box) {
-  const pickEl = box.querySelector('[name="model_pick"]');
-  const model = pickEl.value === '__custom' ? box.querySelector('[name="model_custom"]').value.trim() : pickEl.value;
-  return { model: normalizeModel(model), effort: box.querySelector('[name="effort"]').value };
+  const pickEl = mfEl(box, 'model_pick');
+  const model = pickEl.value === '__custom' ? mfEl(box, 'model_custom').value.trim() : pickEl.value;
+  return { model: normalizeModel(model), effort: mfEl(box, 'effort').value };
 }
 
 /** 담당 AI 를 바꾸면 모델 목록 · 강도 목록을 그 AI 에 맞게 다시 그린다 (고른 모델은 유지 — 새 목록에 없으면 직접 입력 칸으로) */
 function syncModelFields(box, agent) {
   const { model, effort } = readModelFields(box);
-  const custom = box.querySelector('[name="model_pick"]').value === '__custom';
-  box.outerHTML = String(modelFields(agent, model, effort, { keep: false, custom }));
+  const custom = mfEl(box, 'model_pick').value === '__custom';
+  const prefix = box.dataset.prefix || '';
+  const label = prefix ? box.querySelector('.field-label').textContent : '';
+  box.outerHTML = String(modelFields(agent, model, effort, { keep: false, custom, prefix, label }));
 }
 
 /** 고른 모델이 받는 강도로 강도 목록을 바꾼다 (지금 값이 없으면 '지정 안 함') */
 function syncEfforts(box) {
-  const sel = box.querySelector('[name="effort"]');
+  const sel = mfEl(box, 'effort');
   const { model, effort } = readModelFields(box);
   sel.innerHTML = String(effortOptions(box.dataset.agent, model, effort, false));
 }
 
 function onModelPick(select) {
   const box = select.closest('[data-model-fields]');
-  const input = box.querySelector('[name="model_custom"]');
+  const input = mfEl(box, 'model_custom');
   input.hidden = select.value !== '__custom';
   syncEfforts(box);
   if (!input.hidden) input.focus();
 }
 
 const modelArgs = ({ model, effort }) => [model ? `--model ${shellQuote(model)}` : '', effort ? `--effort ${effort}` : ''].filter(Boolean).join(' ');
+const reviewArgs = (d) => (d.review_by ? [`--review-by ${shellQuote(d.review_by)}`, `--review-rounds ${d.review_rounds}`,
+  d.review_model ? `--review-model ${shellQuote(d.review_model)}` : '', d.review_effort ? `--review-effort ${d.review_effort}` : ''].filter(Boolean).join(' ') : '');
 
 /** 관련 작업 칸의 글 → 작업 ID 목록 (중복 제거) 과 작업 번호로 읽을 수 없는 조각.
  *  "T-0001, 2; t-3" → ids ['T-0001', 'T-0002', 'T-0003'] (store.normalize_task_id 와 같은 규칙) */
@@ -2162,15 +2282,20 @@ async function submitNewTask(ev) {
     return;
   }
   data.related = relIds;
-  Object.assign(data, readModelFields(form.querySelector('[data-model-fields]')));
-  delete data.model_pick;
-  delete data.model_custom;
-  if (/\s/.test(data.model)) {
-    toast({ title: L('모델 이름에 공백을 넣을 수 없습니다'), meta: data.model, tone: 'red' });
-    form.elements.model_custom.focus();
-    return;
+  Object.assign(data, readModelFields(form.querySelector('[data-model-fields]:not([data-prefix])')));
+  const rv = data.type === 'code' && data.review_by ? readModelFields(form.querySelector('[data-model-fields][data-prefix="review_"]')) : null;
+  for (const k of ['model_pick', 'model_custom', 'review_model_pick', 'review_model_custom', 'review_effort']) delete data[k];
+  if (rv) Object.assign(data, { review_model: rv.model, review_effort: rv.effort, review_rounds: Number(data.review_rounds) || 3 });
+  else { delete data.review_by; delete data.review_rounds; }
+  for (const [m, el] of [[data.model, 'model_custom'], [data.review_model, 'review_model_custom']]) {
+    if (m && /\s/.test(m)) {
+      toast({ title: L('모델 이름에 공백을 넣을 수 없습니다'), meta: m, tone: 'red' });
+      form.elements[el].focus();
+      return;
+    }
   }
   LS.set('newAgent', data.agent); // 다음 지시에도 같은 AI 를 기본으로
+  LS.set('newReviewer', data.review_by || '');
   const ai = aiName(data);
   if (state.mode === 'live') {
     const btn = form.querySelector('button[type="submit"]');
@@ -2182,7 +2307,10 @@ async function submitNewTask(ev) {
       form.elements.type.value = data.type;
       syncTypeFields(form);
       syncRelated(form);
-      syncModelFields(form.querySelector('[data-model-fields]'), data.agent);
+      syncModelFields(form.querySelector('[data-model-fields]:not([data-prefix])'), data.agent);
+      form.elements.review_by.value = data.review_by || '';
+      syncReviewFields(form);
+      syncReviewSame(form);
       toast({ title: L('작업 지시를 등록했습니다'), meta: `${r.task.id} — ${isUnassigned(data.agent) ? L('먼저 시작한 AI 가 맡습니다') : L('{ai}에게 devtrack inbox 로 전달됩니다', { ai })}`, tone: 'green' });
       await poll({ force: true });
       location.hash = `#/task/${r.task.id}`;
@@ -2199,6 +2327,7 @@ async function submitNewTask(ev) {
     data.repo ? `--repo ${shellQuote(data.repo)}` : '', data.branch ? `--branch ${shellQuote(data.branch)}` : '',
     relIds.length ? `--related ${relIds.join(' ')}` : '',
     modelArgs(data),
+    reviewArgs(data),
     data.instruction ? `-i ${shellQuote(data.instruction)}` : '',
   ].filter(Boolean).join(' ');
   const msg = [
@@ -2210,6 +2339,7 @@ async function submitNewTask(ev) {
     data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : null,
     rels.length ? `관련 작업: ${rels.map((t) => `${t.id} ${t.title}`).join(', ')} (devtrack new 에 --related ${relIds.join(' ')})` : null,
     data.model || data.effort ? `모델: ${specLabel(data.model, data.effort)} (devtrack new 에 ${modelArgs(data)})` : null,
+    data.review_by ? `리뷰: 끝나면 ${data.review_by}${data.review_model || data.review_effort ? ` (${specLabel(data.review_model, data.review_effort)})` : ''} 에게 리뷰받기, 최대 ${data.review_rounds}번 (devtrack new 에 ${reviewArgs(data)})` : null,
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',
@@ -2628,9 +2758,11 @@ function bindEvents() {
     if (el?.dataset.change === 'type-filter') location.hash = tasksHref({ ...parseRoute().q, type: el.value });
     if (ev.target.matches('#new-task-form select[name="type"]')) syncTypeFields(ev.target.form);
     if (ev.target.matches('#new-task-form [data-rel-add]')) addRelated(ev.target);
-    if (ev.target.matches('#new-task-form select[name="agent"]')) syncModelFields(ev.target.form.querySelector('[data-model-fields]'), ev.target.value);
-    if (ev.target.matches('[data-model-fields] select[name="model_pick"]')) onModelPick(ev.target);
-    if (ev.target.matches('[data-model-fields] input[name="model_custom"]')) syncEfforts(ev.target.closest('[data-model-fields]'));
+    if (ev.target.matches('#new-task-form select[name="agent"]')) syncModelFields(ev.target.form.querySelector('[data-model-fields]:not([data-prefix])'), ev.target.value);
+    if (ev.target.matches('#new-task-form select[name="review_by"]')) syncReviewFields(ev.target.form);
+    if (ev.target.closest('#new-task-form')) syncReviewSame(ev.target.closest('#new-task-form'));
+    if (ev.target.matches('[data-model-fields] select[name$="model_pick"]')) onModelPick(ev.target);
+    if (ev.target.matches('[data-model-fields] input[name$="model_custom"]')) syncEfforts(ev.target.closest('[data-model-fields]'));
     const box = ev.target.closest('.choice-box');
     if (box) { box.dataset.dirty = '1'; syncChoiceCount(box); }
   });

@@ -86,6 +86,8 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
+- `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
+  so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
@@ -259,6 +261,38 @@ DevTrack reads the chat's model and effort from the Claude Code session record t
   start the runner; switch that chat with `/model claude-opus-5-5` · `/effort xhigh` and then say "go ahead with T-0012"; or change the task's model.
 - If you change the model of a task already under way, it applies from the next message.
 
+### 6-2. Let AIs review each other's work (optional)
+
+A code task can be set to get a review from another AI once the work is done. For example, Claude develops and Codex reviews.
+If the review asks for changes, the AI that did the work fixes them and asks again; once the review passes, it asks for commit approval. No one has to pass the results along in between.
+
+1. On **New task**, keep the type at **Code development** and, under **Get a review**, choose the reviewer AI and the **max review rounds** (3 by default).
+   You can also set the reviewer's model and effort ([6-1](#/guide/s6-1)).
+2. When the work is done, the assigned AI asks for a review. DevTrack makes a **review task** (e.g. `T-0012`) with the diff of the code changed so far and gives it to the reviewer.
+3. The reviewer records findings (R1, R2…) and a verdict (**Approved** / **Changes requested**). The result goes to the AI that did the work as an **[AI 메시지]** (AI message).
+4. If changes are requested, that AI fixes them and asks again. From the second round on, a diff of **what changed since the last review** goes along too.
+   The reviewer continues the same conversation, so it checks that its earlier findings were fixed.
+5. Once the review passes, the AI asks for commit approval, and the request shows "This code passed review round 2 by Codex".
+   **Nothing is committed or pushed until you approve, as before.** If all rounds are used and changes are still requested, the AI asks you to decide, with the open findings (commit as is, fix more, or allow more reviews).
+
+The **AI review** box on the task page shows each round's result (e.g. round 1 changes requested → round 2 approved), the open items and the reviewed changes. Cancelling the task stops the loop.
+
+- **Both AIs must be running for this to go on by itself.** For example, run `devtrack watch --claude` in one terminal and `devtrack watch --codex` in another.
+  Claude can also be a chat in waiting mode.
+- **The same AI works too** (e.g. Claude develops and Claude reviews, even with the same model). The review is still done by a **new conversation, not the one
+  that wrote the code**, so the code is not re-read in the same context. With just `devtrack watch --claude` on, development and review run in separate conversations for each task.
+  The waiting-mode chat that did the work does not take that review task (`[다른 대화가 리뷰]`).
+- **Rules that are enforced**
+  - A task set to get a review cannot ask for commit approval before the review passes. If the code changes after it passes, the change has to be reviewed again.
+    To commit without a review, say so in the chat.
+  - The conversation that did the work cannot take its review. To have the same conversation review it anyway, say so in the chat.
+  - The reviewer only reviews and does not edit files. Once a commit is applied, later changes on the task are reviewed again and the rounds are counted afresh.
+- **The diff holds only changed code.** CMake build folders (folders with a `CMakeCache.txt`), `CMakeFiles/`, objects, libraries and executables (`.o` · `.a` · `.so` and so on), build folders such as `build/` · `cmake-build-*/`, and `__pycache__/` are left out of the review diff and the commit even when they are not in `.gitignore`, and what was left out is shown separately.
+  If a left-out file really belongs in, name it exactly in the request (`--files`).
+- **AIs asking each other directly:** `devtrack send <task> "message"` reaches the inbox of the AI that has the task, as an [AI 메시지].
+  It is not the user's instruction, so anything that needs approval still goes to the user.
+- In a terminal, set it with `devtrack new … --review-by Codex --review-rounds 3`, or for an existing task ask with `devtrack review-request T-0001 --reviewer Codex`.
+
 ## 7. Follow the progress
 
 - **Dashboard** — counts of tasks in progress, awaiting approval, open issues and done; items that need your attention; cards for tasks in progress; recent activity.
@@ -291,6 +325,7 @@ When Claude reaches a point that needs your check, it shows up in the **Approval
 3. For requests where you pick from a list (e.g. "pick the items to comment on"), only the checked items go ahead.
 
 Safeguard: a commit request **does not run if the actual change differs even slightly from the diff you approved.** If the code changes after your approval, Claude posts a new request.
+The commit holds only the files in the diff. Build outputs (CMake build folders, `.o` files, executables and so on) are left out even when they are not in `.gitignore`, and the request lists them under **Build outputs left out** ([6-2](#/guide/s6-2)).
 
 If you want to tell Claude something during the work, write it in the **Message to Claude** box on the task detail page and send it. Claude picks it up at its next step.
 
@@ -619,6 +654,8 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
+- `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
+  so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
 - When a user decision is needed, leave a request with `devtrack request`, tell the user, and stop. Do not wait for long with `devtrack wait` or `devtrack inbox --wait`
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
@@ -779,6 +816,9 @@ Commands you use yourself:
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |
+| `devtrack review-request T-0001 --reviewer Codex` | Have another AI review the code changed so far (build outputs left out). The result comes as an [AI 메시지] (6-2) |
+| `devtrack review-done T-0012 --verdict changes -m "…"` | (The reviewing AI) send this round's result: `approve` or `changes` |
+| `devtrack send T-0012 "…"` | Send a message to a task another AI has ([AI 메시지]) |
 | `devtrack --data <folder> demo` | Create example data |
 
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·

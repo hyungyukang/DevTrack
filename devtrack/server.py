@@ -122,6 +122,11 @@ def make_handler(store, web_root, verbose=False):
                             status="queued", created_by=USER, related=[r for r in related if r],
                             model=(body.get("model") or "").strip() or None,
                             effort=(body.get("effort") or "").strip() or None,
+                            review={"reviewer": (body.get("review_by") or "").strip(),
+                                    "rounds": body.get("review_rounds") or None,
+                                    "model": (body.get("review_model") or "").strip() or None,
+                                    "effort": (body.get("review_effort") or "").strip() or None}
+                            if (body.get("review_by") or "").strip() else None,
                         )
                         return self._json({"ok": True, "task": {"id": t["id"]}}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/comments$", path)

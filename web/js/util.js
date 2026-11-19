@@ -129,6 +129,15 @@ export const LOG_KIND = translated({
   commit: { label: '커밋', icon: 'git', tone: 'violet' },
   artifact: { label: '결과물', icon: 'package', tone: 'teal' },
   status: { label: '상태', icon: 'circle', tone: 'gray' },
+  agent: { label: 'AI 메시지', icon: 'cpu', tone: 'violet' },
+});
+/** 리뷰 반복의 상태 (store.REVIEW_STATES) */
+export const REVIEW_STATE = translated({
+  planned: { label: '리뷰 전', tone: 'gray', icon: 'clock' },
+  reviewing: { label: '리뷰 중', tone: 'blue', icon: 'eye' },
+  changes: { label: '수정 필요§리뷰', tone: 'amber', icon: 'edit' },
+  approved: { label: '통과', tone: 'green', icon: 'check-circle' },
+  exhausted: { label: '리뷰 횟수 다 씀', tone: 'red', icon: 'alert' },
 });
 export const SEVERITY = translated({
   low: { label: '낮음', tone: 'gray' },

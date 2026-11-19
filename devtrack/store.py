@@ -62,7 +62,16 @@ STATUSES = {
 LOG_KINDS = (
     "info", "step", "success", "warning", "error", "issue",
     "user", "approval", "decision", "commit", "artifact", "status",
+    "agent",  # 다른 AI 가 보낸 메시지 (devtrack send · 리뷰 요청 · 리뷰 결과) — 그 작업의 AI 받은 편지함으로 간다
 )
+
+# AI 끼리 리뷰 반복 (개발 작업의 review_loop)
+REVIEW_ROUNDS_DEFAULT = 3
+REVIEW_ROUNDS_MAX = 10
+REVIEW_STATES = {"planned": "리뷰 전", "reviewing": "리뷰 중", "changes": "수정 필요", "approved": "통과",
+                 "exhausted": "리뷰 횟수 다 씀"}
+_REVIEW_PASS = ("approve", "approved", "pass", "passed", "ok", "lgtm", "comment", "통과")
+_REVIEW_CHANGES = ("changes", "change", "request_changes", "changes_requested", "fix", "reject", "수정", "수정필요")
 SEVERITIES = ("low", "medium", "high", "critical")
 PRIORITIES = ("low", "normal", "high")
 APPROVAL_KINDS = ("general", "commit", "plan", "review", "result", "merge")
@@ -480,7 +489,8 @@ class Store:
     # ------------------------------------------------------------------ 작업
     def create_task(self, title, instruction="", type="code", agent="Claude", repo=None, branch=None,
                     repo_url=None, tags=None, priority="normal", status="in_progress", created_by=None,
-                    plan=None, related=None, model=None, effort=None):
+                    plan=None, related=None, model=None, effort=None, review=None):
+        """review: 끝나면 다른 AI 에게 리뷰받기 {"reviewer", "rounds", "model", "effort"} (review_request 가 쓴다)."""
         if type not in TASK_TYPES:
             raise DevTrackError("알 수 없는 작업 유형: {} ({})".format(type, ", ".join(TASK_TYPES)))
         if status not in STATUSES:
@@ -489,6 +499,9 @@ class Store:
             raise DevTrackError("우선순위는 {} 중 하나여야 합니다".format(", ".join(PRIORITIES)))
         model, effort = models.normalize_model(model), models.normalize_effort(effort)
         models.check_effort(agent, model, effort)
+        review_plan = None
+        if review and review.get("reviewer"):
+            review_plan = _norm_review_plan(review)
         repo_info = {}
         if repo:
             repo_info["path"] = os.path.abspath(os.path.expanduser(repo))
@@ -531,10 +544,16 @@ class Store:
                 "approvals": [],
                 "seq": {},
             }
+            if review_plan:  # 끝나면 이 AI 에게 리뷰받는다 (devtrack review-request)
+                task["review_loop"] = dict(review_plan, state="planned", history=[])
             os.makedirs(os.path.join(self.tasks_dir, tid), exist_ok=True)
             if created_by == USER:
                 self._log(task, "사용자가 새 작업을 지시했습니다", kind="user", author=USER)
                 task["log"][-1]["ack"] = True  # 지시 자체는 queued 상태로 전달됨
+            elif status == "queued" and created_by and agent_key(created_by) != agent_key(task["agent"]):
+                # 다른 AI 가 맡긴 작업 (예: 리뷰 요청) — 맡은 AI 의 받은 편지함에 새 작업으로 간다
+                self._log(task, "{} 이(가) {} 에게 맡긴 작업입니다".format(created_by, task["agent"]), kind="info",
+                          author=created_by)
             else:
                 self._log(task, "작업을 시작했습니다", kind="status", author=task["agent"], meta={"to": status})
             if plan:
@@ -754,6 +773,232 @@ class Store:
             raise DevTrackError("메시지가 비어 있습니다")
         with self.edit(tid) as t:
             return self._log(t, message.strip(), kind="user", author=USER)
+
+    # ------------------------------------------------------------------ AI 끼리 메시지 · 리뷰 반복
+    def _agent_message(self, t, message, author, meta=None, kind_label=None):
+        """작업 t 의 담당 AI 에게 다른 AI 의 메시지를 남긴다 (받은 편지함의 [AI 메시지])."""
+        e = self._log(t, message, kind="agent", author=author, meta=dict(meta or {}, to=t.get("agent")))
+        e["ack"] = False
+        return e
+
+    def send_agent_message(self, tid, message, author=None):
+        """다른 AI 가 맡은 작업에 메시지를 보낸다 — 그 AI 가 처리한다 (사용자 지시가 아님)."""
+        if not message or not message.strip():
+            raise DevTrackError("메시지가 비어 있습니다")
+        with self.edit(tid) as t:
+            if t["status"] == "cancelled":
+                raise DevTrackError("취소된 작업입니다: {}".format(t["id"]))
+            if author and agent_key(author) == agent_key(t.get("agent")):
+                raise DevTrackError("{} 은(는) {} 이(가) 맡은 작업입니다 — 다른 AI 가 맡은 작업에 보내세요".format(
+                    t["id"], t.get("agent")))
+            return self._agent_message(t, message.strip(), author)
+
+    def review_request(self, tid, reviewer=None, rounds=None, model=None, effort=None, note="", files=None,
+                       author=None, same_session=False):
+        """개발 작업의 지금 변경(빌드 결과물 제외)을 다른 AI 에게 리뷰받는다. 첫 차례에는 리뷰 작업을 만들어 리뷰어에게 맡기고,
+        다음 차례에는 같은 리뷰 작업에 [AI 메시지] 로 다시 요청한다 (리뷰어는 같은 대화로 이어 감).
+        차례마다 전체 diff 와, 두 번째부터는 지난 차례 이후 바뀐 부분 diff 를 리뷰 작업의 결과물로 붙인다.
+        리뷰어는 같은 AI · 같은 모델이어도 되지만, 리뷰는 개발한 대화와 다른 대화가 한다 (cli 의 _own_review).
+        same_session: 개발한 대화가 리뷰해도 됨 (사용자가 그렇게 하라고 한 경우만)."""
+        tid = normalize_task_id(tid)
+        t = self.load(tid)
+        repo = (t.get("repo") or {}).get("path")
+        if not repo:
+            raise DevTrackError("{} 에 저장소 경로가 없습니다 — 리뷰는 저장소가 있는 코드 작업만 받을 수 있습니다".format(tid))
+        repo = gitops.require_repo(repo)
+        loop = dict(t.get("review_loop") or {})
+        plan = {k: loop.get(k) for k in ("reviewer", "rounds", "model", "effort")}
+        for k, v in (("reviewer", reviewer), ("rounds", rounds), ("model", model), ("effort", effort)):
+            if v not in (None, ""):
+                plan[k] = v
+        if not plan.get("reviewer"):
+            raise DevTrackError("리뷰어 AI 를 정하세요 (예: devtrack review-request {} --reviewer Codex)".format(tid))
+        plan = _norm_review_plan(plan)
+        same_session = bool(same_session or loop.get("same_session"))
+        history = list(loop.get("history") or [])
+        if history and not history[-1].get("verdict"):
+            raise DevTrackError("{}차 리뷰를 기다리는 중입니다 ({}) — 결과는 [AI 메시지] 로 옵니다".format(
+                history[-1]["round"], history[-1].get("task")))
+        used = len(history) - int(loop.get("cycle_start") or 0)  # 커밋이 반영되면 횟수를 새로 센다
+        if used >= plan["rounds"]:
+            raise DevTrackError("리뷰를 {}번 모두 받았습니다 — 남은 지적과 함께 사용자에게 결정을 요청하세요 "
+                                "(devtrack request {} \"…\"). 사용자가 더 받으라고 하면 --rounds 로 늘립니다".format(
+                                    plan["rounds"], tid))
+        files = list(files or loop.get("files") or [])
+        changes = gitops.capture_changes(repo, files)
+        if not changes["diff"].strip():
+            raise DevTrackError("리뷰할 변경이 없습니다: {}{}".format(repo, " (빌드 결과물만 바뀜: {})".format(
+                gitops.excluded_text(changes["excluded"])) if changes["excluded"] else ""))
+        tree = gitops.snapshot_tree(repo, changes["paths"])
+        prev = history[-1] if history else None
+        if prev and prev.get("tree") == tree:
+            raise DevTrackError("{}차 리뷰 이후 바뀐 코드가 없습니다 — 지적을 고친 뒤 다시 요청하세요".format(prev["round"]))
+        since = gitops.diff_trees(repo, prev["tree"], tree) if prev and prev.get("tree") else None
+        n = len(history) + 1
+        stat = gitops.diffstat(changes["diff"])
+        who = author or t.get("agent")
+        rtid = loop.get("task")
+        alive = False
+        if rtid:
+            try:
+                alive = self.load(rtid).get("status") != "cancelled"
+            except DevTrackError:
+                alive = False
+        created = not alive
+        if created:
+            rt = self.create_task("{} 리뷰: {}".format(tid, t["title"]), type="review", agent=plan["reviewer"],
+                                  repo=repo, status="queued", related=[tid], model=plan["model"],
+                                  effort=plan["effort"], created_by=who,
+                                  instruction=_review_instruction(t, plan, n, note))
+            rtid = rt["id"]
+        with self.edit(rtid) as r:
+            r["review_of"] = {"task": tid, "title": t["title"], "agent": t.get("agent"), "model": t.get("model"),
+                              "effort": t.get("effort"), "same_session": same_session}
+            r["model"], r["effort"] = plan["model"], plan["effort"]
+            r["review_round"] = n
+            art = self._add_artifact(r, text=changes["diff"], filename="round{}.diff".format(n), kind="diff",
+                                     title="{}차 리뷰할 변경 ({})".format(n, tid), category="source", author=who,
+                                     description="빌드 결과물 제외: " + gitops.excluded_text(changes["excluded"])
+                                     if changes["excluded"] else None)
+            since_art = None
+            if since and since.strip():
+                since_art = self._add_artifact(r, text=since, filename="round{}-since-{}.diff".format(n, n - 1),
+                                               kind="diff", title="{}차: 지난 리뷰 이후 바뀐 부분".format(n),
+                                               category="source", author=who)
+            if created:  # 지시에 리뷰 작업 ID 를 넣는다 (아직 아무도 시작하지 않은 대기 작업)
+                r["instruction"] = _review_instruction(t, plan, n, note, rtid)
+            if not created:
+                if r["status"] in ("done", "blocked", "changes_requested"):
+                    old = r["status"]
+                    r["status"] = "in_progress"
+                    self._log(r, "상태 변경: {} → {}".format(STATUSES.get(old, old), STATUSES["in_progress"]),
+                              kind="status", author=who, meta={"from": old, "to": "in_progress"})
+                msg = "{}차 리뷰 요청 ({} — {}): 수정한 변경 {}{} · 파일 {}개 +{} −{}{}".format(
+                    n, tid, t.get("agent"), art["id"],
+                    " (지난 리뷰 이후 바뀐 부분 {})".format(since_art["id"]) if since_art else "",
+                    stat["files"], stat["additions"], stat["deletions"],
+                    " — " + note.strip() if note and note.strip() else "")
+                self._agent_message(r, msg, who, meta={"review_request": {
+                    "round": n, "task": tid, "diff": art["id"], "since": since_art["id"] if since_art else None}})
+        with self.edit(tid) as t:
+            loop = dict(t.get("review_loop") or {})
+            loop.update(plan)
+            loop.update(task=rtid, state="reviewing", round=n, files=files, same_session=same_session)
+            entry = {"round": n, "task": rtid, "requested_at": now(), "requested_by": who, "diff": art["id"],
+                     "since": since_art["id"] if since_art else None, "stat": stat, "excluded": changes["excluded"],
+                     "tree": tree, "verdict": None}
+            loop["history"] = history + [entry]
+            t["review_loop"] = loop
+            self._log(t, "{}차 리뷰 요청 → {}{} ({}) · 파일 {}개 +{} −{}".format(
+                n, plan["reviewer"], " · " + models.spec_label(plan["model"], plan["effort"])
+                if plan["model"] or plan["effort"] else "", rtid, stat["files"], stat["additions"], stat["deletions"]),
+                kind="info", author=who, ref=rtid,
+                detail="빌드 결과물 제외: " + gitops.excluded_text(changes["excluded"], limit=20)
+                if changes["excluded"] else None)
+        return dict(entry, rounds=plan["rounds"], reviewer=plan["reviewer"], created=created)
+
+    def allow_same_session_review(self, rtid, author=None):
+        """이 리뷰 작업은 개발한 대화가 리뷰해도 된다고 적어 둔다 (사용자가 그렇게 하라고 한 경우만)."""
+        with self.edit(rtid) as r:
+            of = r.get("review_of")
+            if not of:
+                raise DevTrackError("{} 은(는) review-request 로 만든 리뷰 작업이 아닙니다".format(r["id"]))
+            if not of.get("same_session"):
+                of["same_session"] = True
+                self._log(r, "개발한 대화가 리뷰해도 됨 (사용자 허락)", kind="info", author=author)
+            return r
+
+    def task_sessions(self, tid):
+        """이 작업에 기록한 AI 세션들 (.agent/sessions)."""
+        tid = normalize_task_id(tid)
+        d = os.path.join(self.root, ".agent", "sessions")
+        found = []
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return found
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(d, name), encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if tid in (data.get("tasks") or []):
+                    found.append(data.get("session") or name[:-5])
+            except (OSError, ValueError, AttributeError):
+                continue
+        return found
+
+    def review_done(self, rtid, verdict=None, summary="", author=None):
+        """리뷰 작업의 이번 차례 결과(통과 / 수정 필요)를 개발 작업의 AI 에게 [AI 메시지] 로 보낸다."""
+        rtid = normalize_task_id(rtid)
+        r = self.load(rtid)
+        tid = (r.get("review_of") or {}).get("task")
+        if not tid:
+            raise DevTrackError("{} 은(는) devtrack review-request 로 만든 리뷰 작업이 아닙니다 — "
+                                "PR 리뷰 등은 devtrack review 로 기록합니다".format(rtid))
+        t = self.load(tid)
+        loop = t.get("review_loop") or {}
+        history = loop.get("history") or []
+        cur = history[-1] if history else None
+        if not cur or cur.get("task") != rtid or cur.get("verdict"):
+            raise DevTrackError("{} 에 결과를 기다리는 리뷰 차례가 없습니다".format(rtid))
+        rv = r.get("review") or {}
+        v = _review_verdict(verdict or rv.get("verdict"))
+        if not v:
+            raise DevTrackError("판정을 정하세요: --verdict approve (통과) 또는 changes (수정 필요)")
+        open_ = [f for f in rv.get("findings") or [] if f.get("status") == "open"]
+        if v == "request_changes" and not open_:
+            raise DevTrackError("수정 필요인데 열린 검토 항목이 없습니다 — 먼저 devtrack review {} --findings 로 "
+                                "R1, R2… 를 남기세요".format(rtid))
+        n, total = cur["round"], loop.get("rounds") or REVIEW_ROUNDS_DEFAULT
+        used = n - int(loop.get("cycle_start") or 0)
+        state = "approved" if v == "approve" else "exhausted" if used >= total else "changes"
+        who = author or r.get("agent")
+        items = " · ".join("{} {}".format(f["id"], FINDING_SEV_LABEL.get(f.get("severity"), f.get("severity")))
+                           for f in open_[:12]) + (" 외 {}개".format(len(open_) - 12) if len(open_) > 12 else "")
+        head = "{}차 리뷰 {} — {} ({}){}".format(n, "통과" if v == "approve" else "결과: 수정 필요", who, rtid,
+                                               ": " + summary.strip() if summary and summary.strip() else "")
+        if state == "approved":
+            msg = head + ("\n남은 의견: " + items if open_ else "") + \
+                "\n이제 커밋 승인을 요청하세요 (devtrack request {} \"…\" --commit -m \"…\").".format(tid)
+        elif state == "changes":
+            msg = head + "\n열린 항목: {}\n내용은 devtrack show {} 에서 보고, 고친 뒤 devtrack review-request {} 로 " \
+                         "다시 리뷰를 요청하세요 (남은 횟수 {}번).".format(items, rtid, tid, total - used)
+        else:
+            msg = head + "\n남은 항목: {}\n리뷰를 {}번 모두 받았습니다 — 남은 지적과 함께 사용자에게 결정을 요청하세요 " \
+                         "(devtrack request {} \"남은 리뷰 지적 처리\": 이대로 커밋 · 더 고치기 · 리뷰 더 받기).".format(
+                             items, total, tid)
+        result = {"round": n, "verdict": v, "state": state, "open": [f["id"] for f in open_], "task": rtid,
+                  "summary": (summary or "").strip() or None}
+        with self.edit(rtid) as r:
+            rv = dict(r.get("review") or {})
+            rv["verdict"] = v
+            if summary and summary.strip():
+                rv["summary"] = summary.strip()
+            rv["updated_at"] = now()
+            r["review"] = rv
+            r.setdefault("review_rounds", []).append(dict(result, at=now(), by=who))
+            self._log(r, "{}차 리뷰 결과: {} (열린 항목 {}개) → {}".format(
+                n, "통과" if v == "approve" else "수정 필요", len(open_), tid),
+                kind="success" if v == "approve" else "warning", author=who)
+            if state in ("approved", "exhausted"):
+                old = r["status"]
+                if old != "done":
+                    r.update(status="done", progress=100, current_step="", completed_at=now())
+                    self._log(r, "상태 변경: {} → {}".format(STATUSES.get(old, old), STATUSES["done"]), kind="status",
+                              author=who, meta={"from": old, "to": "done"})
+            else:
+                if r["status"] == "queued":
+                    r["status"] = "in_progress"
+                r["current_step"] = "{}차 리뷰 끝 — {} 의 수정을 기다리는 중".format(n, t.get("agent"))
+        with self.edit(tid) as t:
+            loop = t["review_loop"]
+            loop["history"][-1].update(verdict=v, open=result["open"], done_at=now(), summary=result["summary"],
+                                       by=who)
+            loop["state"] = state
+            self._agent_message(t, msg, who, meta={"review_result": result})
+        return result
 
     # ------------------------------------------------------------------ 계획
     def set_plan(self, tid, items, append=False, author=None):
@@ -1097,10 +1342,12 @@ class Store:
         return [i for i in ids if i in out]  # 원래 순서 유지
 
     def request_approval(self, tid, title, description="", kind=None, artifact_ids=None, commit=None,
-                         author=None, choices=None, choices_label=None):
+                         author=None, choices=None, choices_label=None, skip_review=False):
+        """skip_review: 리뷰받기로 한 작업이라도 리뷰 없이 커밋 승인을 요청 (사용자가 그렇게 하라고 한 경우만)."""
         tid = normalize_task_id(tid)
         action = None
         diff_text = None
+        review_note = None
         if commit is not None:
             task = self.load(tid)
             repo = commit.get("repo") or (task.get("repo") or {}).get("path")
@@ -1111,9 +1358,12 @@ class Store:
             if not message:
                 raise DevTrackError("커밋 승인 요청에는 커밋 메시지(-m)가 필요합니다")
             files = list(commit.get("files") or [])
-            diff_text = gitops.capture_diff(repo, files)
+            changes = gitops.capture_changes(repo, files)
+            diff_text = changes["diff"]
             if not diff_text.strip():
-                raise DevTrackError("커밋할 변경 사항이 없습니다: {}".format(repo))
+                raise DevTrackError("커밋할 변경 사항이 없습니다: {}{}".format(
+                    repo, " (빌드 결과물만 바뀜: {})".format(gitops.excluded_text(changes["excluded"]))
+                    if changes["excluded"] else ""))
             action = {
                 "type": "git_commit_push",
                 "repo": repo,
@@ -1125,7 +1375,10 @@ class Store:
                 "push": bool(commit.get("push", True)),
                 "fingerprint": gitops.fingerprint(diff_text),
                 "stat": gitops.diffstat(diff_text),
+                "paths": changes["paths"],
+                "excluded": changes["excluded"],  # diff · 커밋에서 뺀 빌드 결과물
             }
+            review_note = self._commit_review_check(task, repo, changes, skip_review)
             kind = kind or "commit"
         kind = kind or "general"
         if kind not in APPROVAL_KINDS:
@@ -1153,6 +1406,8 @@ class Store:
             }
             if action:
                 approval["action"] = action
+            if review_note:
+                approval["review"] = review_note
             if choices is not None:
                 approval["choices"] = self._build_choices(t, choices)
                 approval["choices_label"] = (choices_label or "").strip() or "진행할 항목 선택"
@@ -1195,6 +1450,31 @@ class Store:
                 t["status"] = "in_progress" if status == "approved" else "changes_requested"
             return ap
 
+    @staticmethod
+    def _commit_review_check(task, repo, changes, skip_review):
+        """리뷰받기로 한 작업은 리뷰를 통과한 코드 그대로일 때만 커밋 승인을 요청할 수 있다. 승인 요청에 붙일 리뷰 요약을 돌려준다."""
+        loop = task.get("review_loop") or {}
+        if not loop.get("reviewer"):
+            return None
+        history = loop.get("history") or []
+        last = history[-1] if history else {}
+        state = loop.get("state") or "planned"
+        note = {"reviewer": loop["reviewer"], "model": loop.get("model"), "effort": loop.get("effort"),
+                "task": loop.get("task"), "round": last.get("round", 0), "rounds": loop.get("rounds"),
+                "state": state, "open": last.get("open") or [], "skipped": bool(skip_review)}
+        if skip_review:
+            return note
+        hint = " (사용자가 리뷰 없이 커밋하라고 했으면 --skip-review)"
+        if state == "approved":
+            if gitops.snapshot_tree(repo, changes["paths"]) != last.get("tree"):
+                raise DevTrackError("{}차 리뷰를 통과한 뒤 코드가 바뀌었습니다 — devtrack review-request {} 로 바뀐 부분을 "
+                                    "다시 리뷰받으세요{}".format(last.get("round"), task["id"], hint))
+            return note
+        if state == "exhausted":
+            return note
+        raise DevTrackError("아직 리뷰를 통과하지 않았습니다 ({}) — devtrack review-request {} 로 {} 의 리뷰를 "
+                            "받으세요{}".format(REVIEW_STATES.get(state, state), task["id"], loop["reviewer"], hint))
+
     def apply_approval(self, tid, aid, force=False, dry_run=False, author=None):
         tid = normalize_task_id(tid)
         aid = normalize_item_id(aid, "A")
@@ -1208,7 +1488,8 @@ class Store:
         if action.get("type") != "git_commit_push":
             raise DevTrackError("실행할 작업(commit/push)이 연결되지 않은 승인 요청입니다")
         repo = gitops.require_repo(action["repo"])
-        current = gitops.fingerprint(gitops.capture_diff(repo, action.get("files")))
+        changes = gitops.capture_changes(repo, action.get("files"))
+        current = gitops.fingerprint(changes["diff"])
         if current != action.get("fingerprint") and not force:
             raise DevTrackError(
                 "승인 요청 이후 변경 사항이 달라졌습니다. 새 승인 요청을 만들거나, "
@@ -1217,10 +1498,15 @@ class Store:
         if dry_run:
             return {"dry_run": True, "repo": repo, "branch": action.get("branch"), "message": action["message"],
                     "files": action.get("files") or [], "push": action.get("push", True)}
+        # 커밋은 diff 에 넣은 파일만 (빌드 결과물은 빼고, 다른 스테이징은 풀어 둔다)
         result = gitops.commit_and_push(repo, action["message"], files=action.get("files"),
                                         branch=action.get("branch"), push=action.get("push", True),
-                                        remote=action.get("remote", "origin"))
+                                        remote=action.get("remote", "origin"), paths=changes["paths"])
         with self.edit(tid) as t:
+            loop = t.get("review_loop")
+            if loop and loop.get("reviewer") and loop.get("history"):
+                # 리뷰받은 코드가 커밋됨 — 이 작업의 다음 변경은 다시 리뷰받고, 횟수도 새로 센다
+                loop.update(state="planned", cycle_start=len(loop["history"]))
             ap = self._find(t["approvals"], aid, "승인 요청")
             ap["applied"] = {"at": now(), "commit": result["commit"], "branch": result["branch"],
                              "pushed": result["pushed"], "push_error": result["push_error"], "by": author}
@@ -1256,8 +1542,10 @@ class Store:
         for t in self.all_tasks():
             if (task and t["id"] != task) or not agent_matches(t.get("agent"), agent):
                 continue
+            of = t.get("review_of") or {}
             base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent"),
-                    "model": t.get("model"), "effort": t.get("effort")}
+                    "model": t.get("model"), "effort": t.get("effort"),
+                    "review_of": of.get("task"), "review_same_session": bool(of.get("same_session"))}
             c = t.get("cancelled") or {}
             if t["status"] == "cancelled" and c.get("agent_ack") is False:
                 items.append(dict(base, type="cancelled", reason=c.get("reason", ""), ts=c.get("at")))
@@ -1266,10 +1554,14 @@ class Store:
                 items.append(dict(base, type="completed", reason=d.get("note", ""), ts=d.get("at")))
             if t["status"] == "queued":
                 items.append(dict(base, type="new_task", instruction=t.get("instruction", ""), task_type=t["type"],
-                                  repo=t.get("repo") or {}, ts=t["created_at"]))
+                                  repo=t.get("repo") or {}, ts=t["created_at"],
+                                  review=_loop_summary(t.get("review_loop"))))
             for e in t.get("log", []):
                 if e.get("author") == USER and e.get("kind") == "user" and e.get("ack") is False:
                     items.append(dict(base, type="comment", id=e["id"], message=e["message"], ts=e["ts"]))
+                elif e.get("kind") == "agent" and e.get("ack") is False:
+                    items.append(dict(base, type="agent_message", id=e["id"], message=e["message"],
+                                      sender=e.get("author"), ts=e["ts"]))
             for ap in t.get("approvals", []):
                 if ap["status"] != "pending" and ap.get("agent_ack") is False:
                     items.append(dict(base, type="decision", id=ap["id"], approval_title=ap["title"],
@@ -1298,7 +1590,7 @@ class Store:
                 continue  # 그사이 삭제됨
             with self.edit(tid) as t:
                 for it in its:
-                    if it["type"] == "comment":
+                    if it["type"] in ("comment", "agent_message"):
                         e = next((x for x in t.get("log", []) if x.get("id") == it["id"]), None)
                         if e is not None:
                             e["ack"] = True
@@ -1327,6 +1619,8 @@ class Store:
             return "task:" + it["task_id"]
         if it["type"] == "comment":
             return "comment:{}:{}".format(it["task_id"], it["id"])
+        if it["type"] == "agent_message":
+            return "agent:{}:{}".format(it["task_id"], it["id"])
         if it["type"] in ("cancelled", "deleted", "completed"):
             return "{}:{}:{}".format(it["type"], it["task_id"], it.get("ts") or "")
         return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
@@ -1530,6 +1824,7 @@ class Store:
                 "progress": t.get("progress", 0), "current_step": t.get("current_step", ""),
                 "repo": t.get("repo") or {}, "tags": t.get("tags") or [], "related": t.get("related") or [],
                 "model": t.get("model"), "effort": t.get("effort"),
+                "review_loop": _loop_summary(t.get("review_loop")), "review_of": (t.get("review_of") or {}).get("task"),
                 "created_at": t["created_at"], "updated_at": t["updated_at"],
                 "completed_at": t.get("completed_at"),
                 "plan_total": len(plan), "plan_done": sum(1 for p in plan if p.get("done")),
@@ -1602,6 +1897,60 @@ class Store:
         mirror_tree(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
         return dest
+
+
+def _norm_review_plan(plan):
+    reviewer = " ".join(str(plan.get("reviewer") or "").split())
+    if not reviewer or is_unassigned(reviewer):
+        raise DevTrackError("리뷰어 AI 이름을 정하세요 (예: Codex) — '누구나' 는 리뷰어가 될 수 없습니다")
+    try:
+        rounds = int(plan.get("rounds") or REVIEW_ROUNDS_DEFAULT)
+    except (TypeError, ValueError):
+        raise DevTrackError("리뷰 횟수는 숫자여야 합니다: {}".format(plan.get("rounds")))
+    if not 1 <= rounds <= REVIEW_ROUNDS_MAX:
+        raise DevTrackError("리뷰 횟수는 1 – {}번이어야 합니다".format(REVIEW_ROUNDS_MAX))
+    model, effort = models.normalize_model(plan.get("model")), models.normalize_effort(plan.get("effort"))
+    models.check_effort(reviewer, model, effort)
+    return {"reviewer": reviewer, "rounds": rounds, "model": model, "effort": effort}
+
+
+def _review_verdict(value):
+    s = re.sub(r"[\s-]+", "_", str(value or "").strip().lower())
+    if s in _REVIEW_PASS:
+        return "approve"
+    if s.replace("_", "") in [x.replace("_", "") for x in _REVIEW_CHANGES]:
+        return "request_changes"
+    return None
+
+
+def _review_instruction(t, plan, n, note="", rtid=None):
+    dev = t.get("agent") or "AI"
+    spec = models.spec_label(t.get("model"), t.get("effort"))
+    lines = [
+        "{} 「{}」 의 코드 변경을 리뷰해 주세요. 개발: {}{} · 리뷰는 최대 {}번 (이번이 {}차).".format(
+            t["id"], t["title"], dev, " (" + spec + ")" if spec else "", plan["rounds"], n),
+        "",
+        "- 리뷰할 변경: 이 작업의 결과물 \"{}차 리뷰할 변경\" (diff — 빌드 결과물은 빠져 있음). 저장소 폴더에서 코드를 직접 봐도 됩니다.".format(n),
+        "- 개발 작업의 지시와 기록: devtrack show {}".format(t["id"]),
+        "- 파일은 고치지 말고 리뷰만 합니다. 커밋 · 푸시도 하지 않습니다.",
+        "- 검토 항목은 devtrack review {} --findings <JSON> 으로 R1, R2… 를 남깁니다 ".format(rtid or "<이 작업>") +
+        "(severity: blocker · major · minor · nit · question, file, line, title, plain = 비개발자도 알 수 있는 설명, suggestion = 고칠 방법).",
+        "  다음 차례에는 같은 ID 의 status 를 fixed · open 으로 갱신하고, 새로 찾은 문제는 새 ID 로 더합니다.",
+        "- 끝나면 devtrack review-done {} --verdict approve (통과) 또는 changes (수정 필요) -m \"한두 줄 요약\" 으로 "
+        "결과를 보냅니다. 결과는 {} 에게 가고, 고친 뒤의 다음 차례 요청은 이 작업으로 옵니다.".format(rtid or "<이 작업>", dev),
+    ]
+    if note and note.strip():
+        lines += ["", "개발 AI 의 메모: " + note.strip()]
+    return "\n".join(lines)
+
+
+def _loop_summary(loop):
+    if not loop or not loop.get("reviewer"):
+        return None
+    last = (loop.get("history") or [{}])[-1]
+    return {"reviewer": loop["reviewer"], "model": loop.get("model"), "effort": loop.get("effort"),
+            "rounds": loop.get("rounds"), "state": loop.get("state"), "round": last.get("round", 0),
+            "task": loop.get("task"), "open": len(last.get("open") or [])}
 
 
 def _choice_labels(ap):

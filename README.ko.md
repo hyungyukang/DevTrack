@@ -61,6 +61,23 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 - **대기 모드 대화는 자기 것이 아닌 작업을 건너뜁니다:** 켜 둔 대화는 자기 모델을 바꿀 수 없으므로, 다른 모델 · 강도로 정한 작업은 받지 않고,
   작업 화면에 그 이유와 할 일을 보여 줍니다. 데모의 `T-0006` 은 Opus 5.5 · Extra high 로 정해져 있습니다.
 
+## AI 끼리 리뷰
+
+코드 작업은 개발이 끝나면 다른 AI 에게 리뷰받도록 정할 수 있습니다. Claude 가 개발하고 Codex 가 리뷰하거나, 그 반대로도 됩니다.
+**새 작업 지시** 의 **리뷰 받기** 에서 리뷰어를 고릅니다 (또는 `devtrack new … --review-by Codex --review-rounds 3`).
+
+1. 개발이 끝나면 개발한 AI 가 `devtrack review-request` 를 실행합니다. DevTrack 이 바뀐 코드의 diff 로 리뷰 작업을 만들어 리뷰어에게 맡깁니다.
+2. 리뷰어는 검토 항목 R1, R2… 와 판정을 `devtrack review-done` 으로 남기고, 결과는 개발한 AI 에게 `[AI 메시지]` 로 갑니다.
+3. 수정이 필요하면 고친 뒤 다시 요청합니다. 두 번째부터는 지난 리뷰 이후 바뀐 부분의 diff 도 함께 가고, 리뷰어는 같은 대화로 이어 가며 앞의 지적을 확인합니다.
+4. 통과하면 개발한 AI 가 커밋 승인을 요청합니다. **커밋은 지금처럼 사용자가 승인해야만 됩니다.** 정한 횟수를 다 쓰면 AI 가 사용자에게 결정을 요청합니다.
+
+몇 가지 규칙이 지켜집니다. 리뷰받기로 한 작업은 리뷰를 통과하기 전이나, 통과한 뒤 코드가 다시 바뀌면 커밋 승인을 요청할 수 없습니다.
+같은 AI · 같은 모델끼리도 리뷰할 수 있습니다. 리뷰는 늘 개발한 대화와 다른 새 대화가 합니다 (`devtrack watch --claude` 하나가 작업마다 다른 대화로 실행).
+**diff 에는 바뀐 코드만 들어갑니다.** CMake 빌드 폴더, `CMakeFiles/`, 오브젝트 · 라이브러리 · 실행 파일은
+`.gitignore` 에 없어도 리뷰 diff 와 커밋에서 빠지고, 뺀 것은 따로 표시됩니다.
+두 AI 를 모두 켜 두면(`devtrack watch --claude` 와 `devtrack watch --codex`) 반복이 저절로 이어집니다.
+데모의 `T-0006`(Claude)은 `T-0012` 에서 Codex 의 2차 리뷰를 통과했습니다.
+
 ## 구성
 
 | 구성 요소 | 설명 |
@@ -157,6 +174,8 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
 | `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `model` | 작업을 처리할 AI 모델 · 추론 강도 보기 / 정하기 (`devtrack model T-0006 opus-5.5 --effort xhigh`, `--clear`, `--list` 고를 수 있는 모델 · 강도). `new --model --effort` 로 생성 시 지정도 가능 |
+| `review-request` · `review-done` | AI 끼리 리뷰 반복: `review-request T-ID --reviewer Codex` 로 바뀐 코드(빌드 결과물 제외)를 리뷰 요청, 리뷰어는 `review-done T-ID --verdict approve\|changes` 로 결과를 보냄. `new --review-by` 로 미리 정하고, `request --commit --skip-review` 는 사용자가 그렇게 하라고 할 때만 |
+| `send` | 다른 AI 가 맡은 작업에 메시지 보내기 (그 AI 의 inbox 에 `[AI 메시지]`) |
 | `issue` / `resolve` | 문제 기록 / 해결 |
 | `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`, `--source` = 문서 리뷰의 검토할 원본) / 코드 · 문서 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록 (문서 리뷰는 `doc` · `checks` · `strengths` 도), `--pdf` 로 PDF 도 만들어 첨부. 같은 이름으로 다시 올리면 새 버전으로 교체(이전 버전 보관, `artifact --replace` 도 동일) |
 | `text` | 문서의 글자 뽑기 — Word(`.docx`) → Markdown (표준 라이브러리), PDF → 글자 (`pdftotext` 가 있을 때). 문서 리뷰에서 AI 가 원본을 읽는 용도 |

@@ -36,6 +36,13 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   `inbox` 는 다른 모델의 작업을 `[다른 모델 지정]` 으로 빼고 `start` 는 거절(`--any-model`), `watch --claude` · `--codex` 는 그 모델로 실행
   (`.agent/watch-sessions-<AI>.json` 으로 같은 작업을 같은 대화로 이어 감 — Claude `--resume`, Codex `exec resume` + `-c` 샌드박스 설정). 웹은 `util.js` 의 `specMatches` 로 기다리는 AI 를
   거른다 — 이름 · 맞는지 규칙은 두 쪽을 함께 고칠 것
+- AI 끼리 리뷰 반복: 개발 작업의 `review_loop`(리뷰어 · 횟수 · 차례별 `history` — diff 결과물 · 트리 · 판정), 리뷰 작업의 `review_of`.
+  `Store.review_request` (첫 차례에 리뷰 작업 생성, 다음 차례는 `[AI 메시지]`) · `review_done` (판정 → 개발 AI 에게 `[AI 메시지]`) ·
+  `_commit_review_check` (통과한 트리와 같을 때만 커밋 요청, `--skip-review`). AI 메시지는 로그 kind `agent` + `ack: False` → inbox `agent_message`.
+  같은 AI · 같은 모델의 리뷰도 되지만 개발한 대화는 못 맡는다: cli `_own_review` (세션 기록 `Store.task_sessions`) 가 inbox 에서 빼고 `_guard_task` 가 거절,
+  `--same-session` 은 사용자 허락
+- diff 범위: `gitops.capture_changes` 가 빌드 결과물(CMake 빌드 폴더 · CMakeFiles · 오브젝트 · 실행 파일 등)을 빼고 `paths` · `excluded` 를 돌려준다.
+  커밋(`commit_and_push(paths=)`)도 그 파일만. `snapshot_tree` 는 임시 index 로 트리를 만들어 차례 사이 diff · 리뷰 후 변경 확인에 쓴다 (사용자 index 는 건드리지 않음)
 - `devtrack/latex.py` LaTeX 컴파일 · 로그 분석 (`Store.record_build` 로 기록)
 - `devtrack/pdf.py` Markdown → PDF (web/vendor 렌더러 + 헤드리스 Chrome 인쇄, `review --pdf` · `devtrack pdf`)
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
@@ -65,5 +72,10 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   `--session-id` → 다음 입력 `--resume` 을 본다. Codex 는 가짜 codex(`DEVTRACK_CODEX=…`, `CODEX_HOME=…` 에 rollout 파일,
   `--json` 출력에 `thread.started`)로 `exec --json` → 다음 입력 `exec resume <ID>` + `-c` 샌드박스 설정, 실패 시 새 대화를 본다
   (실제 claude · codex 호출은 필요할 때만).
+- 리뷰 반복 · diff 범위 변경 후: 임시 git 저장소에 CMake 빌드 폴더(`build/CMakeCache.txt` · `CMakeFiles/` · 실행 파일)와 소스 변경을 만들고
+  `new --review-by Codex` → `--as Claude review-request` → `--as Codex review --findings` · `review-done --verdict changes` → `--as Claude inbox` 의 `[AI 메시지]` →
+  수정 후 2차 → 통과 → `request --commit` (리뷰 전 · 통과 후 변경은 거절) → `apply` 의 커밋에 소스만 들어가는지 본다.
+  가짜 AI 두 개를 `watch --agent Claude -- dev.sh` · `watch --agent Codex -- rev.sh` 로 켜 두면 반복이 저절로 도는지 볼 수 있다.
+  같은 AI 리뷰는 `DEVTRACK_SESSION=s1` 로 개발 · 요청한 뒤 s1 의 inbox (`[다른 대화가 리뷰]`) · `start` 거절 · `inbox --wait` 안 깨어남, s2 는 처리되는지 본다.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

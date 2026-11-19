@@ -66,6 +66,25 @@ takes (`devtrack model --list` shows them). Any other model name can be typed in
 - **A chat in wait mode skips the tasks that are not its own:** a running chat can't switch its own model, so it leaves tasks set to
   another model or effort alone, and the task page says why and what to do. The demo task `T-0006` is set to Opus 5.5 · Extra high.
 
+## AIs that review each other
+
+A code task can be set to get a review from another AI when the work is done: Claude develops, Codex reviews, or the other way round.
+Choose the reviewer under **Get a review** on **New task** (or `devtrack new … --review-by Codex --review-rounds 3`).
+
+1. When the work is done, the developing AI runs `devtrack review-request`. DevTrack makes a review task holding the diff of the changed code
+   and gives it to the reviewer.
+2. The reviewer records findings R1, R2… and a verdict with `devtrack review-done`. The result reaches the developing AI as an `[AI 메시지]` (AI message).
+3. If changes are requested, the developer fixes them and asks again. Later rounds also carry the diff since the last review, and the reviewer
+   continues the same conversation, so it checks its earlier findings.
+4. Once the review passes, the developer asks for commit approval. **You still approve every commit.** If the rounds run out first, the AI asks you to decide.
+
+Some rules are enforced. A task set to get a review cannot ask for commit approval before the review passes, or after the code changes again.
+The same AI, even the same model, can review: the review always runs in a new conversation, not the one that wrote the code
+(one `devtrack watch --claude` runs each task in its own conversation). **Diffs hold only changed code:** CMake build folders, `CMakeFiles/`, object files,
+libraries and executables are left out of review diffs and commits even when `.gitignore` misses them, and the request lists what was left out.
+With both AIs running (`devtrack watch --claude` and `devtrack watch --codex`), the loop goes on by itself.
+In the demo, `T-0006` (Claude) passed review in round 2 by Codex in `T-0012`.
+
 ## What is in this repository
 
 | Component | Description |
@@ -163,6 +182,8 @@ devtrack inbox                              # new instructions · messages · de
 | `plan` / `check` | Set the plan / mark a step done |
 | `link` | Link tasks (e.g. data analysis → paper). `new --related T-ID` links them when the task is created |
 | `model` | Show or set the AI model and effort for a task (`devtrack model T-0006 opus-5.5 --effort xhigh`, `--clear`, `--list` for the models and levels). `new --model --effort` sets it when the task is created |
+| `review-request` · `review-done` | AI-to-AI review loop: `review-request T-ID --reviewer Codex` sends the changed code (build outputs left out) for review, and the reviewer answers with `review-done T-ID --verdict approve\|changes`. `new --review-by` sets it up front, `request --commit --skip-review` only when the user says so |
+| `send` | Message a task another AI has (`[AI 메시지]` in its inbox) |
 | `issue` / `resolve` | Record an issue / resolve it |
 | `artifact` / `review` | Attach an artifact (file, `--url`, `--git-diff`, `--source` = the original under review in a document review) / register a code or document review report: `--findings` records the findings (R1, R2…) (plus `doc` · `checks` · `strengths` for document reviews), `--pdf` also makes and attaches a PDF. Uploading under the same name replaces it with a new version (earlier versions are kept; `artifact --replace` does the same) |
 | `text` | Extract a document's text — Word (`.docx`) → Markdown (standard library), PDF → text (when `pdftotext` is installed). The AI uses it to read the original in a document review |

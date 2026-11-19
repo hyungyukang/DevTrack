@@ -439,6 +439,15 @@ void solve_pressure(Field& f, int iters, hipStream_t stream) {
 }
 """
 
+# Codex 리뷰(R1 · R2)를 반영한 판
+SOLVER_V3 = SOLVER_V2.replace(
+    "  // MI250X: 64-wide wavefronts -> 64x4 blocks\n  dim3 block(64, 4);\n  dim3 grid((f.nx + 63) / 64, (f.ny + 3) / 4);",
+    "  // MI250X: 64-wide wavefronts -> 64x4 blocks\n  constexpr int BX = 64, BY = 4;\n  dim3 block(BX, BY);\n"
+    "  dim3 grid((f.nx + BX - 1) / BX, (f.ny + BY - 1) / BY);").replace(
+    "  HIP_CHECK(hipMemcpyAsync(f.p, d_p, bytes, hipMemcpyDeviceToHost, stream));",
+    "  HIP_CHECK(hipGetLastError());  // kernel launch errors\n"
+    "  HIP_CHECK(hipMemcpyAsync(f.p, d_p, bytes, hipMemcpyDeviceToHost, stream));")
+
 HIP_UTILS = """#pragma once
 #include <cstdio>
 #include <cstdlib>
@@ -1323,7 +1332,8 @@ def _scenario(s, clk, tmp):
         instruction="`src/pressure_solver.cu` 를 HIP 으로 포팅해 AMD GPU(MI250X)에서 돌아가게 해주세요.\n\n"
                     "- CPU 결과 대비 상대오차 1e-10 이내\n- 오류 체크 매크로 추가\n- **커밋 전 승인 필수**",
         plan=["CUDA 커널 구조 분석", "hipify 변환 및 빌드 설정", "MI250X 단일 GCD 성능 측정", "수치 검증 (CPU 대비)", "커밋 승인 요청"],
-        tags=["hip", "hpc", "gpu"], model="claude-opus-5-5", effort="xhigh")
+        tags=["hip", "hpc", "gpu"], model="claude-opus-5-5", effort="xhigh",
+        review={"reviewer": "Codex", "model": "gpt-6-astra", "effort": "high", "rounds": 3})
     tid6 = t6["id"]
     clk.at(185); s.update_task(tid6, step="CUDA 커널 1개, 메모리 전송 5곳 확인", progress=5)
     clk.at(175); s.check_plan(tid6, [1])
@@ -1344,21 +1354,7 @@ def _scenario(s, clk, tmp):
     s.add_log(tid6, "수치 검증 통과: CPU 대비 최대 상대오차 3.2e-13 (2048², 5000 iter)", kind="success")
     s.check_plan(tid6, [4])
     s.add_issue(tid6, "AMD clang 경고: 미사용 변수 `nz` (main.cpp)", severity="low")
-    if repo:
-        _git(repo, "mv", "src/pressure_solver.cu", "src/pressure_solver.hip")
-        _write(os.path.join(repo, "src", "pressure_solver.hip"), SOLVER_V2)
-        _write(os.path.join(repo, "src", "hip_utils.h"), HIP_UTILS)
-        _write(os.path.join(repo, "CMakeLists.txt"), CMAKE_V2)
-        clk.at(8)
-        s.request_approval(
-            tid6, "HIP 포팅 변경사항 커밋 · 푸시", artifact_ids=[perf["id"]],
-            description="수치 검증(상대오차 3.2e-13)과 성능 측정을 마쳤습니다. 승인해 주시면 "
-                        "`feature/hip-pressure` 브랜치에 커밋하겠습니다.\n\n"
-                        "> 데모 저장소에는 원격이 없어 푸시는 생략됩니다. 승인 후 `devtrack --data <dir> apply T-0006 A-1` 로 실제 커밋을 확인할 수 있습니다.",
-            commit={"repo": repo, "message": "Port pressure solver to HIP for MI250X\n\n"
-                                             "- hipify kernels, 64x4 blocks for 64-wide wavefronts\n"
-                                             "- add HIP_CHECK error macro\n- fix missing stream sync before D2H copy",
-                    "push": False})
+    # 저장소 변경 · Codex 리뷰 반복 · 커밋 승인 요청은 맨 끝에서 (리뷰 작업이 T-0012 가 되도록 — 다른 예시의 번호 유지)
 
     # ---------------------------------------------------------------- T-0007 사용자가 웹에서 지시 (대기)
     clk.at(5)
@@ -1573,3 +1569,59 @@ def _scenario(s, clk, tmp):
     s.decide(tid11, ap11["id"], "approve", comment="R1 은 지난 할당량 사용 실적으로 보완하겠습니다. 고맙습니다.")
     s.ack_decision(tid11, ap11["id"])
     clk.at(1395); s.update_task(tid11, status="done", message="리뷰 리포트 전달 완료 (소폭 수정)")
+
+    # ---------------------------------------------------------------- T-0006 ↔ T-0012 Codex 리뷰 반복 → 커밋 승인 대기
+    if repo:
+        _git(repo, "mv", "src/pressure_solver.cu", "src/pressure_solver.hip")
+        _write(os.path.join(repo, "src", "pressure_solver.hip"), SOLVER_V2)
+        _write(os.path.join(repo, "src", "hip_utils.h"), HIP_UTILS)
+        _write(os.path.join(repo, "CMakeLists.txt"), CMAKE_V2)
+        # CMake 빌드 폴더 (.gitignore 에 없음) — diff · 커밋에서 빠지는 것을 보여 준다
+        _write(os.path.join(repo, "build", "CMakeCache.txt"), "CMAKE_BUILD_TYPE:STRING=Release\n")
+        _write(os.path.join(repo, "build", "CMakeFiles", "cfd.dir", "src", "main.cpp.o"), "obj\n")
+        _write(os.path.join(repo, "build", "compile_commands.json"), "[]\n")
+        with open(os.path.join(repo, "build", "cfd"), "wb") as fh:
+            fh.write(b"\x7fELF\x02\x01\x01" + b"\x00" * 57)
+        clk.at(52)
+        r1 = s.review_request(tid6, author="Claude", note="커널 · 메모리 전송 · 오류 처리 위주로 봐 주세요")
+        rtid = r1["task"]
+        clk.at(50); s.update_task(rtid, status="in_progress", step="1차 리뷰: 바뀐 파일 3개 읽는 중", progress=30,
+                                  author="Codex", claim="Codex")
+        clk.at(44)
+        s.set_review(rtid, {"findings": [
+            {"id": "R1", "severity": "major", "title": "커널 실행 뒤 오류 확인 없음",
+             "plain": "GPU 계산이 실패해도 알아차리지 못하고, 덜 계산된 값을 결과로 씁니다.",
+             "file": "src/pressure_solver.hip", "line": 31,
+             "suggestion": "반복문이 끝난 뒤 `HIP_CHECK(hipGetLastError());` 를 넣으세요."},
+            {"id": "R2", "severity": "minor", "title": "블록 크기 64×4 가 두 곳에 숫자로 적힘",
+             "plain": "블록 크기를 바꿀 때 한 곳만 고치면 격자 일부가 계산되지 않습니다.",
+             "file": "src/pressure_solver.hip", "line": 27,
+             "suggestion": "`constexpr int BX = 64, BY = 4;` 로 한 번만 적고 grid 계산에도 쓰세요."},
+        ]}, author="Codex")
+        clk.at(43)
+        s.review_done(rtid, verdict="changes", summary="포팅 방향은 맞습니다. 커널 오류 확인(R1)을 넣어 주세요.",
+                      author="Codex")
+        s.ack_inbox(s.inbox(agent="Codex", task=rtid))
+        clk.at(36); s.ack_inbox(s.inbox(agent="Claude", task=tid6))
+        s.update_task(tid6, step="리뷰 R1 · R2 반영: 커널 오류 확인, 블록 크기 상수", author="Claude")
+        _write(os.path.join(repo, "src", "pressure_solver.hip"), SOLVER_V3)
+        clk.at(30)
+        s.review_request(tid6, author="Claude", note="R1 · R2 고쳤습니다")
+        clk.at(24)
+        s.set_review(rtid, {"findings": [{"id": "R1", "status": "fixed"}, {"id": "R2", "status": "fixed"}]},
+                     author="Codex")
+        s.ack_inbox(s.inbox(agent="Codex", task=rtid))
+        clk.at(23)
+        s.review_done(rtid, verdict="approve", summary="R1 · R2 모두 고쳐졌습니다. 커밋해도 좋습니다.", author="Codex")
+        clk.at(20); s.ack_inbox(s.inbox(agent="Claude", task=tid6))
+        clk.at(8)
+        s.request_approval(
+            tid6, "HIP 포팅 변경사항 커밋 · 푸시", artifact_ids=[perf["id"]],
+            description="수치 검증(상대오차 3.2e-13)과 성능 측정을 마쳤고, Codex 리뷰 2차에서 통과했습니다. 승인해 주시면 "
+                        "`feature/hip-pressure` 브랜치에 커밋하겠습니다.\n\n"
+                        "> 데모 저장소에는 원격이 없어 푸시는 생략됩니다. 승인 후 `devtrack --data <dir> apply T-0006 A-1` 로 실제 커밋을 확인할 수 있습니다.",
+            commit={"repo": repo, "message": "Port pressure solver to HIP for MI250X\n\n"
+                                             "- hipify kernels, 64x4 blocks for 64-wide wavefronts\n"
+                                             "- add HIP_CHECK error macro and check kernel launches\n"
+                                             "- fix missing stream sync before D2H copy",
+                    "push": False})
