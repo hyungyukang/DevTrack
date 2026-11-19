@@ -26,7 +26,7 @@ try:
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
-from . import DevTrackError, gitops, models
+from . import DevTrackError, gitops, manuscript, models
 
 # 데모 데이터 생성 시 시간을 조작하기 위한 훅 (callable -> datetime)
 _clock = None
@@ -69,7 +69,11 @@ LOG_KINDS = (
 REVIEW_ROUNDS_DEFAULT = 3
 REVIEW_ROUNDS_MAX = 10
 REVIEW_STATES = {"planned": "리뷰 전", "reviewing": "리뷰 중", "changes": "수정 필요", "approved": "통과",
-                 "exhausted": "리뷰 횟수 다 씀"}
+                 "exhausted": "리뷰 횟수 다 씀", "rejected": "게재 불가"}
+# 논문 · 문서 심사의 판정 (DOC_VERDICTS) — 저널 심사의 이름으로
+JOURNAL_VERDICT_LABEL = {"ready": "게재 가능 (accept)", "minor_revision": "소폭 수정 (minor revision)",
+                         "major_revision": "대폭 수정 (major revision)", "rework": "게재 불가 (reject)"}
+REVIEW_DOC_TYPES = ("paper",)  # 이 유형의 작업은 코드 diff 대신 원고를 심사받는다
 _REVIEW_PASS = ("approve", "approved", "pass", "passed", "ok", "lgtm", "comment", "통과")
 _REVIEW_CHANGES = ("changes", "change", "request_changes", "changes_requested", "fix", "reject", "수정", "수정필요")
 SEVERITIES = ("low", "medium", "high", "critical")
@@ -501,7 +505,7 @@ class Store:
         models.check_effort(agent, model, effort)
         review_plan = None
         if review and review.get("reviewer"):
-            review_plan = _norm_review_plan(review)
+            review_plan = _norm_review_plan(review, type)
         repo_info = {}
         if repo:
             repo_info["path"] = os.path.abspath(os.path.expanduser(repo))
@@ -794,26 +798,24 @@ class Store:
             return self._agent_message(t, message.strip(), author)
 
     def review_request(self, tid, reviewer=None, rounds=None, model=None, effort=None, note="", files=None,
-                       author=None, same_session=False):
+                       author=None, same_session=False, doc=None, venue=None, response=None):
         """개발 작업의 지금 변경(빌드 결과물 제외)을 다른 AI 에게 리뷰받는다. 첫 차례에는 리뷰 작업을 만들어 리뷰어에게 맡기고,
         다음 차례에는 같은 리뷰 작업에 [AI 메시지] 로 다시 요청한다 (리뷰어는 같은 대화로 이어 감).
         차례마다 전체 diff 와, 두 번째부터는 지난 차례 이후 바뀐 부분 diff 를 리뷰 작업의 결과물로 붙인다.
         리뷰어는 같은 AI · 같은 모델이어도 되지만, 리뷰는 개발한 대화와 다른 대화가 한다 (cli 의 _own_review).
-        same_session: 개발한 대화가 리뷰해도 됨 (사용자가 그렇게 하라고 한 경우만)."""
+        same_session: 개발한 대화가 리뷰해도 됨 (사용자가 그렇게 하라고 한 경우만).
+        논문 작업(REVIEW_DOC_TYPES)이나 doc(원고 파일)을 준 작업은 문서 모드 — 저널 심사위원 관점의 심사 (_doc_review_request)."""
         tid = normalize_task_id(tid)
         t = self.load(tid)
-        repo = (t.get("repo") or {}).get("path")
-        if not repo:
-            raise DevTrackError("{} 에 저장소 경로가 없습니다 — 리뷰는 저장소가 있는 코드 작업만 받을 수 있습니다".format(tid))
-        repo = gitops.require_repo(repo)
         loop = dict(t.get("review_loop") or {})
-        plan = {k: loop.get(k) for k in ("reviewer", "rounds", "model", "effort")}
-        for k, v in (("reviewer", reviewer), ("rounds", rounds), ("model", model), ("effort", effort)):
+        plan = {k: loop.get(k) for k in ("reviewer", "rounds", "model", "effort", "doc", "venue")}
+        for k, v in (("reviewer", reviewer), ("rounds", rounds), ("model", model), ("effort", effort), ("doc", doc),
+                     ("venue", venue)):
             if v not in (None, ""):
                 plan[k] = v
         if not plan.get("reviewer"):
             raise DevTrackError("리뷰어 AI 를 정하세요 (예: devtrack review-request {} --reviewer Codex)".format(tid))
-        plan = _norm_review_plan(plan)
+        plan = _norm_review_plan(plan, t.get("type"))
         same_session = bool(same_session or loop.get("same_session"))
         history = list(loop.get("history") or [])
         if history and not history[-1].get("verdict"):
@@ -824,6 +826,13 @@ class Store:
             raise DevTrackError("리뷰를 {}번 모두 받았습니다 — 남은 지적과 함께 사용자에게 결정을 요청하세요 "
                                 "(devtrack request {} \"…\"). 사용자가 더 받으라고 하면 --rounds 로 늘립니다".format(
                                     plan["rounds"], tid))
+        if plan["kind"] == "doc":
+            return self._doc_review_request(t, loop, plan, history, note, author, same_session, response)
+        repo = (t.get("repo") or {}).get("path")
+        if not repo:
+            raise DevTrackError("{} 에 저장소 경로가 없습니다 — 코드 리뷰는 저장소가 있는 작업만 받을 수 있습니다 "
+                                "(논문 · 문서는 --doc <원고 파일>)".format(tid))
+        repo = gitops.require_repo(repo)
         files = list(files or loop.get("files") or [])
         changes = gitops.capture_changes(repo, files)
         if not changes["diff"].strip():
@@ -897,6 +906,124 @@ class Store:
                 if changes["excluded"] else None)
         return dict(entry, rounds=plan["rounds"], reviewer=plan["reviewer"], created=created)
 
+    def _review_task(self, t, plan, n, who, rtype, title, instruction, repo=None):
+        """이 개발 작업의 리뷰 작업 — 살아 있으면 그대로, 없거나 취소됐으면 새로 만든다 → (ID, 새로 만들었는지)."""
+        rtid = (t.get("review_loop") or {}).get("task")
+        if rtid:
+            try:
+                if self.load(rtid).get("status") != "cancelled":
+                    return rtid, False
+            except DevTrackError:
+                pass
+        rt = self.create_task(title, type=rtype, agent=plan["reviewer"], repo=repo, status="queued", related=[t["id"]],
+                              model=plan["model"], effort=plan["effort"], created_by=who, instruction=instruction)
+        return rt["id"], True
+
+    def _snapshot_path(self, rtid, n):
+        # 점(.)으로 시작하는 폴더는 publish · 웹에서 빠진다 — 차례 사이 diff 를 만드는 데만 쓴다
+        return os.path.join(self.tasks_dir, rtid, ".snapshots", "round{}.json".format(n))
+
+    def _doc_review_request(self, t, loop, plan, history, note, author, same_session, response):
+        """논문 · 문서 원고를 저널 심사위원 관점으로 심사받는다. 차례마다 원고(PDF · 원문)를, 두 번째부터는 지난 심사 이후
+        바뀐 부분과 저자의 답변서(response to reviewers)를 리뷰 작업에 붙인다."""
+        tid = t["id"]
+        if not plan.get("doc"):
+            raise DevTrackError("심사할 원고 파일을 정하세요 (예: devtrack review-request {} --doc paper/main.tex)".format(tid))
+        path = _doc_path(t, plan["doc"])
+        plan = dict(plan, doc=path)  # 상대 경로는 확인한 절대 경로로 남긴다 (다른 폴더에서 실행해도 같은 원고)
+        snap = manuscript.snapshot(path)
+        if not snap["files"] and not snap["pdf"]:
+            raise DevTrackError("원고에 글이 없습니다: {}".format(path))
+        dig = manuscript.digest(snap)
+        prev = history[-1] if history else None
+        if prev and prev.get("digest") == dig:
+            raise DevTrackError("{}차 심사 이후 원고가 바뀌지 않았습니다 — 지적을 반영한 뒤 다시 요청하세요".format(prev["round"]))
+        if prev and not response:
+            raise DevTrackError("2차 심사부터는 답변서(response to reviewers)가 필요합니다 — 지적(R1, R2…)마다 어떻게 고쳤는지, "
+                                "고치지 않았다면 그 이유를 적은 파일을 --response 로 주세요")
+        if response and not os.path.isfile(os.path.expanduser(response)):
+            raise DevTrackError("답변서 파일을 찾을 수 없습니다: {}".format(response))
+        n = len(history) + 1
+        who = author or t.get("agent")
+        rtid, created = self._review_task(t, plan, n, who, "docreview", "{} 심사: {}".format(tid, t["title"]),
+                                          _doc_review_instruction(t, plan, n, note, path))
+        prev_files = None
+        if prev:
+            try:
+                with open(self._snapshot_path(prev.get("task") or rtid, prev["round"]), encoding="utf-8") as fh:
+                    prev_files = json.load(fh).get("files")
+            except (OSError, ValueError):
+                prev_files = None
+        since = manuscript.diff(prev_files, snap["files"]) if prev_files is not None else None
+        stat = gitops.diffstat(since) if since else None
+        ext = {"latex": ".tex", "word": ".md", "pdf": ".txt"}.get(snap["kind"], os.path.splitext(snap["main"])[1] or ".txt")
+        with self.edit(rtid) as r:
+            r["review_of"] = {"task": tid, "title": t["title"], "agent": t.get("agent"), "model": t.get("model"),
+                              "effort": t.get("effort"), "same_session": same_session, "kind": "doc",
+                              "venue": plan.get("venue"), "doc": path}
+            r["model"], r["effort"] = plan["model"], plan["effort"]
+            r["review_round"] = n
+            ids = {}
+            if snap["kind"] in ("word", "pdf") or snap["pdf"]:
+                src = snap["pdf"] if snap["kind"] != "word" else snap["source"]
+                ids["file"] = self._add_artifact(r, path=src, title="{}차 원고 ({})".format(
+                    n, "Word" if snap["kind"] == "word" else "PDF"), category="source", author=who)["id"]
+            if snap["files"]:
+                ids["text"] = self._add_artifact(
+                    r, text=manuscript.combined_text(snap), filename="round{}-manuscript{}".format(n, ext),
+                    title="{}차 원고 원문{}".format(n, " (LaTeX 파일 {}개)".format(len(snap["files"]))
+                                               if snap["kind"] == "latex" else ""),
+                    category="source", author=who)["id"]
+            if since and since.strip():
+                ids["since"] = self._add_artifact(r, text=since, filename="round{}-since-{}.diff".format(n, n - 1),
+                                                  kind="diff", title="{}차: 지난 심사 이후 바뀐 부분".format(n),
+                                                  category="source", author=who)["id"]
+            if response:
+                ids["response"] = self._add_artifact(r, path=os.path.expanduser(response),
+                                                     title="{}차 답변서 (response to reviewers)".format(n),
+                                                     category="source", author=who)["id"]
+            rv = dict(r.get("review") or {})
+            rv["doc"] = dict(rv.get("doc") or {}, **_norm_doc({
+                "title": t["title"], "kind": "paper" if t.get("type") == "paper" else "other",
+                "purpose": "{} 투고 — 저널 심사위원 관점의 심사".format(plan["venue"]) if plan.get("venue")
+                else "저널 투고 — 심사위원 관점의 심사",
+                "audience": "저널 심사위원 · 편집자", "source": ids.get("file") or ids.get("text")}))
+            r["review"] = rv
+            if created:
+                r["instruction"] = _doc_review_instruction(t, plan, n, note, path, rtid)
+            else:
+                if r["status"] in ("done", "blocked", "changes_requested"):
+                    old = r["status"]
+                    r["status"] = "in_progress"
+                    self._log(r, "상태 변경: {} → {}".format(STATUSES.get(old, old), STATUSES["in_progress"]),
+                              kind="status", author=who, meta={"from": old, "to": "in_progress"})
+                parts = ["고친 원고 " + (ids.get("file") or ids.get("text"))]
+                if ids.get("since"):
+                    parts.append("지난 심사 이후 바뀐 부분 {} (+{} −{})".format(ids["since"], stat["additions"],
+                                                                         stat["deletions"]))
+                if ids.get("response"):
+                    parts.append("답변서 " + ids["response"])
+                msg = "{}차 심사 요청 ({} — {}): {}{}".format(n, tid, t.get("agent"), " · ".join(parts),
+                                                          " — " + note.strip() if note and note.strip() else "")
+                self._agent_message(r, msg, who, meta={"review_request": dict(ids, round=n, task=tid)})
+        self._write_json(self._snapshot_path(rtid, n), {"round": n, "source": path, "kind": snap["kind"],
+                                                        "files": snap["files"]})
+        with self.edit(tid) as t:
+            loop = dict(t.get("review_loop") or {})
+            loop.update(plan)
+            loop.update(task=rtid, state="reviewing", round=n, same_session=same_session)
+            entry = {"round": n, "task": rtid, "requested_at": now(), "requested_by": who, "diff": ids.get("file") or ids.get("text"),
+                     "manuscript": ids.get("text"), "file": ids.get("file"), "since": ids.get("since"),
+                     "response": ids.get("response"), "stat": stat, "digest": dig, "verdict": None}
+            loop["history"] = history + [entry]
+            t["review_loop"] = loop
+            self._log(t, "{}차 심사 요청 → {}{} ({}) · 원고 {}".format(
+                n, plan["reviewer"], " · " + models.spec_label(plan["model"], plan["effort"])
+                if plan["model"] or plan["effort"] else "", rtid, os.path.basename(path)),
+                kind="info", author=who, ref=rtid)
+        return dict(entry, rounds=plan["rounds"], reviewer=plan["reviewer"], created=created, kind="doc",
+                    excluded=[], stat=stat or {"files": len(snap["files"]), "additions": 0, "deletions": 0})
+
     def allow_same_session_review(self, rtid, author=None):
         """이 리뷰 작업은 개발한 대화가 리뷰해도 된다고 적어 둔다 (사용자가 그렇게 하라고 한 경우만)."""
         with self.edit(rtid) as r:
@@ -944,22 +1071,43 @@ class Store:
         if not cur or cur.get("task") != rtid or cur.get("verdict"):
             raise DevTrackError("{} 에 결과를 기다리는 리뷰 차례가 없습니다".format(rtid))
         rv = r.get("review") or {}
-        v = _review_verdict(verdict or rv.get("verdict"))
+        doc = loop.get("kind") == "doc"
+        v = _doc_verdict(verdict or rv.get("verdict")) if doc else _review_verdict(verdict or rv.get("verdict"))
         if not v:
-            raise DevTrackError("판정을 정하세요: --verdict approve (통과) 또는 changes (수정 필요)")
+            raise DevTrackError("판정을 정하세요: --verdict accept · minor · major · reject" if doc else
+                                "판정을 정하세요: --verdict approve (통과) 또는 changes (수정 필요)")
+        passed = v in ("approve", "ready")
         open_ = [f for f in rv.get("findings") or [] if f.get("status") == "open"]
-        if v == "request_changes" and not open_:
-            raise DevTrackError("수정 필요인데 열린 검토 항목이 없습니다 — 먼저 devtrack review {} --findings 로 "
+        if not passed and not open_:
+            raise DevTrackError("수정이 필요한 판정인데 열린 검토 항목이 없습니다 — 먼저 devtrack review {} --findings 로 "
                                 "R1, R2… 를 남기세요".format(rtid))
         n, total = cur["round"], loop.get("rounds") or REVIEW_ROUNDS_DEFAULT
         used = n - int(loop.get("cycle_start") or 0)
-        state = "approved" if v == "approve" else "exhausted" if used >= total else "changes"
+        state = ("approved" if passed else "rejected" if v == "rework" else "exhausted" if used >= total
+                 else "changes")
         who = author or r.get("agent")
         items = " · ".join("{} {}".format(f["id"], FINDING_SEV_LABEL.get(f.get("severity"), f.get("severity")))
                            for f in open_[:12]) + (" 외 {}개".format(len(open_) - 12) if len(open_) > 12 else "")
         head = "{}차 리뷰 {} — {} ({}){}".format(n, "통과" if v == "approve" else "결과: 수정 필요", who, rtid,
                                                ": " + summary.strip() if summary and summary.strip() else "")
-        if state == "approved":
+        if doc:
+            head = "{}차 심사: {} — {} ({}){}".format(n, JOURNAL_VERDICT_LABEL.get(v, v), who, rtid,
+                                                  ": " + summary.strip() if summary and summary.strip() else "")
+        if doc and state == "approved":
+            msg = head + ("\n남은 의견: " + items if open_ else "") + \
+                "\n심사를 통과했습니다 — 사용자에게 결과를 알리세요 (devtrack request {} \"심사 통과: …\" -k result).".format(tid)
+        elif doc and state == "changes":
+            msg = head + "\n열린 항목: {}\n심사평과 항목은 devtrack show {} 에서 봅니다. 원고를 고친 뒤 지적마다 어떻게 고쳤는지(고치지 " \
+                         "않았다면 그 이유)를 적은 답변서(response to reviewers)를 만들어 devtrack review-request {} --response " \
+                         "<답변서.md> 로 다시 심사를 요청하세요 (남은 횟수 {}번).".format(items, rtid, tid, total - used)
+        elif doc and state == "rejected":
+            msg = head + "\n열린 항목: {}\n게재 불가 판정입니다 — 사용자에게 결정을 요청하세요 (devtrack request {} \"심사 결과: " \
+                         "게재 불가\" -k result: 크게 고쳐 다시 심사 · 다른 투고처 · 중단).".format(items, tid)
+        elif doc:
+            msg = head + "\n남은 항목: {}\n심사를 {}번 모두 받았습니다 — 남은 지적과 함께 사용자에게 결정을 요청하세요 " \
+                         "(devtrack request {} \"남은 심사 지적 처리\": 이대로 마무리 · 더 고치기 · 심사 더 받기).".format(
+                             items, total, tid)
+        elif state == "approved":
             msg = head + ("\n남은 의견: " + items if open_ else "") + \
                 "\n이제 커밋 승인을 요청하세요 (devtrack request {} \"…\" --commit -m \"…\").".format(tid)
         elif state == "changes":
@@ -979,10 +1127,10 @@ class Store:
             rv["updated_at"] = now()
             r["review"] = rv
             r.setdefault("review_rounds", []).append(dict(result, at=now(), by=who))
-            self._log(r, "{}차 리뷰 결과: {} (열린 항목 {}개) → {}".format(
-                n, "통과" if v == "approve" else "수정 필요", len(open_), tid),
-                kind="success" if v == "approve" else "warning", author=who)
-            if state in ("approved", "exhausted"):
+            self._log(r, "{}차 {} 결과: {} (열린 항목 {}개) → {}".format(
+                n, "심사" if doc else "리뷰", JOURNAL_VERDICT_LABEL.get(v) if doc else "통과" if passed else "수정 필요",
+                len(open_), tid), kind="success" if passed else "warning", author=who)
+            if state in ("approved", "exhausted", "rejected"):
                 old = r["status"]
                 if old != "done":
                     r.update(status="done", progress=100, current_step="", completed_at=now())
@@ -991,7 +1139,7 @@ class Store:
             else:
                 if r["status"] == "queued":
                     r["status"] = "in_progress"
-                r["current_step"] = "{}차 리뷰 끝 — {} 의 수정을 기다리는 중".format(n, t.get("agent"))
+                r["current_step"] = "{}차 {} 끝 — {} 의 수정을 기다리는 중".format(n, "심사" if doc else "리뷰", t.get("agent"))
         with self.edit(tid) as t:
             loop = t["review_loop"]
             loop["history"][-1].update(verdict=v, open=result["open"], done_at=now(), summary=result["summary"],
@@ -1456,6 +1604,11 @@ class Store:
         loop = task.get("review_loop") or {}
         if not loop.get("reviewer"):
             return None
+        if loop.get("kind") == "doc":  # 논문 · 문서 심사는 커밋을 막지 않는다 (초안도 자주 커밋함) — 요약만 붙인다
+            last = (loop.get("history") or [{}])[-1]
+            return {"reviewer": loop["reviewer"], "kind": "doc", "task": loop.get("task"), "round": last.get("round", 0),
+                    "rounds": loop.get("rounds"), "state": loop.get("state") or "planned",
+                    "verdict": last.get("verdict"), "open": last.get("open") or [], "skipped": False}
         history = loop.get("history") or []
         last = history[-1] if history else {}
         state = loop.get("state") or "planned"
@@ -1899,7 +2052,8 @@ class Store:
         return dest
 
 
-def _norm_review_plan(plan):
+def _norm_review_plan(plan, task_type=None):
+    """리뷰 계획 정리. kind: 'doc' (논문 작업이거나 원고 파일을 준 경우 — 저널 심사) · 'code' (코드 diff 리뷰)."""
     reviewer = " ".join(str(plan.get("reviewer") or "").split())
     if not reviewer or is_unassigned(reviewer):
         raise DevTrackError("리뷰어 AI 이름을 정하세요 (예: Codex) — '누구나' 는 리뷰어가 될 수 없습니다")
@@ -1911,7 +2065,31 @@ def _norm_review_plan(plan):
         raise DevTrackError("리뷰 횟수는 1 – {}번이어야 합니다".format(REVIEW_ROUNDS_MAX))
     model, effort = models.normalize_model(plan.get("model")), models.normalize_effort(plan.get("effort"))
     models.check_effort(reviewer, model, effort)
-    return {"reviewer": reviewer, "rounds": rounds, "model": model, "effort": effort}
+    doc = str(plan.get("doc") or "").strip() or None
+    venue = " ".join(str(plan.get("venue") or "").split()) or None
+    kind = "doc" if doc or task_type in REVIEW_DOC_TYPES or plan.get("kind") == "doc" else "code"
+    return {"reviewer": reviewer, "rounds": rounds, "model": model, "effort": effort, "kind": kind, "doc": doc,
+            "venue": venue}
+
+
+def _doc_path(t, doc):
+    """원고 경로: 절대 경로 · ~ 는 그대로, 상대 경로는 작업의 저장소(없으면 지금 폴더) 기준."""
+    p = os.path.expanduser(doc)
+    if not os.path.isabs(p):
+        p = os.path.join((t.get("repo") or {}).get("path") or os.getcwd(), p)
+    return os.path.abspath(p)
+
+
+def _doc_verdict(value):
+    """심사 판정 → DOC_VERDICTS (accept · minor · major · reject, approve = 게재 가능, changes = 대폭 수정)."""
+    s = str(value or "").strip().lower()
+    if s in DOC_VERDICTS:
+        return s
+    s2 = s.replace("_", " ")
+    return _DOC_VERDICT_ALIAS.get(s) or _DOC_VERDICT_ALIAS.get(s2) or {
+        "approve": "ready", "approved": "ready", "pass": "ready", "게재 가능": "ready", "changes": "major_revision",
+        "request_changes": "major_revision", "minor_revision": "minor_revision", "major_revision": "major_revision",
+        "게재 불가": "rework", "rejected": "rework"}.get(s)
 
 
 def _review_verdict(value):
@@ -1950,7 +2128,37 @@ def _loop_summary(loop):
     last = (loop.get("history") or [{}])[-1]
     return {"reviewer": loop["reviewer"], "model": loop.get("model"), "effort": loop.get("effort"),
             "rounds": loop.get("rounds"), "state": loop.get("state"), "round": last.get("round", 0),
-            "task": loop.get("task"), "open": len(last.get("open") or [])}
+            "task": loop.get("task"), "open": len(last.get("open") or []), "kind": loop.get("kind") or "code",
+            "venue": loop.get("venue"), "doc": loop.get("doc"), "verdict": last.get("verdict")}
+
+
+def _doc_review_instruction(t, plan, n, note, path, rtid=None):
+    dev = t.get("agent") or "AI"
+    spec = models.spec_label(t.get("model"), t.get("effort"))
+    rt = rtid or "<이 작업>"
+    venue = plan.get("venue") or "투고할 저널"
+    lines = [
+        "{} 「{}」 의 원고를 {} 의 심사위원(reviewer)으로서 심사해 주세요. 저자: {}{} · 심사는 최대 {}번 (이번이 {}차).".format(
+            t["id"], t["title"], venue, dev, " (" + spec + ")" if spec else "", plan["rounds"], n),
+        "",
+        "- 원고: 이 작업의 결과물 \"{}차 원고\" (PDF · Word 가 있으면 그것을, 원문은 \"{}차 원고 원문\"). 원본 파일: {}".format(n, n, path),
+        "- 저자의 작업 지시와 기록: devtrack show {}".format(t["id"]),
+        "- 실제 저널 심사처럼 봅니다: 연구의 새로움과 선행 연구 대비 기여, 방법의 타당성 · 재현성, 결과가 결론을 뒷받침하는지, "
+        "그림 · 표, 구성 · 문장, 투고처 규정. 근거 없는 칭찬이나 막연한 지적 대신 위치와 고칠 방법을 적습니다.",
+        "- 원고는 고치지 않고 심사만 합니다.",
+        "- 심사 항목은 devtrack review {} --findings <JSON> 으로 R1, R2… 를 남깁니다 (severity: blocker = 반드시 고칠 주요 지적 · major · "
+        "minor · nit · question, location = 절 · 쪽 · 그림 · 표, quote = 원고 원문 그대로, title, plain = 비전문가도 알 수 있는 설명, "
+        "suggestion = 고칠 방법 — 원고의 언어로).".format(rt),
+        "- 심사평(referee report)을 원고의 언어로 써서 함께 올립니다: 편집자에게 보내는 요약 · 주요 지적 · 세부 지적 "
+        "(devtrack review {} report.md --pdf --findings f.json — PDF 를 만들지 못하면 --pdf 없이).".format(rt),
+        "- 다음 차례에는 저자의 답변서(response to reviewers)와 \"지난 심사 이후 바뀐 부분\" 을 보고, 같은 ID 의 status 를 "
+        "fixed · open 으로 갱신하고 새로 찾은 문제는 새 ID 로 더합니다.",
+        "- 끝나면 devtrack review-done {} --verdict accept (게재 가능) · minor (소폭 수정) · major (대폭 수정) · reject (게재 불가) "
+        "-m \"한두 줄 요약\" 으로 판정을 보냅니다. 판정은 {} 에게 가고, 고친 원고와 답변서로 다음 심사 요청이 이 작업으로 옵니다.".format(rt, dev),
+    ]
+    if note and note.strip():
+        lines += ["", "저자의 메모: " + note.strip()]
+    return "\n".join(lines)
 
 
 def _choice_labels(ap):

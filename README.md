@@ -85,6 +85,12 @@ libraries and executables are left out of review diffs and commits even when `.g
 With both AIs running (`devtrack watch --claude` and `devtrack watch --codex`), the loop goes on by itself.
 In the demo, `T-0006` (Claude) passed review in round 2 by Codex in `T-0012`.
 
+**Papers get a journal review the same way.** For a paper task, the reviewer acts as a referee for the target journal
+(`--review-doc paper/main.tex --review-venue "J. Fluid Mech."`). The verdict is accept, minor revision, major revision or reject.
+Each round carries the manuscript (LaTeX with its `\input` files and `.bib`, Word, PDF or Markdown). From round 2 on it also carries
+the changes since the last review and the author's response to reviewers. In the demo, `T-0005` went from major revision to minor
+revision in `T-0013`.
+
 ## What is in this repository
 
 | Component | Description |
@@ -182,7 +188,7 @@ devtrack inbox                              # new instructions · messages · de
 | `plan` / `check` | Set the plan / mark a step done |
 | `link` | Link tasks (e.g. data analysis → paper). `new --related T-ID` links them when the task is created |
 | `model` | Show or set the AI model and effort for a task (`devtrack model T-0006 opus-5.5 --effort xhigh`, `--clear`, `--list` for the models and levels). `new --model --effort` sets it when the task is created |
-| `review-request` · `review-done` | AI-to-AI review loop: `review-request T-ID --reviewer Codex` sends the changed code (build outputs left out) for review, and the reviewer answers with `review-done T-ID --verdict approve\|changes`. `new --review-by` sets it up front, `request --commit --skip-review` only when the user says so |
+| `review-request` · `review-done` | AI-to-AI review loop: `review-request T-ID --reviewer Codex` sends the changed code (build outputs left out) for review, and the reviewer answers with `review-done T-ID --verdict approve\|changes`. For papers, `--doc` · `--venue` · `--response` and verdicts `accept\|minor\|major\|reject`. `new --review-by` sets it up front, `request --commit --skip-review` only when the user says so |
 | `send` | Message a task another AI has (`[AI 메시지]` in its inbox) |
 | `issue` / `resolve` | Record an issue / resolve it |
 | `artifact` / `review` | Attach an artifact (file, `--url`, `--git-diff`, `--source` = the original under review in a document review) / register a code or document review report: `--findings` records the findings (R1, R2…) (plus `doc` · `checks` · `strengths` for document reviews), `--pdf` also makes and attaches a PDF. Uploading under the same name replaces it with a new version (earlier versions are kept; `artifact --replace` does the same) |

@@ -138,6 +138,7 @@ export const REVIEW_STATE = translated({
   changes: { label: '수정 필요§리뷰', tone: 'amber', icon: 'edit' },
   approved: { label: '통과', tone: 'green', icon: 'check-circle' },
   exhausted: { label: '리뷰 횟수 다 씀', tone: 'red', icon: 'alert' },
+  rejected: { label: '게재 불가', tone: 'red', icon: 'x-circle' },
 });
 export const SEVERITY = translated({
   low: { label: '낮음', tone: 'gray' },

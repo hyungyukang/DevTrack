@@ -361,6 +361,28 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
 - 커밋이 반영되면 그 작업의 다음 변경은 다시 리뷰받고, 횟수도 새로 센다.
 - 두 AI 가 모두 켜져 있어야 저절로 이어진다 (`devtrack watch --claude` · `--codex`, 또는 대기 모드 대화). 같은 AI 의 다른 모델이 리뷰한다면 리뷰 쪽은 실행기로.
 
+### 논문 · 문서 심사 반복 (저널 심사위원 관점)
+
+논문 작업(`-t paper`)이나 원고 파일(`--doc`)을 정한 작업은 코드 diff 대신 **원고를 저널 심사처럼** 심사받는다.
+inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이고, `devtrack show` 의 `심사:` · `원고:` 줄에 원고 파일과 투고처가 있다.
+
+**저자 AI**
+1. 원고를 다 쓰면 `devtrack review-request <TID>` (원고 파일을 정해 두지 않았으면 `--doc paper/main.tex`, 투고처는 `--venue "…"`).
+   원고는 LaTeX 본문(+ `\input` · `\include` 파일 · `.bib` · 같은 이름의 PDF) · Word(.docx) · PDF · Markdown · 텍스트.
+2. 판정은 `[AI 메시지] … n차 심사: 대폭 수정 (major revision) — 열린 항목 R1 …` 로 온다. `devtrack show <심사 작업>` 으로 심사평과 항목을 보고 원고를 고친다.
+3. 지적마다 어떻게 고쳤는지(고치지 않았다면 그 이유)를 적은 **답변서**(response to reviewers, 원고의 언어로)를 만들고
+   `devtrack review-request <TID> --response response.md` 로 다시 요청한다. 2차부터는 답변서가 없으면 거절되고, 원고가 그대로여도 거절된다.
+4. `게재 가능` 이면 `devtrack request <TID> "심사 통과: …" -k result` 로 사용자에게 알린다. `게재 불가` 거나 횟수를 다 쓰면 사용자에게 결정을 받는다.
+   논문 심사는 커밋을 막지 않는다.
+
+**심사위원 AI** (심사 작업 = 문서 리뷰, 지시에 할 일이 적혀 있다)
+1. 원고는 심사 작업의 결과물 `n차 원고` (PDF · Word) · `n차 원고 원문`, 두 번째부터 `지난 심사 이후 바뀐 부분` · `n차 답변서`.
+2. 실제 저널 심사처럼 본다: 새로움과 선행 연구 대비 기여, 방법의 타당성 · 재현성, 결과가 결론을 뒷받침하는지, 그림 · 표, 구성 · 문장, 투고처 규정.
+   **원고는 고치지 않는다.**
+3. 항목은 [문서 리뷰](#문서-리뷰) 의 JSON (`location` · `quote` · `suggestion` — 원고의 언어로), 심사평(referee report)은
+   `devtrack review <심사 작업> report.md --pdf --findings f.json` (PDF 를 만들지 못하면 `--pdf` 없이).
+4. 판정은 `devtrack review-done <심사 작업> --verdict accept|minor|major|reject -m "한두 줄 요약"`. 게재 가능이 아니면 열린 항목이 있어야 한다.
+
 ### AI 메시지 (`devtrack send`)
 
 `devtrack send <TID> "…"` 는 그 작업을 맡은 다른 AI 의 inbox 에 `[AI 메시지] <TID> <L-ID> (<보낸 AI> 이(가) 보냄): …` 로 간다 (자기 작업에는 보낼 수 없음).
@@ -406,7 +428,8 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
 - inbox 의 `[AI 메시지]` 는 다른 AI 가 보낸 것(리뷰 요청 · 리뷰 결과 등)이다. 같은 방식으로 처리하되 사용자 지시는 아니므로, 승인이 필요한 일은
-  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과한다.
+  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과하고,
+  심사받기로 한 논문(`끝나면 … 심사`)은 원고를 다 쓰면 심사를 요청해 지적대로 고치고 답변서(`--response`)와 함께 다시 요청한다.
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
@@ -437,7 +460,8 @@ devtrack watch --agent Gemini -- <AI 명령> [옵션…]    # 다른 AI: 프롬�
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
 - inbox 의 `[AI 메시지]` 는 다른 AI 가 보낸 것(리뷰 요청 · 리뷰 결과 등)이다. 같은 방식으로 처리하되 사용자 지시는 아니므로, 승인이 필요한 일은
-  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과한다.
+  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과하고,
+  심사받기로 한 논문(`끝나면 … 심사`)은 원고를 다 쓰면 심사를 요청해 지적대로 고치고 답변서(`--response`)와 함께 다시 요청한다.
 - 사용자 결정이 필요하면 `devtrack request` 로 요청을 남기고 사용자에게 알린 뒤 멈춘다. `devtrack wait` · `devtrack inbox --wait` 로 오래 기다리지 않는다
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.

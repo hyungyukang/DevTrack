@@ -439,6 +439,36 @@ void solve_pressure(Field& f, int iters, hipStream_t stream) {
 }
 """
 
+# 논문 심사 반복 예시 (T-0005 ↔ T-0013) — 원고 본문 · 참고문헌 · 2차 원고에서 고친 문장
+PAPER_MAIN = r"""\documentclass{article}
+\usepackage{amsmath,graphicx,booktabs}
+\begin{document}
+\title{A portable GPU pressure solver for incompressible flow}
+\maketitle
+\input{chapters/results}
+\bibliography{refs}
+\end{document}
+"""
+PAPER_BIB = """@article{roache1994,
+  author = {Roache, P. J.},
+  title = {Perspective: a method for uniform reporting of grid refinement studies},
+  journal = {J. Fluids Eng.}, year = {1994}, volume = {116}, pages = {405--413}
+}
+"""
+PAPER_RESPONSE = """# Response to the referee (round 2)
+
+We thank the referee for the careful reading. Changes are marked in the revised manuscript.
+
+**R1 (grid convergence).** We now report the observed order from three grids with Richardson
+extrapolation and the grid convergence index (GCI) following Roache (1994), Section 4.1.
+
+**R2 (Table 4.1).** All timings were re-checked against `results/perf.csv`; the 8-GCD speedup is
+112.3x (previously rounded to 112x). Run-to-run variation (5 runs) is now given.
+
+**R3 (Figure 4.1).** We will add the second-order reference line in the next revision.
+"""
+
+
 # Codex 리뷰(R1 · R2)를 반영한 판
 SOLVER_V3 = SOLVER_V2.replace(
     "  // MI250X: 64-wide wavefronts -> 64x4 blocks\n  dim3 block(64, 4);\n  dim3 grid((f.nx + 63) / 64, (f.ny + 3) / 4);",
@@ -1278,7 +1308,9 @@ def _scenario(s, clk, tmp):
                     "1. 격자 수렴성 (Fig 4.1)\n2. GPU 성능 비교 (Fig 4.2, Table 4.1)\n3. 난류 통계 검증 (Fig 4.3)\n\n"
                     "수치는 반드시 `results/*.csv` 원본과 대조하고, 그림은 PDF 벡터로.",
         plan=["실험 결과 데이터 정리", "Fig 4.1–4.3 생성", "4.1절 격자 수렴성 작성", "4.2절 GPU 성능 작성",
-              "Table 4.1 수치 검증", "4.3절 및 참고문헌 정리"], tags=["paper", "latex"], related=[tid2])
+              "Table 4.1 수치 검증", "4.3절 및 참고문헌 정리"], tags=["paper", "latex"], related=[tid2],
+        review={"reviewer": "Codex", "model": "gpt-6-astra", "effort": "high", "rounds": 3,
+                "doc": os.path.join(s.root, ".repos", "jfm-paper", "main.tex"), "venue": "Journal of Fluid Mechanics"})
     tid5 = t5["id"]
     clk.at(240); s.update_task(tid5, step="results/*.csv 12개 파일 정리", progress=5)
     clk.at(225); s.check_plan(tid5, [1])
@@ -1625,3 +1657,51 @@ def _scenario(s, clk, tmp):
                                              "- add HIP_CHECK error macro and check kernel launches\n"
                                              "- fix missing stream sync before D2H copy",
                     "push": False})
+
+    # ---------------------------------------------------------------- T-0005 ↔ T-0013 저널 심사 반복 (1차 대폭 수정 → 2차 소폭 수정)
+    paper = os.path.join(s.root, ".repos", "jfm-paper")
+    _write(os.path.join(paper, "main.tex"), PAPER_MAIN)
+    _write(os.path.join(paper, "chapters", "results.tex"), RESULTS_TEX)
+    _write(os.path.join(paper, "refs.bib"), PAPER_BIB)
+    clk.at(48)
+    p1 = s.review_request(tid5, author="Claude", note="4장 결과 섹션 초안입니다. 수치 근거 위주로 봐 주세요.")
+    ptid = p1["task"]
+    clk.at(46); s.update_task(ptid, status="in_progress", step="1차 심사: 원고 읽는 중", progress=30, author="Codex",
+                              claim="Codex")
+    clk.at(40)
+    s.set_review(ptid, {"summary": "The port is useful, but the accuracy and performance claims need firmer support "
+                                   "before the paper can be considered further.",
+                        "findings": [
+        {"id": "R1", "severity": "blocker", "location": "Section 4.1, eq. (4.1)",
+         "quote": "the observed order of accuracy defined in \\eqref{eq:l2} is $p = 2.01$",
+         "title": "Observed order from only two grids",
+         "plain": "두 격자만으로 정확도 차수를 계산해서, 2차 정확도라는 주장을 믿기 어렵습니다.",
+         "suggestion": "Use at least three grids, report Richardson extrapolation and the grid convergence index (GCI)."},
+        {"id": "R2", "severity": "major", "location": "Section 4.2, Table 4.1", "title": "Timings without variation",
+         "plain": "속도 향상 수치에 반복 측정의 편차가 없어, 112배가 우연인지 알 수 없습니다.",
+         "suggestion": "Give mean and spread over repeated runs and state how the CPU baseline was compiled."},
+        {"id": "R3", "severity": "minor", "location": "Figure 4.1", "title": "Missing second-order reference line",
+         "plain": "그림에 2차 기준선이 없어 기울기를 눈으로 확인하기 어렵습니다.",
+         "suggestion": "Add an O(h^2) reference line next to the first-order one."},
+    ]}, author="Codex")
+    clk.at(39)
+    s.review_done(ptid, verdict="major", summary="정확도 · 성능 주장의 근거를 보강해야 합니다 (R1 · R2).", author="Codex")
+    s.ack_inbox(s.inbox(agent="Codex", task=ptid))
+    clk.at(34); s.ack_inbox(s.inbox(agent="Claude", task=tid5))
+    s.update_task(tid5, step="심사 R1 · R2 반영: 3개 격자 GCI, Table 4.1 반복 측정", author="Claude")
+    _write(os.path.join(paper, "chapters", "results.tex"), RESULTS_TEX.replace(
+        "is $p = 2.01$, confirming the second-order spatial\ndiscretisation.",
+        "is $p = 2.01$ on the three finest grids (Richardson extrapolation, GCI $= 0.4\\%$ following\n"
+        "\\citet{roache1994}), confirming the second-order spatial discretisation.").replace(
+        "achieves a $112\\times$", "achieves a $112.3\\times$ (mean of five runs, $\\pm 1.2\\%$)"))
+    _write(os.path.join(paper, "response_round2.md"), PAPER_RESPONSE)
+    clk.at(28)
+    s.review_request(tid5, author="Claude", response=os.path.join(paper, "response_round2.md"),
+                     note="R1 · R2 반영, R3 은 다음 판에서")
+    clk.at(18)
+    s.set_review(ptid, {"findings": [{"id": "R1", "status": "fixed"}, {"id": "R2", "status": "fixed"}]},
+                 author="Codex")
+    s.ack_inbox(s.inbox(agent="Codex", task=ptid))
+    clk.at(17)
+    s.review_done(ptid, verdict="minor", summary="R1 · R2 는 해결됐습니다. 그림 기준선(R3)만 남았습니다.", author="Codex")
+    clk.at(15); s.ack_inbox(s.inbox(agent="Claude", task=tid5))

@@ -125,7 +125,9 @@ def make_handler(store, web_root, verbose=False):
                             review={"reviewer": (body.get("review_by") or "").strip(),
                                     "rounds": body.get("review_rounds") or None,
                                     "model": (body.get("review_model") or "").strip() or None,
-                                    "effort": (body.get("review_effort") or "").strip() or None}
+                                    "effort": (body.get("review_effort") or "").strip() or None,
+                                    "doc": (body.get("review_doc") or "").strip() or None,
+                                    "venue": (body.get("review_venue") or "").strip() or None}
                             if (body.get("review_by") or "").strip() else None,
                         )
                         return self._json({"ok": True, "task": {"id": t["id"]}}, 201)

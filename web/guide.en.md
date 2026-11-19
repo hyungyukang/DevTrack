@@ -88,6 +88,7 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
 - `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
   so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
+  For a paper set to get a journal review (`끝나면 … 심사`), ask for the review when the manuscript is done, revise as the findings say, and ask again with a response (`--response`).
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
@@ -292,6 +293,30 @@ The **AI review** box on the task page shows each round's result (e.g. round 1 c
 - **AIs asking each other directly:** `devtrack send <task> "message"` reaches the inbox of the AI that has the task, as an [AI 메시지].
   It is not the user's instruction, so anything that needs approval still goes to the user.
 - In a terminal, set it with `devtrack new … --review-by Codex --review-rounds 3`, or for an existing task ask with `devtrack review-request T-0001 --reviewer Codex`.
+
+### 6-3. Journal review loop for papers (optional)
+
+When the manuscript of a paper task is done, another AI can review it **as a referee for the target journal**. The author AI then revises it and asks for another review.
+As in a real journal review, a verdict (**accept · minor revision · major revision · reject**), findings (R1, R2…) and the author's **response to reviewers** go back and forth.
+
+1. On **New task**, keep the type at **Paper writing** and choose the referee AI and the maximum rounds under **Get a journal review**.
+   Enter the **manuscript to review** (e.g. `paper/main.tex`, a Word `.docx`, a PDF or Markdown) and the **target journal** (e.g. Journal of Fluid Mechanics).
+   If you leave the manuscript empty, the AI sets it when it asks for the review.
+2. When the manuscript is done, the author AI asks for a review. A **review task** (a document review) is made with the manuscript as it is at that point.
+   - For LaTeX, the main file comes with the files it pulls in with `\input` · `\include`, the bibliography (`.bib`) and the PDF of the same name.
+   - For Word, the original and its text come along.
+3. The referee AI looks at novelty and contribution over prior work, soundness of the method, whether the results support the conclusions, figures and tables, and the writing.
+   Each finding has a location, the original text and a fix (in the manuscript's language), and the referee sends a referee report and a verdict.
+4. If revisions are needed, the author AI revises the manuscript, writes a **response to reviewers** explaining how each point was handled, and asks again (from round 2 on the response is required).
+   The referee looks at **what changed since the last review** and the response, continuing the same conversation, and checks whether the earlier points were resolved.
+5. On **accept**, the author AI reports the result to you. On reject, or once all rounds are used, it asks you what to do next.
+
+The **AI journal review** box on the task page shows each round's verdict, the open items, and the manuscript, changes and response. The review task also appears on the **Document review** page.
+
+- The same rules as for code review apply. Both AIs must be running for this to go on by itself, the conversation that wrote the manuscript does not take its review, and the referee does not edit the manuscript.
+- A journal review does not block commits (drafts can be committed to the repository as often as you like).
+- In a terminal: `devtrack new … -t paper --review-by Codex --review-doc paper/main.tex --review-venue "J. Fluid Mech."`; to ask again,
+  `devtrack review-request T-0005 --response response.md`.
 
 ## 7. Follow the progress
 
@@ -656,6 +681,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
 - `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
   so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
+  For a paper set to get a journal review (`끝나면 … 심사`), ask for the review when the manuscript is done, revise as the findings say, and ask again with a response (`--response`).
 - When a user decision is needed, leave a request with `devtrack request`, tell the user, and stop. Do not wait for long with `devtrack wait` or `devtrack inbox --wait`
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
@@ -817,7 +843,8 @@ Commands you use yourself:
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |
 | `devtrack review-request T-0001 --reviewer Codex` | Have another AI review the code changed so far (build outputs left out). The result comes as an [AI 메시지] (6-2) |
-| `devtrack review-done T-0012 --verdict changes -m "…"` | (The reviewing AI) send this round's result: `approve` or `changes` |
+| `devtrack review-done T-0012 --verdict changes -m "…"` | (The reviewing AI) send this round's result: `approve` or `changes`; for a journal review `accept` · `minor` · `major` · `reject` (6-3) |
+| `devtrack review-request T-0005 --response response.md` | (Paper) ask for another journal review of the revised manuscript with the response; the first time, `--doc <manuscript> --venue <journal>` (6-3) |
 | `devtrack send T-0012 "…"` | Send a message to a task another AI has ([AI 메시지]) |
 | `devtrack --data <folder> demo` | Create example data |
 

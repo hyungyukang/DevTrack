@@ -41,6 +41,9 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   `_commit_review_check` (통과한 트리와 같을 때만 커밋 요청, `--skip-review`). AI 메시지는 로그 kind `agent` + `ack: False` → inbox `agent_message`.
   같은 AI · 같은 모델의 리뷰도 되지만 개발한 대화는 못 맡는다: cli `_own_review` (세션 기록 `Store.task_sessions`) 가 inbox 에서 빼고 `_guard_task` 가 거절,
   `--same-session` 은 사용자 허락
+- 논문 · 문서 심사 반복: `review_loop.kind == "doc"` (논문 작업 · `--doc`). `devtrack/manuscript.py` 가 원고를 떠 둠 (LaTeX `\input` · `.bib` ·
+  Word → Markdown · PDF → pdftotext) → `Store._doc_review_request` 가 심사 작업(`docreview`)에 원고 · 지난 심사 이후 diff · 답변서를 붙이고
+  차례마다 `.snapshots/round<n>.json` 을 남김. 판정은 `DOC_VERDICTS` (게재 가능이면 통과, `rework` = 게재 불가 → `rejected`), 커밋은 막지 않음
 - diff 범위: `gitops.capture_changes` 가 빌드 결과물(CMake 빌드 폴더 · CMakeFiles · 오브젝트 · 실행 파일 등)을 빼고 `paths` · `excluded` 를 돌려준다.
   커밋(`commit_and_push(paths=)`)도 그 파일만. `snapshot_tree` 는 임시 index 로 트리를 만들어 차례 사이 diff · 리뷰 후 변경 확인에 쓴다 (사용자 index 는 건드리지 않음)
 - `devtrack/latex.py` LaTeX 컴파일 · 로그 분석 (`Store.record_build` 로 기록)
@@ -76,6 +79,8 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   `new --review-by Codex` → `--as Claude review-request` → `--as Codex review --findings` · `review-done --verdict changes` → `--as Claude inbox` 의 `[AI 메시지]` →
   수정 후 2차 → 통과 → `request --commit` (리뷰 전 · 통과 후 변경은 거절) → `apply` 의 커밋에 소스만 들어가는지 본다.
   가짜 AI 두 개를 `watch --agent Claude -- dev.sh` · `watch --agent Codex -- rev.sh` 로 켜 두면 반복이 저절로 도는지 볼 수 있다.
+  논문 심사는 임시 폴더에 `\input` 이 있는 LaTeX 원고를 두고 `new -t paper --review-by Codex --review-doc main.tex` → `review-request` →
+  `review --findings` · `review-done --verdict major` → 원고 수정 → `--response` 없이 거절 · 함께 2차 → `지난 심사 이후 바뀐 부분` diff 를 본다.
   같은 AI 리뷰는 `DEVTRACK_SESSION=s1` 로 개발 · 요청한 뒤 s1 의 inbox (`[다른 대화가 리뷰]`) · `start` 거절 · `inbox --wait` 안 깨어남, s2 는 처리되는지 본다.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

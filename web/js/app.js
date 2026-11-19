@@ -719,6 +719,10 @@ function approvalReview(rv) {
   if (!rv) return '';
   const st = pick(REVIEW_STATE, rv.state, 'planned');
   const who = `${rv.reviewer}${rv.model || rv.effort ? ` (${specLabel(rv.model, rv.effort)})` : ''}`;
+  if (rv.kind === 'doc') {
+    const j = JOURNAL_VERDICT[rv.verdict];
+    return html`<div class="ap-review tone-${j?.tone || st.tone}">${icon(j?.icon || st.icon)} <span>${j ? L('{who} 의 {n}차 심사: {v}', { who, n: rv.round, v: j.label }) : loopStateLabel(rv, st)}</span>${rv.task ? html` <a href="#/task/${rv.task}">${rv.task}</a>` : ''}</div>`;
+  }
   const text = rv.skipped ? L('리뷰 없이 요청 (사용자가 리뷰를 건너뛰라고 함)')
     : rv.state === 'approved' ? L('{who} 의 {n}차 리뷰를 통과한 코드입니다', { who, n: rv.round })
       : rv.state === 'exhausted' ? L('{who} 의 리뷰를 {n}번 받았지만 아직 수정 필요 — 남은 항목 {ids}', { who, n: rv.round, ids: (rv.open || []).join(', ') || '-' })
@@ -1233,9 +1237,32 @@ async function viewTask({ rest }) {
 }
 
 // ---------------------------------------------------------------------- AI 끼리 리뷰 반복
-const verdictBadge = (v) => (v === 'approve' ? html`<span class="badge tone-green">${icon('check')} ${L('통과')}</span>`
-  : v === 'request_changes' ? html`<span class="badge tone-amber">${icon('edit')} ${L('수정 필요§리뷰')}</span>`
-    : html`<span class="badge tone-blue">${icon('eye')} ${L('리뷰 중')}</span>`);
+/** 논문 · 문서 심사의 판정 (store.JOURNAL_VERDICT_LABEL) */
+const JOURNAL_VERDICT = translated({
+  ready: { label: '게재 가능', tone: 'green', icon: 'check' },
+  minor_revision: { label: '소폭 수정', tone: 'amber', icon: 'edit' },
+  major_revision: { label: '대폭 수정', tone: 'orange', icon: 'edit' },
+  rework: { label: '게재 불가', tone: 'red', icon: 'x' },
+});
+const verdictBadge = (v, doc = false) => {
+  const j = JOURNAL_VERDICT[v];
+  if (j) return html`<span class="badge tone-${j.tone}">${icon(j.icon)} ${j.label}</span>`;
+  return v === 'approve' ? html`<span class="badge tone-green">${icon('check')} ${L('통과')}</span>`
+    : v === 'request_changes' ? html`<span class="badge tone-amber">${icon('edit')} ${L('수정 필요§리뷰')}</span>`
+      : html`<span class="badge tone-blue">${icon('eye')} ${doc ? L('심사 중') : L('리뷰 중')}</span>`;
+};
+/** 리뷰 반복의 상태 이름 — 논문 심사는 '심사' 로 */
+function loopStateLabel(loop, st) {
+  if (loop.kind !== 'doc') return st.label;
+  return { planned: L('심사 전'), reviewing: L('심사 중'), exhausted: L('심사 횟수 다 씀') }[loop.state] || st.label;
+}
+
+/** 심사 차례의 결과물: 원고 · 원문 · 지난 심사 이후 바뀐 부분 · 답변서 */
+function docRoundLinks(h) {
+  const links = [[h.file, L('원고')], [h.manuscript, L('원문')], [h.since, L('지난 심사 이후')], [h.response, L('답변서')]]
+    .filter(([id]) => id);
+  return links.map(([id, label], i) => html`${i ? ' · ' : ''}<a href="#/artifact/${h.task}/${id}">${label}</a>`);
+}
 
 /** 개발 작업: 누가 리뷰하는지, 차례마다 결과, 지금 누구 차례인지 */
 function reviewLoopPanel(t) {
@@ -1246,7 +1273,15 @@ function reviewLoopPanel(t) {
   const used = hist.length - (loop.cycle_start || 0);
   const spec = specLabel(loop.model, loop.effort);
   const dev = aiName(t);
-  const next = {
+  const doc = loop.kind === 'doc';
+  const next = doc ? ({
+    planned: L('원고를 다 쓰면 {dev} 가 {who} 에게 심사를 요청합니다.', { dev, who: loop.reviewer }),
+    reviewing: L('{who} 가 심사하는 중입니다. {who} 가 켜져 있어야 이어집니다 (실행기 devtrack watch 또는 대기 모드).', { who: loop.reviewer }),
+    changes: L('{dev} 가 원고를 고치고 답변서(response to reviewers)를 써서 다시 심사를 요청합니다.', { dev }),
+    approved: L('게재 가능 판정을 받았습니다. {dev} 가 결과를 알려 드립니다.', { dev }),
+    exhausted: L('심사를 정한 횟수만큼 받았지만 아직 수정이 필요합니다. {dev} 가 남은 지적과 함께 결정을 요청합니다.', { dev }),
+    rejected: L('게재 불가 판정입니다. {dev} 가 다음에 어떻게 할지 결정을 요청합니다.', { dev }),
+  }[loop.state] || '') : {
     planned: L('개발이 끝나면 {dev} 가 {who} 에게 리뷰를 요청합니다.', { dev, who: loop.reviewer }),
     reviewing: L('{who} 가 리뷰하는 중입니다. {who} 가 켜져 있어야 이어집니다 (실행기 devtrack watch 또는 대기 모드).', { who: loop.reviewer }),
     changes: L('{dev} 가 지적을 고친 뒤 다시 리뷰를 요청합니다.', { dev }),
@@ -1254,14 +1289,17 @@ function reviewLoopPanel(t) {
     exhausted: L('리뷰를 정한 횟수만큼 받았지만 아직 수정이 필요합니다. {dev} 가 남은 지적과 함께 결정을 요청합니다.', { dev }),
   }[loop.state] || '';
   return html`<section class="card review-loop">
-    <div class="card-head"><h2>${icon('eye')} ${L('AI 리뷰')}</h2><span class="badge tone-${st.tone}">${icon(st.icon)} ${st.label}</span></div>
+    <div class="card-head"><h2>${icon('eye')} ${doc ? L('AI 심사') : L('AI 리뷰')}</h2><span class="badge tone-${st.tone}">${icon(st.icon)} ${loopStateLabel(loop, st)}</span></div>
     <div class="card-body">
-      <div class="rl-who">${L('리뷰어')} <b>${loop.reviewer}</b>${spec ? html` <span class="muted">· ${spec}</span>` : ''} · ${L('최대 {n}번', { n: loop.rounds })}${hist.length ? html` · ${L('{n}번 받음', { n: used })}` : ''}${loop.task ? html` · <a href="#/task/${loop.task}">${L('리뷰 작업')} ${loop.task}</a>` : ''}</div>
+      <div class="rl-who">${doc ? L('심사위원') : L('리뷰어')} <b>${loop.reviewer}</b>${spec ? html` <span class="muted">· ${spec}</span>` : ''} · ${L('최대 {n}번', { n: loop.rounds })}${hist.length ? html` · ${L('{n}번 받음', { n: used })}` : ''}${loop.task ? html` · <a href="#/task/${loop.task}">${doc ? L('심사 작업') : L('리뷰 작업')} ${loop.task}</a>` : ''}</div>
+      ${doc ? html`<div class="rl-doc muted">${icon('file-text')} ${loop.doc || L('원고 파일은 심사를 요청할 때 정합니다')}${loop.venue ? html` · ${L('투고처')} <b>${loop.venue}</b>` : ''}</div>` : ''}
       ${hist.length ? html`<ol class="rl-rounds">${hist.map((h) => html`<li>
-        <span class="rl-n">${L('{n}차', { n: h.round })}</span>${verdictBadge(h.verdict)}
-        <span class="muted">${L('{n}개 파일', { n: h.stat?.files ?? '?' })} <span class="add">+${h.stat?.additions ?? 0}</span> <span class="del">−${h.stat?.deletions ?? 0}</span></span>
+        <span class="rl-n">${L('{n}차', { n: h.round })}</span>${verdictBadge(h.verdict, doc)}
+        ${doc ? (h.stat ? html`<span class="muted">${L('바뀐 부분')} <span class="add">+${h.stat.additions}</span> <span class="del">−${h.stat.deletions}</span></span>` : '')
+    : html`<span class="muted">${L('{n}개 파일', { n: h.stat?.files ?? '?' })} <span class="add">+${h.stat?.additions ?? 0}</span> <span class="del">−${h.stat?.deletions ?? 0}</span></span>`}
         ${h.open?.length ? html`<span class="rl-open">${L('열린 항목')} ${h.open.map((id) => html`<span class="fid">${id}</span>`)}</span>` : ''}
-        <span class="rl-links">${h.diff ? html`<a href="#/artifact/${h.task}/${h.diff}">${L('변경 내용')}</a>` : ''}${h.since ? html` · <a href="#/artifact/${h.task}/${h.since}">${L('지난 리뷰 이후')}</a>` : ''}</span>
+        <span class="rl-links">${doc ? docRoundLinks(h)
+    : html`${h.diff ? html`<a href="#/artifact/${h.task}/${h.diff}">${L('변경 내용')}</a>` : ''}${h.since ? html` · <a href="#/artifact/${h.task}/${h.since}">${L('지난 리뷰 이후')}</a>` : ''}`}</span>
         ${h.summary ? html`<div class="rl-sum">${h.summary}</div>` : ''}
         ${h.excluded?.length ? html`<div class="rl-ex muted">${L('빌드 결과물 제외')}: ${excludedText(h.excluded, 3)}</div>` : ''}
       </li>`)}</ol>` : ''}
@@ -1276,10 +1314,10 @@ function reviewOfPanel(t) {
   if (!of?.task) return '';
   const rounds = t.review_rounds || [];
   return html`<section class="card review-loop">
-    <div class="card-head"><h2>${icon('eye')} ${L('리뷰 대상')}</h2><span class="muted">${L('{n}차', { n: t.review_round || 1 })}</span></div>
+    <div class="card-head"><h2>${icon('eye')} ${of.kind === 'doc' ? L('심사 대상') : L('리뷰 대상')}</h2><span class="muted">${L('{n}차', { n: t.review_round || 1 })}</span></div>
     <div class="card-body">
-      <div class="rl-who"><a href="#/task/${of.task}">${of.task} · ${of.title || ''}</a> · ${L('개발')} <b>${of.agent || 'AI'}</b>${of.model || of.effort ? html` <span class="muted">(${specLabel(of.model, of.effort)})</span>` : ''}</div>
-      ${rounds.length ? html`<ol class="rl-rounds">${rounds.map((r) => html`<li><span class="rl-n">${L('{n}차', { n: r.round })}</span>${verdictBadge(r.verdict)}${r.open?.length ? html`<span class="rl-open">${L('열린 항목')} ${r.open.map((id) => html`<span class="fid">${id}</span>`)}</span>` : ''}${r.summary ? html`<div class="rl-sum">${r.summary}</div>` : ''}</li>`)}</ol>` : ''}
+      <div class="rl-who"><a href="#/task/${of.task}">${of.task} · ${of.title || ''}</a> · ${of.kind === 'doc' ? L('저자') : L('개발')} <b>${of.agent || 'AI'}</b>${of.model || of.effort ? html` <span class="muted">(${specLabel(of.model, of.effort)})</span>` : ''}</div>
+      ${rounds.length ? html`<ol class="rl-rounds">${rounds.map((r) => html`<li><span class="rl-n">${L('{n}차', { n: r.round })}</span>${verdictBadge(r.verdict, of.kind === 'doc')}${r.open?.length ? html`<span class="rl-open">${L('열린 항목')} ${r.open.map((id) => html`<span class="fid">${id}</span>`)}</span>` : ''}${r.summary ? html`<div class="rl-sum">${r.summary}</div>` : ''}</li>`)}</ol>` : ''}
     </div>
   </section>`;
 }
@@ -2072,20 +2110,27 @@ function viewNewTask({ q = {} } = {}) {
 }
 
 const AGENTS = [['Claude', 'Claude'], ['Codex', 'Codex'], ['Gemini', 'Gemini'], ['누구나', '누구나 (먼저 시작한 AI)']];
+const REVIEW_TYPES = ['code', 'paper']; // 리뷰 반복을 정할 수 있는 작업 유형 (논문은 저널 심사)
 
 /** 코드 작업의 '리뷰 받기' 칸: 끝나면 다른 AI 에게 리뷰받고, 수정이 필요하면 고친 뒤 다시 리뷰 (최대 횟수까지) */
 function reviewFields(type) {
   const last = LS.get('newReviewer', '');
   const same = !!last && String(LS.get('newAgent', 'Claude')).toLowerCase() === last.toLowerCase();
-  return html`<div class="review-fields" data-type-only="code" data-review-fields ${type === 'code' ? '' : raw('hidden')}>
+  const on = REVIEW_TYPES.includes(type);
+  return html`<div class="review-fields" data-type-in="${REVIEW_TYPES.join(' ')}" data-review-fields ${on ? '' : raw('hidden')}>
     <div class="field-row">
-      <label class="field"><span>${L('리뷰 받기 (선택)')}</span><select name="review_by">
+      <label class="field"><span data-type-only="code" ${type === 'paper' ? raw('hidden') : ''}>${L('리뷰 받기 (선택)')}</span><span data-type-only="paper" ${type === 'paper' ? '' : raw('hidden')}>${L('심사 받기 (선택)')}</span><select name="review_by">
         <option value="">${L('안 받음')}</option>${AGENTS.filter(([v]) => !isUnassigned(v)).map(([v, label]) => html`<option value="${v}" ${v === last ? raw('selected') : ''}>${L(label)}</option>`)}
       </select></label>
-      <label class="field"><span>${L('리뷰 최대 횟수')}</span><select name="review_rounds">${[1, 2, 3, 4, 5].map((n) => html`<option value="${n}" ${n === 3 ? raw('selected') : ''}>${L('{n}번', { n })}</option>`)}</select></label>
+      <label class="field"><span data-type-only="code" ${type === 'paper' ? raw('hidden') : ''}>${L('리뷰 최대 횟수')}</span><span data-type-only="paper" ${type === 'paper' ? '' : raw('hidden')}>${L('심사 최대 횟수')}</span><select name="review_rounds">${[1, 2, 3, 4, 5].map((n) => html`<option value="${n}" ${n === 3 ? raw('selected') : ''}>${L('{n}번', { n })}</option>`)}</select></label>
     </div>
-    <div data-review-model ${last ? '' : raw('hidden')}>${modelFields(last || 'Codex', '', '', { prefix: 'review_', label: L('리뷰어 모델 (선택)') })}</div>
-    <small class="mf-note">${L('개발이 끝나면 이 AI 가 변경된 코드(빌드 결과물 제외)를 리뷰합니다. 수정이 필요하면 담당 AI 가 고친 뒤 다시 리뷰받고, 통과하면 커밋 승인을 요청합니다. 두 AI 가 모두 켜져 있어야 저절로 이어집니다.')}</small>
+    <div data-review-model ${last ? '' : raw('hidden')}>${modelFields(last || 'Codex', '', '', { prefix: 'review_', label: type === 'paper' ? L('심사위원 모델 (선택)') : L('리뷰어 모델 (선택)') })}</div>
+    <div class="field-row" data-type-only="paper" ${type === 'paper' ? '' : raw('hidden')}>
+      <label class="field" style="flex:2"><span>${L('심사할 원고')}</span><input type="text" name="review_doc" placeholder="paper/main.tex · draft.docx" spellcheck="false"><small>${L('LaTeX 본문(.tex, 불러오는 파일까지) · Word · PDF · Markdown. 저장소 기준 상대 경로도 됩니다. 비워 두면 AI 가 심사를 요청할 때 정합니다.')}</small></label>
+      <label class="field"><span>${L('투고처 (저널)')}</span><input type="text" name="review_venue" placeholder="${L('예: Journal of Fluid Mechanics')}"></label>
+    </div>
+    <small class="mf-note" data-type-only="code" ${type === 'paper' ? raw('hidden') : ''}>${L('개발이 끝나면 이 AI 가 변경된 코드(빌드 결과물 제외)를 리뷰합니다. 수정이 필요하면 담당 AI 가 고친 뒤 다시 리뷰받고, 통과하면 커밋 승인을 요청합니다. 두 AI 가 모두 켜져 있어야 저절로 이어집니다.')}</small>
+    <small class="mf-note" data-type-only="paper" ${type === 'paper' ? '' : raw('hidden')}>${L('원고를 다 쓰면 이 AI 가 투고처의 심사위원 관점으로 심사합니다 (판정: 게재 가능 · 소폭 수정 · 대폭 수정 · 게재 불가). 수정이 필요하면 담당 AI 가 원고를 고치고 답변서(response to reviewers)를 써서 다시 심사받습니다. 두 AI 가 모두 켜져 있어야 저절로 이어집니다.')}</small>
     <div class="alert alert-info review-same" data-review-same ${same ? '' : raw('hidden')}>${icon('info')}<div class="alert-body"><p>${LH('같은 AI 가 리뷰합니다. 리뷰는 개발한 대화와 다른 <b>새 대화</b>에서 하므로, 실행기(<code>devtrack watch</code>)를 켜 두세요 — 작업마다 따로 대화를 엽니다.')}</p></div></div>
   </div>`;
 }
@@ -2189,8 +2234,16 @@ function onModelPick(select) {
 }
 
 const modelArgs = ({ model, effort }) => [model ? `--model ${shellQuote(model)}` : '', effort ? `--effort ${effort}` : ''].filter(Boolean).join(' ');
+/** 정적 모드의 지시문에 넣는 '리뷰 / 심사' 줄 (AI 에게 가는 글이라 한국어 그대로) */
+function reviewMsgLine(d) {
+  const spec = d.review_model || d.review_effort ? ` (${specLabel(d.review_model, d.review_effort)})` : '';
+  const what = d.type === 'paper'
+    ? `${d.review_venue || '저널'} 심사위원 관점의 심사받기${d.review_doc ? ` (원고 ${d.review_doc})` : ''}` : '리뷰받기';
+  return `${d.type === 'paper' ? '심사' : '리뷰'}: 끝나면 ${d.review_by}${spec} 에게 ${what}, 최대 ${d.review_rounds}번 (devtrack new 에 ${reviewArgs(d)})`;
+}
 const reviewArgs = (d) => (d.review_by ? [`--review-by ${shellQuote(d.review_by)}`, `--review-rounds ${d.review_rounds}`,
-  d.review_model ? `--review-model ${shellQuote(d.review_model)}` : '', d.review_effort ? `--review-effort ${d.review_effort}` : ''].filter(Boolean).join(' ') : '');
+  d.review_model ? `--review-model ${shellQuote(d.review_model)}` : '', d.review_effort ? `--review-effort ${d.review_effort}` : '',
+  d.review_doc ? `--review-doc ${shellQuote(d.review_doc)}` : '', d.review_venue ? `--review-venue ${shellQuote(d.review_venue)}` : ''].filter(Boolean).join(' ') : '');
 
 /** 관련 작업 칸의 글 → 작업 ID 목록 (중복 제거) 과 작업 번호로 읽을 수 없는 조각.
  *  "T-0001, 2; t-3" → ids ['T-0001', 'T-0002', 'T-0003'] (store.normalize_task_id 와 같은 규칙) */
@@ -2253,6 +2306,9 @@ function syncTypeFields(form) {
   const type = form.elements.type.value;
   $$('[data-type-only]', form).forEach((el) => { el.hidden = el.dataset.typeOnly !== type; });
   $$('[data-type-hide]', form).forEach((el) => { el.hidden = el.dataset.typeHide === type; });
+  $$('[data-type-in]', form).forEach((el) => { el.hidden = !el.dataset.typeIn.split(' ').includes(type); });
+  const rmLabel = form.querySelector('[data-model-fields][data-prefix="review_"] .field-label');
+  if (rmLabel) rmLabel.textContent = type === 'paper' ? L('심사위원 모델 (선택)') : L('리뷰어 모델 (선택)');
 }
 
 /** 문서 리뷰 칸 → 지시 내용 앞에 붙일 요약 (AI 에게 가는 글이라 한국어 그대로) */
@@ -2283,10 +2339,12 @@ async function submitNewTask(ev) {
   }
   data.related = relIds;
   Object.assign(data, readModelFields(form.querySelector('[data-model-fields]:not([data-prefix])')));
-  const rv = data.type === 'code' && data.review_by ? readModelFields(form.querySelector('[data-model-fields][data-prefix="review_"]')) : null;
+  const rv = REVIEW_TYPES.includes(data.type) && data.review_by ? readModelFields(form.querySelector('[data-model-fields][data-prefix="review_"]')) : null;
   for (const k of ['model_pick', 'model_custom', 'review_model_pick', 'review_model_custom', 'review_effort']) delete data[k];
   if (rv) Object.assign(data, { review_model: rv.model, review_effort: rv.effort, review_rounds: Number(data.review_rounds) || 3 });
   else { delete data.review_by; delete data.review_rounds; }
+  if (!rv || data.type !== 'paper') { delete data.review_doc; delete data.review_venue; }
+  else { data.review_doc = (data.review_doc || '').trim(); data.review_venue = (data.review_venue || '').trim(); }
   for (const [m, el] of [[data.model, 'model_custom'], [data.review_model, 'review_model_custom']]) {
     if (m && /\s/.test(m)) {
       toast({ title: L('모델 이름에 공백을 넣을 수 없습니다'), meta: m, tone: 'red' });
@@ -2339,7 +2397,7 @@ async function submitNewTask(ev) {
     data.priority !== 'normal' ? `우선순위: ${data.priority === 'high' ? '높음' : '낮음'}` : null,
     rels.length ? `관련 작업: ${rels.map((t) => `${t.id} ${t.title}`).join(', ')} (devtrack new 에 --related ${relIds.join(' ')})` : null,
     data.model || data.effort ? `모델: ${specLabel(data.model, data.effort)} (devtrack new 에 ${modelArgs(data)})` : null,
-    data.review_by ? `리뷰: 끝나면 ${data.review_by}${data.review_model || data.review_effort ? ` (${specLabel(data.review_model, data.review_effort)})` : ''} 에게 리뷰받기, 최대 ${data.review_rounds}번 (devtrack new 에 ${reviewArgs(data)})` : null,
+    data.review_by ? reviewMsgLine(data) : null,
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',

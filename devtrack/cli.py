@@ -70,7 +70,8 @@ def cmd_new(store, args):
         status="queued" if queued else "in_progress", created_by=USER if queued else None, plan=args.plan,
         related=args.related, model=args.model, effort=args.effort,
         review={"reviewer": args.review_by, "rounds": args.review_rounds, "model": args.review_model,
-                "effort": args.review_effort} if args.review_by else None,
+                "effort": args.review_effort, "doc": args.review_doc, "venue": args.review_venue}
+        if args.review_by else None,
     )
     if not queued:  # AI 가 스스로 만들어 진행하는 작업 — 이 세션이 맡은 작업으로 적어 둔다
         _note_session(store, t["id"])
@@ -420,7 +421,20 @@ def cmd_send(store, args):
 def cmd_review_request(store, args):
     r = store.review_request(args.task, reviewer=args.reviewer, rounds=args.rounds, model=args.model,
                              effort=args.effort, note=_text(args.message, None) or "", files=args.files,
-                             author=args.author, same_session=args.same_session)
+                             author=args.author, same_session=args.same_session, doc=args.doc, venue=args.venue,
+                             response=args.response)
+    if r.get("kind") == "doc":
+        lines = ["{}차 심사 요청 → {} ({}{}) · 최대 {}번".format(r["round"], r["reviewer"], r["task"],
+                                                         " 새 심사 작업" if r["created"] else "", r["rounds"]),
+                 "  원고: {}{}".format(", ".join(x for x in (r.get("file"), r.get("manuscript")) if x),
+                                     " · 지난 심사 이후 바뀐 부분 {} (+{} −{})".format(
+                                         r["since"], r["stat"]["additions"], r["stat"]["deletions"]) if r.get("since") else ""),
+                 ]
+        if r.get("response"):
+            lines.append("  답변서: " + r["response"])
+        lines.append("  판정은 {} 에 [AI 메시지] 로 옵니다 (심사위원 AI 가 켜져 있어야 함)".format(normalize_task_id(args.task)))
+        _out(args, r, "\n".join(lines))
+        return
     lines = ["{}차 리뷰 요청 → {} ({}{}) · 최대 {}번".format(r["round"], r["reviewer"], r["task"],
                                                      " 새 리뷰 작업" if r["created"] else "", r["rounds"]),
              "  변경: 파일 {files}개 +{additions} −{deletions}".format(**r["stat"])]
@@ -437,8 +451,10 @@ def cmd_review_request(store, args):
 def cmd_review_done(store, args):
     r = store.review_done(args.task, verdict=args.verdict, summary=args.message or "", author=args.author)
     t = store.load(args.task)
-    _out(args, r, "{}차 리뷰 결과 → {}: {}{}".format(
-        r["round"], (t.get("review_of") or {}).get("task"), {"approve": "통과", "request_changes": "수정 필요"}[r["verdict"]],
+    from .store import JOURNAL_VERDICT_LABEL
+    label = {"approve": "통과", "request_changes": "수정 필요"}.get(r["verdict"]) or JOURNAL_VERDICT_LABEL.get(r["verdict"], r["verdict"])
+    _out(args, r, "{}차 결과 → {}: {}{}".format(
+        r["round"], (t.get("review_of") or {}).get("task"), label,
         " (열린 항목 {})".format(", ".join(r["open"])) if r["open"] else ""))
 
 
@@ -456,14 +472,21 @@ def _format_inbox(items):
             if spec:
                 who += " · 모델 " + spec
             rv = it.get("review")
+            doc = bool(rv and rv.get("kind") == "doc")
             if rv:
                 rspec = models.spec_label(rv.get("model"), rv.get("effort"))
-                who += " · 끝나면 {}{} 리뷰 (최대 {}번)".format(rv["reviewer"], " " + rspec if rspec else "", rv["rounds"])
+                who += " · 끝나면 {}{} {} (최대 {}번)".format(rv["reviewer"], " " + rspec if rspec else "",
+                                                        "심사" if doc else "리뷰", rv["rounds"])
             out.append("[새 작업] {} {} ({} · {})".format(it["task_id"], it["title"], it["task_type"], who))
             if it.get("instruction"):
                 out.append(_indent(it["instruction"]))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
-            if rv:
+            if rv and doc:
+                out.append(_indent("→ 원고를 다 쓰면 devtrack review-request {}{} 로 {} 에게 {}심사위원 관점의 심사를 받습니다. "
+                                   "판정은 [AI 메시지] 로 오고, 고친 뒤에는 답변서와 함께 다시 요청 (--response)".format(
+                                       it["task_id"], "" if rv.get("doc") else " --doc <원고 파일>", rv["reviewer"],
+                                       rv["venue"] + " " if rv.get("venue") else "저널 ")))
+            elif rv:
                 out.append(_indent("→ 개발이 끝나면 커밋 승인 요청 전에 devtrack review-request {} 로 {} 의 리뷰를 받습니다 "
                                    "(결과는 [AI 메시지] 로 옴)".format(it["task_id"], rv["reviewer"])))
         elif it["type"] == "comment":
@@ -1421,6 +1444,12 @@ def cmd_done(store, args):
     _out(args, t, "{} 완료".format(t["id"]))
 
 
+def _loop_state_label(loop):
+    from .store import REVIEW_STATES
+    label = REVIEW_STATES.get(loop.get("state"), loop.get("state") or "")
+    return label.replace("리뷰", "심사") if loop.get("kind") == "doc" else label
+
+
 def cmd_show(store, args):
     t = store.load(args.task)
     if args.json:
@@ -1437,12 +1466,21 @@ def cmd_show(store, args):
     if loop.get("reviewer"):
         from .store import REVIEW_STATES
         rspec = models.spec_label(loop.get("model"), loop.get("effort"))
-        print("  리뷰: {}{} · 최대 {}번 · {}{}".format(loop["reviewer"], " (" + rspec + ")" if rspec else "", loop["rounds"],
-                                                REVIEW_STATES.get(loop.get("state"), loop.get("state")),
-                                                " · 리뷰 작업 " + loop["task"] if loop.get("task") else ""))
+        doc = loop.get("kind") == "doc"
+        print("  {}: {}{} · 최대 {}번 · {}{}".format("심사" if doc else "리뷰", loop["reviewer"],
+                                                " (" + rspec + ")" if rspec else "", loop["rounds"],
+                                                _loop_state_label(loop),
+                                                (" · 심사 작업 " if doc else " · 리뷰 작업 ") + loop["task"]
+                                                if loop.get("task") else ""))
+        from .store import JOURNAL_VERDICT_LABEL
+        if doc:
+            print("    원고: {}{}".format(loop.get("doc") or "원고 파일 아직 안 정함 (--doc)",
+                                       " · 투고처 " + loop["venue"] if loop.get("venue") else ""))
         for h in loop.get("history") or []:
-            print("    {}차 {} — {}{}".format(h["round"], (h.get("requested_at") or "")[5:16].replace("T", " "),
-                                          {"approve": "통과", "request_changes": "수정 필요"}.get(h.get("verdict"), "리뷰 중"),
+            v = h.get("verdict")
+            label = {"approve": "통과", "request_changes": "수정 필요"}.get(v) or JOURNAL_VERDICT_LABEL.get(v) or (
+                "심사 중" if doc else "리뷰 중")
+            print("    {}차 {} — {}{}".format(h["round"], (h.get("requested_at") or "")[5:16].replace("T", " "), label,
                                           " (열린 항목 {})".format(", ".join(h["open"])) if h.get("open") else ""))
     if t.get("review_of"):
         print("  리뷰 대상: {} {} ({}차)".format(t["review_of"]["task"], t["review_of"].get("title", ""),
@@ -1586,6 +1624,8 @@ def build_parser():
     sp.add_argument("--review-rounds", type=int, help="리뷰 최대 횟수 (기본 {})".format(REVIEW_ROUNDS_DEFAULT))
     sp.add_argument("--review-model", help="리뷰어 모델")
     sp.add_argument("--review-effort", help="리뷰어 추론 강도")
+    sp.add_argument("--review-doc", metavar="FILE", help="심사할 원고 (논문 작업: main.tex · .docx · .pdf · .md — 저장소 기준 상대 경로 가능)")
+    sp.add_argument("--review-venue", metavar="JOURNAL", help="투고처 (예: Journal of Fluid Mechanics) — 그 저널의 심사위원 관점으로 심사")
 
     sp = add("start", cmd_start, "대기 중인 작업을 진행 중으로 전환 (다른 AI 에게 배정된 작업은 --take 로만)")
     sp.add_argument("task")
@@ -1724,7 +1764,8 @@ def build_parser():
                     help="리뷰받기로 한 작업이라도 리뷰 없이 커밋 승인 요청 (사용자가 그렇게 하라고 한 경우만)")
 
     sp = add("review-request", cmd_review_request,
-             "개발 작업의 지금 변경(빌드 결과물 제외)을 다른 AI 에게 리뷰받기 — 결과는 [AI 메시지] 로 옴")
+             "개발 작업의 지금 변경(빌드 결과물 제외)을 다른 AI 에게 리뷰받기, 논문 작업은 원고를 저널 심사위원 관점으로 심사받기 — "
+             "결과는 [AI 메시지] 로 옴")
     sp.add_argument("task", help="개발 작업 (저장소가 있는 작업)")
     sp.add_argument("--reviewer", help="리뷰할 AI (예: Codex, Claude). 작업에 정해 두었으면 생략")
     sp.add_argument("--model", help="리뷰어 모델 (예: gpt-6-astra, opus-5.5)")
@@ -1733,12 +1774,16 @@ def build_parser():
         REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX))
     sp.add_argument("-m", "--message", help="리뷰어에게 남길 메모 (봐 줄 부분 · 고친 내용)")
     sp.add_argument("--files", nargs="+", help="리뷰할 파일 제한 (기본: 바뀐 코드 전체, 빌드 결과물 제외)")
+    sp.add_argument("--doc", metavar="FILE", help="(논문 · 문서) 심사할 원고 — main.tex · .docx · .pdf · .md")
+    sp.add_argument("--venue", metavar="JOURNAL", help="(논문 · 문서) 투고처 — 그 저널의 심사위원 관점으로 심사")
+    sp.add_argument("--response", metavar="FILE", help="(논문 · 문서, 2차부터 필수) 답변서 — 지적마다 어떻게 고쳤는지 (response to reviewers)")
     sp.add_argument("--same-session", action="store_true",
                     help="개발한 대화가 리뷰해도 됨 (기본: 리뷰는 다른 대화가 함 — 사용자가 그렇게 하라고 한 경우만)")
 
     sp = add("review-done", cmd_review_done, "리뷰 작업의 이번 차례 결과(통과 / 수정 필요)를 개발 AI 에게 보내기")
     sp.add_argument("task", help="리뷰 작업 (review-request 로 만든 작업)")
-    sp.add_argument("--verdict", help="approve (통과) · changes (수정 필요). 생략하면 devtrack review 로 남긴 verdict")
+    sp.add_argument("--verdict", help="코드: approve (통과) · changes (수정 필요). 논문 · 문서: accept · minor · major · reject. "
+                                      "생략하면 devtrack review 로 남긴 verdict")
     sp.add_argument("-m", "--message", help="한두 줄 요약")
 
     sp = add("send", cmd_send, "다른 AI 가 맡은 작업에 메시지 보내기 (AI → AI, [AI 메시지])")

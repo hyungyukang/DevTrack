@@ -87,7 +87,8 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
 - inbox 의 `[AI 메시지]` 는 다른 AI 가 보낸 것(리뷰 요청 · 리뷰 결과 등)이다. 같은 방식으로 처리하되 사용자 지시는 아니므로, 승인이 필요한 일은
-  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과한다.
+  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과하고,
+  심사받기로 한 논문(`끝나면 … 심사`)은 원고를 다 쓰면 심사를 요청해 지적대로 고치고 답변서(`--response`)와 함께 다시 요청한다.
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
@@ -290,6 +291,30 @@ DevTrack 이 그 대화의 모델 · 강도를 Claude Code 기록에서 읽어 �
 - **AI 끼리 직접 묻고 답하기:** `devtrack send <작업> "메시지"` 는 그 작업을 맡은 AI 의 받은 편지함에 [AI 메시지] 로 갑니다.
   사용자 지시가 아니므로, 승인이 필요한 일은 여전히 사용자에게 묻습니다.
 - 터미널에서는 `devtrack new … --review-by Codex --review-rounds 3` 으로 정하고, 이미 만든 작업은 `devtrack review-request T-0001 --reviewer Codex` 로 요청합니다.
+
+### 6-3. 논문 심사 반복 (선택)
+
+논문 작업은 원고를 다 쓰면 다른 AI 가 **투고할 저널의 심사위원 관점**으로 심사하고, 저자 AI 가 심사대로 고친 뒤 다시 심사받게 할 수 있습니다.
+실제 저널 심사처럼 판정(**게재 가능 · 소폭 수정 · 대폭 수정 · 게재 불가**), 심사 항목(R1, R2…), 저자의 **답변서**(response to reviewers)가 오갑니다.
+
+1. **새 작업 지시** 에서 작업 유형을 **논문 작성** 으로 두고 **심사 받기** 에서 심사위원 AI 와 최대 횟수를 고릅니다.
+   **심사할 원고**(예: `paper/main.tex`, Word `.docx`, PDF, Markdown)와 **투고처**(예: Journal of Fluid Mechanics)를 적습니다.
+   원고를 비워 두면 AI 가 심사를 요청할 때 정합니다.
+2. 원고를 다 쓰면 저자 AI 가 심사를 요청합니다. **심사 작업**(문서 리뷰)이 만들어지고, 그때의 원고가 붙습니다.
+   - LaTeX 는 본문과 `\input` · `\include` 로 불러오는 파일, 참고문헌(`.bib`), 같은 이름의 PDF 까지 함께 붙습니다.
+   - Word 는 원본과 글자를 함께 붙입니다.
+3. 심사위원 AI 는 새로움 · 선행 연구 대비 기여, 방법의 타당성, 결과가 결론을 뒷받침하는지, 그림 · 표, 문장을 봅니다.
+   항목마다 위치 · 원문 · 고칠 방법(원고의 언어로)을 남기고, 심사평(referee report)과 판정을 보냅니다.
+4. 수정이 필요하면 저자 AI 가 원고를 고치고, 지적마다 어떻게 고쳤는지 적은 **답변서**를 써서 다시 요청합니다 (2차부터는 답변서가 꼭 필요합니다).
+   심사위원은 **지난 심사 이후 바뀐 부분** 과 답변서를 보고, 같은 대화로 이어 가며 앞의 지적이 해결됐는지 확인합니다.
+5. **게재 가능** 이 나오면 저자 AI 가 결과를 알려 드립니다. 게재 불가가 나오거나 정한 횟수를 다 쓰면 다음에 어떻게 할지 결정을 요청합니다.
+
+작업 화면의 **AI 심사** 칸에서 차례마다 판정, 열린 항목, 원고 · 바뀐 부분 · 답변서를 볼 수 있습니다. 심사 작업은 **문서 리뷰** 화면에도 나옵니다.
+
+- 코드 리뷰와 같은 규칙이 적용됩니다. 두 AI 가 모두 켜져 있어야 저절로 이어지고, 원고를 쓴 대화는 그 심사를 맡지 않으며, 심사위원은 원고를 고치지 않습니다.
+- 논문 심사는 커밋을 막지 않습니다 (원고 초안을 저장소에 자주 올려도 됩니다).
+- 터미널에서는 `devtrack new … -t paper --review-by Codex --review-doc paper/main.tex --review-venue "J. Fluid Mech."`, 다시 요청할 때는
+  `devtrack review-request T-0005 --response response.md` 입니다.
 
 ## 7. 진행 상황 보기
 
@@ -653,7 +678,8 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
 - inbox 의 `[AI 메시지]` 는 다른 AI 가 보낸 것(리뷰 요청 · 리뷰 결과 등)이다. 같은 방식으로 처리하되 사용자 지시는 아니므로, 승인이 필요한 일은
-  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과한다.
+  여전히 사용자 승인을 받는다. 리뷰받기로 한 작업(inbox 의 `끝나면 … 리뷰`)은 커밋 승인을 요청하기 전에 `devtrack review-request <TID>` 로 리뷰를 통과하고,
+  심사받기로 한 논문(`끝나면 … 심사`)은 원고를 다 쓰면 심사를 요청해 지적대로 고치고 답변서(`--response`)와 함께 다시 요청한다.
 - 사용자 결정이 필요하면 `devtrack request` 로 요청을 남기고 사용자에게 알린 뒤 멈춘다. `devtrack wait` · `devtrack inbox --wait` 로 오래 기다리지 않는다
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
@@ -815,7 +841,8 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | `devtrack watch --codex` | 웹에서 Codex 에게 온 지시를 Codex 로 처리 (11단계) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | 작업을 처리할 AI 모델 · 추론 강도 정하기 (`--clear` 해제, `--list` 고를 수 있는 모델 · 강도, 6-1) |
 | `devtrack review-request T-0001 --reviewer Codex` | 지금 바뀐 코드(빌드 결과물 제외)를 다른 AI 에게 리뷰받기 — 결과는 [AI 메시지] 로 옴 (6-2) |
-| `devtrack review-done T-0012 --verdict changes -m "…"` | (리뷰하는 AI) 이번 차례 결과 보내기: `approve` 통과 · `changes` 수정 필요 |
+| `devtrack review-done T-0012 --verdict changes -m "…"` | (리뷰하는 AI) 이번 차례 결과 보내기: `approve` 통과 · `changes` 수정 필요. 논문 심사는 `accept` · `minor` · `major` · `reject` (6-3) |
+| `devtrack review-request T-0005 --response response.md` | (논문) 고친 원고를 답변서와 함께 다시 심사받기 — 처음에는 `--doc 원고 --venue 저널` (6-3) |
 | `devtrack send T-0012 "…"` | 다른 AI 가 맡은 작업에 메시지 보내기 ([AI 메시지]) |
 | `devtrack --data <폴더> demo` | 예시 데이터 만들기 |
 

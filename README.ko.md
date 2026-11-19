@@ -78,6 +78,11 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 두 AI 를 모두 켜 두면(`devtrack watch --claude` 와 `devtrack watch --codex`) 반복이 저절로 이어집니다.
 데모의 `T-0006`(Claude)은 `T-0012` 에서 Codex 의 2차 리뷰를 통과했습니다.
 
+**논문은 같은 방식으로 저널 심사를 받습니다.** 논문 작업에서는 리뷰어가 투고할 저널의 심사위원으로서 심사합니다
+(`--review-doc paper/main.tex --review-venue "J. Fluid Mech."`). 판정은 게재 가능 · 소폭 수정 · 대폭 수정 · 게재 불가입니다.
+차례마다 원고(`\input` 파일과 `.bib` 를 포함한 LaTeX · Word · PDF · Markdown)가 가고, 2차부터는 지난 심사 이후 바뀐 부분과 저자의 답변서도 함께 갑니다.
+데모의 `T-0005` 는 `T-0013` 에서 대폭 수정 → 소폭 수정으로 진행 중입니다.
+
 ## 구성
 
 | 구성 요소 | 설명 |
@@ -174,7 +179,7 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `plan` / `check` | 작업 계획 설정 / 단계 완료 표시 |
 | `link` | 작업 연결 (예: 데이터 분석 → 논문). `new --related T-ID` 로 생성 시 연결도 가능 |
 | `model` | 작업을 처리할 AI 모델 · 추론 강도 보기 / 정하기 (`devtrack model T-0006 opus-5.5 --effort xhigh`, `--clear`, `--list` 고를 수 있는 모델 · 강도). `new --model --effort` 로 생성 시 지정도 가능 |
-| `review-request` · `review-done` | AI 끼리 리뷰 반복: `review-request T-ID --reviewer Codex` 로 바뀐 코드(빌드 결과물 제외)를 리뷰 요청, 리뷰어는 `review-done T-ID --verdict approve\|changes` 로 결과를 보냄. `new --review-by` 로 미리 정하고, `request --commit --skip-review` 는 사용자가 그렇게 하라고 할 때만 |
+| `review-request` · `review-done` | AI 끼리 리뷰 반복: `review-request T-ID --reviewer Codex` 로 바뀐 코드(빌드 결과물 제외)를 리뷰 요청, 리뷰어는 `review-done T-ID --verdict approve\|changes` 로 결과를 보냄. 논문은 `--doc` · `--venue` · `--response` 와 판정 `accept\|minor\|major\|reject`. `new --review-by` 로 미리 정하고, `request --commit --skip-review` 는 사용자가 그렇게 하라고 할 때만 |
 | `send` | 다른 AI 가 맡은 작업에 메시지 보내기 (그 AI 의 inbox 에 `[AI 메시지]`) |
 | `issue` / `resolve` | 문제 기록 / 해결 |
 | `artifact` / `review` | 결과물 첨부 (파일, `--url`, `--git-diff`, `--source` = 문서 리뷰의 검토할 원본) / 코드 · 문서 리뷰 리포트 등록 + `--findings` 로 검토 항목(R1, R2…) 기록 (문서 리뷰는 `doc` · `checks` · `strengths` 도), `--pdf` 로 PDF 도 만들어 첨부. 같은 이름으로 다시 올리면 새 버전으로 교체(이전 버전 보관, `artifact --replace` 도 동일) |
