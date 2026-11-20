@@ -1292,7 +1292,7 @@ function reviewLoopPanel(t) {
     <div class="card-head"><h2>${icon('eye')} ${doc ? L('AI 심사') : L('AI 리뷰')}</h2><span class="badge tone-${st.tone}">${icon(st.icon)} ${loopStateLabel(loop, st)}</span></div>
     <div class="card-body">
       <div class="rl-who">${doc ? L('심사위원') : L('리뷰어')} <b>${loop.reviewer}</b>${spec ? html` <span class="muted">· ${spec}</span>` : ''} · ${L('최대 {n}번', { n: loop.rounds })}${hist.length ? html` · ${L('{n}번 받음', { n: used })}` : ''}${loop.task ? html` · <a href="#/task/${loop.task}">${doc ? L('심사 작업') : L('리뷰 작업')} ${loop.task}</a>` : ''}</div>
-      ${doc ? html`<div class="rl-doc muted">${icon('file-text')} ${loop.doc || L('원고 파일은 심사를 요청할 때 정합니다')}${loop.venue ? html` · ${L('투고처')} <b>${loop.venue}</b>` : ''}</div>` : ''}
+      ${doc ? html`<div class="rl-doc muted">${icon('file-text')} ${loop.doc || L('원고 파일은 심사를 요청할 때 정합니다')}${loop.venue ? html` · ${L('투고처')} <b>${loop.venue}</b>` : ''}${loop.record ? html` · <a href="#/artifact/${t.id}/${loop.record}">${L('심사 · 답변 기록')}</a>` : ''}</div>` : ''}
       ${hist.length ? html`<ol class="rl-rounds">${hist.map((h) => html`<li>
         <span class="rl-n">${L('{n}차', { n: h.round })}</span>${verdictBadge(h.verdict, doc)}
         ${doc ? (h.stat ? html`<span class="muted">${L('바뀐 부분')} <span class="add">+${h.stat.additions}</span> <span class="del">−${h.stat.deletions}</span></span>` : '')

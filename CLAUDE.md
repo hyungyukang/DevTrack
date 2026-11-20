@@ -51,7 +51,10 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   Word → Markdown · PDF → pdftotext) → `Store._doc_review_request` 가 심사 작업(`docreview`)에 원고 · 지난 심사 이후 diff · 답변서를 붙이고
   차례마다 `.snapshots/round<n>.json` 을 남김. 판정은 `DOC_VERDICTS` (게재 가능이면 통과, `rework` = 게재 불가 → `rejected`), 커밋은 막지 않음.
   `\includegraphics` 그림은 `manuscript.find_graphic`(LaTeX 순서, 심사는 확장자 무관)으로 찾아 `_attach_figures` 가 심사 작업에 붙인다
-  (결과물의 `figure` = 원고 폴더 기준 이름, 바뀐 그림은 새 버전, 지문 `digest` 에 그림 포함 — 그림이 없으면 예전 지문 그대로)
+  (결과물의 `figure` = 원고 폴더 기준 이름, 바뀐 그림은 새 버전, 지문 `digest` 에 그림 포함 — 그림이 없으면 예전 지문 그대로).
+  심사 · 답변 기록: `review_done` 이 그 차례의 항목을 `review_rounds[].findings` 로 떠 두고, 답변서는 `response_sections` 가 항목 ID 제목
+  (`## R1` · `**R1**`)으로 나눈다 (지난 차례의 열린 항목에 답이 없으면 `review-request` 거절). `_save_review_record` 가 논문 작업의
+  `review_response_record.md` 결과물(`review_record`, `review_loop.record`)을 판정 · 답변서마다 새 버전으로 고친다
 - 논문 원고 폴더: `tasks/<T>/paper/` (`Store.paper_folder`) — 최신 `.tex` · `.bib` 결과물 + 원고가 부르는 그림(같은 이름 결과물, 이 작업 > 연결된 작업)을
   LaTeX 가 찾는 폴더에. 원고 · 그림 결과물이 바뀌면 `_mark_paper` → `_save` 에서 그 작업과 연결된 논문 작업을 다시 만든다(`_refresh_papers`).
   DevTrack 이 관리하는 폴더라 없는 파일은 지우고, 공개 폴더도 `_mirror_paper` 로 맞춘다. `devtrack paper <T>` 는 다시 만들기 · 빠진 그림 확인
@@ -95,6 +98,8 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   그림: `\graphicspath{{figures/}}` 와 PNG 그림을 두고 1차에 `그림: …` 결과물이 붙는지, 그림 하나만 고친 2차가 받아지고 메시지에 그 이름이 나오는지,
   아무것도 안 바꾼 3차는 거절되는지 본다. 원고 폴더는 논문 작업에 그림 · `.tex` 를 올리고(연결된 분석 작업의 그림 포함) `devtrack paper` 의
   `확장자를 빼야 할 그림` · `그림 결과물이 없는 그림`, 연결 해제 · 다시 공개 뒤 빠진 그림이 지워지는지 본다.
+  심사 · 답변 기록: `severity: question` 이 섞인 항목으로 1차 판정 → 한 항목이 빠진 답변서는 거절 · `**R2.**` 로 더하면 2차 → accept 판정
+  메시지에 `-a <기록 ID>` 가 나오는지, 기록의 표(답변 수 · 해결 수)와 항목별 저자 답변을 본다. 데모 T-0005 의 기록도 확인.
   같은 AI 리뷰는 `DEVTRACK_SESSION=s1` 로 개발 · 요청한 뒤 s1 의 inbox (`[다른 대화가 리뷰]`) · `start` 거절 · `inbox --wait` 안 깨어남, s2 는 처리되는지 본다.
 - 기록 위치 변경 후: `XDG_CONFIG_HOME=<임시>` 로 실제 `~/.config` 를 건드리지 않고 `config data` · `config publish` →
   환경 변수 없이 `new` 가 그곳에 쓰고 공개 폴더로 반영되는지, 훅(`bin/devtrack-hook`)이 그곳의 취소를 보는지, `$DEVTRACK_DATA` 가 다르면

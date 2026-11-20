@@ -88,8 +88,10 @@ In the demo, `T-0006` (Claude) passed review in round 2 by Codex in `T-0012`.
 **Papers get a journal review the same way.** For a paper task, the reviewer acts as a referee for the target journal
 (`--review-doc paper/main.tex --review-venue "J. Fluid Mech."`). The verdict is accept, minor revision, major revision or reject.
 Each round carries the manuscript (LaTeX with its `\input` files, `.bib` and the figures it loads, Word, PDF or Markdown). From round 2 on it also carries
-the changes since the last review and the author's response to reviewers. In the demo, `T-0005` went from major revision to minor
-revision in `T-0013`.
+the changes since the last review and the author's response to reviewers. The response answers every open item by its ID
+(`## R1 — …`), or the request is refused. DevTrack gathers the referee's questions and requests and the author's answers, round
+by round, into a **review & response record** on the paper task. The author attaches it when reporting the result. In the demo,
+`T-0005` went from major revision to minor revision in `T-0013`.
 
 Each paper task also keeps a **manuscript folder** in the records, `tasks/<T-ID>/paper/`: the latest `.tex` and `.bib` under their
 own names, plus the figures the manuscript loads, gathered into `figures/` from figure artifacts of the same name. You can compile it

@@ -678,7 +678,11 @@ def cmd_review_request(store, args):
                                          r["since"], r["stat"]["additions"], r["stat"]["deletions"]) if r.get("since") else ""),
                  ]
         if r.get("response"):
-            lines.append("  답변서: " + r["response"])
+            lines.append("  답변서: {}{}".format(r["response"], " (답한 항목 {})".format(" · ".join(r["answered"]))
+                                                 if r.get("answered") else ""))
+        if r.get("record"):
+            lines.append("  심사 · 답변 기록: {} (논문 작업 {} 의 결과물 — 차례마다 새 버전)".format(
+                r["record"], normalize_task_id(args.task)))
         fg = r.get("figures") or {}
         if fg.get("count"):
             chg = ", ".join("{} {}".format(label, len(fg[k])) for k, label in (("changed", "바뀜"), ("new", "새 그림"),

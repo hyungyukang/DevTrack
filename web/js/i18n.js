@@ -391,6 +391,7 @@ const EN = {
   '심사 작업': 'review task',
   '원고 파일은 심사를 요청할 때 정합니다': 'The manuscript file is set when the review is requested',
   '투고처': 'Venue',
+  '심사 · 답변 기록': 'Review & response record',
   '바뀐 부분': 'Changed',
   '지난 심사 이후': 'Since last review',
   '답변서': 'Response',

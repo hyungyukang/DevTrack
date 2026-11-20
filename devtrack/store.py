@@ -1069,6 +1069,16 @@ class Store:
                                 "고치지 않았다면 그 이유를 적은 파일을 --response 로 주세요")
         if response and not os.path.isfile(os.path.expanduser(response)):
             raise DevTrackError("답변서 파일을 찾을 수 없습니다: {}".format(response))
+        answered = None
+        if prev and response:  # 지난 차례의 열린 항목(질문 · 요청)마다 답이 있어야 심사 · 답변 기록이 빠짐없이 남는다
+            answered = sorted((k for k, v in response_sections(_read_response(response))[1].items() if v),
+                              key=lambda x: int(x[1:]))
+            missing = [i for i in prev.get("open") or [] if i not in answered]
+            if missing:
+                raise DevTrackError(
+                    "답변서에 {}차 심사의 항목 {} 에 대한 답이 없습니다 — 항목마다 '## R1 — 제목' 처럼 항목 ID 로 제목을 달고, "
+                    "질문에는 답을, 요청에는 어떻게 고쳤는지(고치지 않았다면 그 이유)를 적어 주세요".format(
+                        prev["round"], " · ".join(missing)))
         n = len(history) + 1
         who = author or t.get("agent")
         figs = snap.get("figures") or {}
@@ -1152,12 +1162,17 @@ class Store:
                      "response": ids.get("response"), "stat": stat, "digest": dig, "verdict": None}
             if figs or snap.get("missing_figures"):
                 entry["figures"] = dict(figchg or {}, count=len(figs), missing=snap.get("missing_figures") or [])
+            if answered is not None:
+                entry["answered"] = answered
             loop["history"] = history + [entry]
             t["review_loop"] = loop
             self._log(t, "{}차 심사 요청 → {}{} ({}) · 원고 {}".format(
                 n, plan["reviewer"], " · " + models.spec_label(plan["model"], plan["effort"])
                 if plan["model"] or plan["effort"] else "", rtid, os.path.basename(path)),
                 kind="info", author=who, ref=rtid)
+            rec = self._save_review_record(t, who)
+            if rec:
+                entry["record"] = rec["id"]
         return dict(entry, rounds=plan["rounds"], reviewer=plan["reviewer"], created=created, kind="doc",
                     excluded=[], stat=stat or {"files": len(snap["files"]), "additions": 0, "deletions": 0})
 
@@ -1283,7 +1298,10 @@ class Store:
                 rv["summary"] = summary.strip()
             rv["updated_at"] = now()
             r["review"] = rv
-            r.setdefault("review_rounds", []).append(dict(result, at=now(), by=who))
+            rnd = dict(result, at=now(), by=who)
+            if doc:  # 이 차례의 질문 · 요청을 그대로 남긴다 (항목은 같은 ID 끼리 합쳐지므로 — 심사 · 답변 기록용)
+                rnd["findings"] = [dict(f) for f in rv.get("findings") or []]
+            r.setdefault("review_rounds", []).append(rnd)
             self._log(r, "{}차 {} 결과: {} (열린 항목 {}개) → {}".format(
                 n, "심사" if doc else "리뷰", JOURNAL_VERDICT_LABEL.get(v) if doc else "통과" if passed else "수정 필요",
                 len(open_), tid), kind="success" if passed else "warning", author=who)
@@ -1302,8 +1320,162 @@ class Store:
             loop["history"][-1].update(verdict=v, open=result["open"], done_at=now(), summary=result["summary"],
                                        by=who)
             loop["state"] = state
+            rec = self._save_review_record(t, who) if doc else None
+            if rec and state == "changes":
+                msg += ("\n답변서는 열린 항목마다 '## R1 — 제목' 처럼 항목 ID 로 제목을 달아, 질문에는 답을, 요청에는 어떻게 고쳤는지"
+                        "(고치지 않았다면 그 이유)를 씁니다 — 빠진 항목이 있으면 다시 요청이 거절됩니다. 질문 · 요청과 답변은 "
+                        "심사 · 답변 기록 {} 에 차례별로 모입니다.").format(rec["id"])
+            elif rec:
+                msg += "\n알릴 때 심사 · 답변 기록 {0} (심사위원의 질문 · 요청과 저자 답변, 차례별)을 함께 첨부하세요: " \
+                       "devtrack request {1} \"…\" -k result -a {0}".format(rec["id"], tid)
+                result["record"] = rec["id"]
             self._agent_message(t, msg, who, meta={"review_result": result})
         return result
+
+    def _save_review_record(self, t, who):
+        """논문 · 문서 심사의 '심사 · 답변 기록'(review_response_record.md)을 논문 작업의 결과물로 만들거나 새 버전으로 고친다.
+        심사 판정과 답변서가 올 때마다 부른다 (잠금 안에서, t 는 편집 중인 작업). → 결과물"""
+        loop = t.get("review_loop") or {}
+        if loop.get("kind") != "doc" or not loop.get("history"):
+            return None
+        text = self._review_record_text(t)
+        title = "심사 · 답변 기록 ({}차까지)".format(loop["history"][-1]["round"])
+        art = next((a for a in t.get("artifacts", []) if a.get("review_record") and a.get("path")), None)
+        if art:
+            fd, tmp = tempfile.mkstemp(prefix=".tmp-record-", suffix=".md", dir=self.task_dir(t["id"]))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                art = self._new_version(t, art, tmp, title=title, author=who)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        else:
+            art = self._add_artifact(t, text=text, filename="review_response_record.md", title=title, author=who,
+                                     description="심사위원의 질문 · 요청(R1, R2…)과 저자가 답변서로 답한 내용을 차례별로 모은 기록. "
+                                                 "DevTrack 이 심사 판정과 답변서가 올 때마다 고친다.",
+                                     extra={"review_record": True})
+        loop["record"] = art["id"]
+        return art
+
+    def _review_record_text(self, t):
+        """심사 · 답변 기록 (Markdown): 차례마다 판정 · 심사위원의 질문과 요청(그 차례의 열린 항목) · 다음 답변서의 답 · 해결 여부."""
+        loop = t.get("review_loop") or {}
+        hist = loop.get("history") or []
+        cache = {}
+
+        def rtask(rid):
+            if rid not in cache:
+                try:
+                    cache[rid] = self.load(rid)
+                except (DevTrackError, OSError, ValueError):
+                    cache[rid] = {"id": rid}
+            return cache[rid]
+
+        def answers(h):
+            """그 차례 요청에 붙은 답변서 → (답변서 결과물 ID, 총평, {항목 ID: 답})"""
+            if not h or not h.get("response"):
+                return None, "", {}
+            r = rtask(h["task"])
+            a = next((x for x in r.get("artifacts", []) if x.get("id") == h["response"]), None)
+            path = a and self._artifact_file(r["id"], a)
+            try:
+                general, secs = response_sections(_read_response(path)) if path else ("", {})
+            except (DevTrackError, OSError):
+                general, secs = "", {}
+            return h["response"], general, secs
+
+        def items(h):
+            """그 차례에 열려 있던 질문 · 요청 (판정 때 떠 둔 항목, 없으면 지금 항목)"""
+            r = rtask(h["task"])
+            snap = next((x for x in reversed(r.get("review_rounds") or [])
+                         if x.get("round") == h["round"] and x.get("findings") is not None), None)
+            pool = snap["findings"] if snap else (r.get("review") or {}).get("findings") or []
+            byid = dict((f["id"], f) for f in pool)
+            return [byid.get(i) or {"id": i, "title": "(내용 없음)"} for i in h.get("open") or []]
+
+        def quote(text):
+            return "\n".join("  > " + line if line.strip() else "  >" for line in str(text).strip().splitlines())
+
+        def spec(model, effort):
+            s = models.spec_label(model, effort)
+            return " ({})".format(s) if s else ""
+
+        state = loop.get("state")
+        final = state in ("approved", "exhausted", "rejected")
+        reports = []
+        for rid in sorted({h["task"] for h in hist if h.get("task")}):
+            reports += ["{} 의 {}{}".format(rid, a["id"], " (v{})".format(a["version"]) if a.get("version", 1) > 1 else "")
+                        for a in rtask(rid).get("artifacts", []) if a.get("category") == "review"]
+        out = ["# 심사 · 답변 기록 — {}".format(t["title"]), "",
+               "심사위원이 남긴 **질문 · 요청**(R1, R2…)과 저자가 답변서(response to reviewers)로 **답한 내용**을 차례별로 모은 기록입니다.",
+               "DevTrack 이 심사 판정과 답변서가 올 때마다 새 버전으로 고칩니다.", "",
+               "| 항목 | 내용 |", "|---|---|",
+               "| 논문 작업 | {} |".format(t["id"]),
+               "| 저자 | {}{} |".format(t.get("agent") or "AI", spec(t.get("model"), t.get("effort"))),
+               "| 심사위원 | {}{} |".format(loop.get("reviewer") or "—", spec(loop.get("model"), loop.get("effort"))),
+               "| 투고처 | {} |".format(loop.get("venue") or "—"),
+               "| 원고 | `{}` |".format(loop.get("doc") or "—"),
+               "| 상태 | {} ({}차까지, 최대 {}번) |".format(DOC_LOOP_STATES.get(state, state or "—"), len(hist),
+                                                    loop.get("rounds") or REVIEW_ROUNDS_DEFAULT),
+               "| 심사평 (referee report) | {} |".format(" · ".join(reports) or "—"), "",
+               "## 한눈에 보기", "",
+               "| 차례 | 판정 | 질문 · 요청 | 저자 답변 | 다음 심사에서 해결 |", "|---|---|---|---|---|"]
+        rounds = []
+        for i, h in enumerate(hist):
+            nxt = hist[i + 1] if i + 1 < len(hist) else None
+            its = items(h) if h.get("verdict") else []
+            rid, general, secs = answers(nxt)
+            judged = bool(nxt and nxt.get("verdict"))
+            fixed = [f for f in its if judged and f["id"] not in (nxt.get("open") or [])]
+            q = sum(1 for f in its if f.get("severity") == "question")
+            out.append("| {}차 | {} | {} | {} | {} |".format(
+                h["round"], JOURNAL_VERDICT_LABEL.get(h.get("verdict"), "심사 중") if h.get("verdict") else "심사 중",
+                "{}개{}".format(len(its), " (질문 {})".format(q) if q else "") if h.get("verdict") else "—",
+                "{}/{}".format(sum(1 for f in its if secs.get(f["id"])), len(its)) if nxt and its else "—",
+                "{}/{}".format(len(fixed), len(its)) if judged and its else "—"))
+            rounds.append((h, nxt, its, rid, general, secs, judged))
+        for h, nxt, its, rid, general, secs, judged in rounds:
+            n = h["round"]
+            out += ["", "## {}차 심사 — {}".format(n, JOURNAL_VERDICT_LABEL.get(h.get("verdict"), "심사 중")
+                                               if h.get("verdict") else "심사 중"), ""]
+            meta = ["요청 {} ({})".format((h.get("requested_at") or "")[:10], h.get("requested_by") or "—")]
+            if h.get("done_at"):
+                meta.append("판정 {} ({})".format(h["done_at"][:10], h.get("by") or loop.get("reviewer") or "—"))
+            out.append(" · ".join(meta))
+            if h.get("summary"):
+                out += ["", "**심사위원 요약:** {}".format(h["summary"])]
+            if not h.get("verdict"):
+                out += ["", "심사위원이 심사하는 중입니다."]
+                continue
+            if not its:
+                out += ["", "열린 질문 · 요청이 없습니다."]
+            if general:
+                out += ["", "**저자 총평 ({}차 답변서 {}):**".format(nxt["round"], rid), "", quote(general).replace("  >", ">")]
+            for f in its:
+                sev = f.get("severity")
+                out += ["", "### {} · {} — {}".format(f["id"], FINDING_SEV_LABEL.get(sev, sev or "—"),
+                                                      f.get("title") or "(제목 없음)"), ""]
+                if f.get("location"):
+                    out.append("- **위치:** {}".format(f["location"]))
+                if f.get("quote"):
+                    out += ["- **원고 원문:**", quote(f["quote"])]
+                if f.get("plain"):
+                    out.append("- **{}:** {}".format("질문" if sev == "question" else "심사위원 설명", f["plain"]))
+                if f.get("suggestion"):
+                    out.append("- **{}:** {}".format("심사위원 제안" if sev == "question" else "요청 (고칠 방법)",
+                                                     f["suggestion"]))
+                ans = secs.get(f["id"])
+                if nxt and ans:
+                    out += ["- **저자 답변 ({}차 답변서 {}):**".format(nxt["round"], rid), quote(ans)]
+                elif nxt:
+                    out.append("- **저자 답변:** 답변서에 이 항목이 없습니다")
+                else:
+                    out.append("- **저자 답변:** {}".format("없음 (마지막 차례)" if final else "아직 없음 — 다음 답변서에서 답합니다"))
+                if judged:
+                    out.append("- **{}차 심사 결과:** {}".format(
+                        nxt["round"], "아직 열림" if f["id"] in (nxt.get("open") or []) else "해결됨"))
+        return "\n".join(out) + "\n"
 
     # ------------------------------------------------------------------ 계획
     def set_plan(self, tid, items, append=False, author=None):
@@ -2372,6 +2544,54 @@ def _doc_path(t, doc):
     if not os.path.isabs(p):
         p = os.path.join((t.get("repo") or {}).get("path") or os.getcwd(), p)
     return os.path.abspath(p)
+
+
+DOC_LOOP_STATES = {"planned": "심사 전", "reviewing": "심사 중", "changes": "저자가 고치는 중", "approved": "게재 가능 — 심사 통과",
+                   "exhausted": "심사 횟수를 다 씀", "rejected": "게재 불가"}
+# 답변서의 항목 시작: '## R1 — 제목' 같은 제목 줄, 또는 '**R1 (…).** 답…' · '- **R1** …' 처럼 굵은 글씨로 시작하는 줄
+_RESPONSE_HEAD = re.compile(r"^\s{0,3}(?:(#{1,6})\s*(?:\*\*|__)?|(?:[-*+]\s+)?(\*\*|__))\s*\[?R\s*-?\s*0*(\d+)(?!\d)")
+
+
+def response_sections(text):
+    """답변서(response to reviewers) → (총평, {"R1": 답, …}). 항목은 항목 ID 로 시작하는 제목 · 굵은 글씨 줄부터
+    다음 항목 · 같은 단계 이상의 다른 제목까지. 제목 줄 자체는 빼고, 굵은 글씨 줄은 닫는 ** 뒤의 글부터 답으로 친다."""
+    general, secs, cur, level = [], {}, None, 7
+    for line in (text or "").splitlines():
+        m = _RESPONSE_HEAD.match(line)
+        if m:
+            cur = "R{}".format(int(m.group(3)))
+            level = len(m.group(1)) if m.group(1) else 7
+            body = secs.setdefault(cur, [])
+            if m.group(2):
+                rest = line[m.end():]
+                close = rest.find(m.group(2))
+                rest = (rest[close + 2:] if close >= 0 else rest).lstrip(" .:)]—–-")
+                if rest.strip():
+                    body.append(rest)
+            continue
+        h = re.match(r"^\s{0,3}(#{1,6})\s", line)
+        if cur and h and len(h.group(1)) <= level:  # 같은 단계 이상의 다른 제목 → 그 항목 끝
+            cur = None
+        (secs[cur] if cur else general).append(line)
+    while general and (not general[0].strip() or re.match(r"^\s{0,3}#\s", general[0])):  # 맨 앞의 문서 제목은 총평에서 뺀다
+        general.pop(0)
+    return "\n".join(general).strip(), dict((k, "\n".join(v).strip()) for k, v in secs.items())
+
+
+def _read_response(path):
+    """답변서 글: Markdown · 텍스트는 그대로, Word 는 Markdown 으로, PDF 는 pdftotext 로."""
+    p = os.path.expanduser(path)
+    ext = os.path.splitext(p)[1].lower()
+    if ext == ".docx":
+        from .docx import docx_to_markdown
+        return docx_to_markdown(p)
+    if ext == ".pdf":
+        text = manuscript.pdf_text(p)
+        if text is None:
+            raise DevTrackError("PDF 답변서의 글자를 읽지 못했습니다 (pdftotext 없음) — Markdown · 텍스트 · Word 로 주세요: {}".format(path))
+        return text
+    with open(p, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
 
 
 def _doc_verdict(value):

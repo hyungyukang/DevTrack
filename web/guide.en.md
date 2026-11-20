@@ -313,11 +313,19 @@ As in a real journal review, a verdict (**accept · minor revision · major revi
    - For Word, the original and its text come along.
 3. The referee AI looks at novelty and contribution over prior work, soundness of the method, whether the results support the conclusions, figures and tables, and the writing.
    Each finding has a location, the original text and a fix (in the manuscript's language), and the referee sends a referee report and a verdict.
-4. If revisions are needed, the author AI revises the manuscript, writes a **response to reviewers** explaining how each point was handled, and asks again (from round 2 on the response is required).
-   The referee looks at **what changed since the last review** and the response, continuing the same conversation, and checks whether the earlier points were resolved.
+4. If revisions are needed, the author AI revises the manuscript, writes a **response to reviewers** and asks again. From round 2 on the response is required.
+   - The response is split by item, `R1`, `R2` …. Questions get an answer; requests get how they were handled (or why not).
+   - If any item left open in the last round has no answer, the request is refused.
+   - The referee looks at **what changed since the last review** and the response, continuing the same conversation, and checks whether the earlier points were resolved.
 5. On **accept**, the author AI reports the result to you. On reject, or once all rounds are used, it asks you what to do next.
+   Either way it attaches the **review & response record** below.
 
-The **AI journal review** box on the task page shows each round's verdict, the open items, and the manuscript, changes and response. The review task also appears on the **Document review** page.
+**Review & response record** — a report that gathers the referee's questions and requests and the author's answers, round by round. It is an artifact of the paper task.
+- The table at the top shows each round's verdict, how many questions and requests there were, how many were answered, and how many were resolved in the next review.
+- Then each item shows its location, the quoted text, the referee's question or request, the author's answer, and whether the next round resolved it.
+- DevTrack updates it to a new version whenever a verdict or a response arrives. Earlier versions are kept.
+
+The **AI journal review** box on the task page shows each round's verdict, the open items, the manuscript, changes and response, and a link to the **review & response record**. The review task also appears on the **Document review** page.
 
 - The same rules as for code review apply. Both AIs must be running for this to go on by itself, the conversation that wrote the manuscript does not take its review, and the referee does not edit the manuscript.
 - A journal review does not block commits (drafts can be committed to the repository as often as you like).
