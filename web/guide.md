@@ -483,6 +483,8 @@ devtrack publish               # 처음 한 번 (웹 화면을 업데이트했�
 - `git clone` 을 하려면 HPC 에 GitHub SSH 키가 등록되어 있어야 합니다.
 - 이후 Claude 가 기록할 때마다 공개 디렉토리에 자동으로 반영됩니다.
   센터가 웹 공개 폴더를 제공하지 않으면 `devtrack config publish` 와 `devtrack publish` 는 빼고 실시간 방식([10-5](#/guide/s10-5))으로 보세요.
+- **DevTrack 을 업데이트(`git pull`)한 뒤에는 `devtrack publish` 를 다시 실행하세요.** 기록은 저절로 반영되지만 웹 화면 파일은 이 명령으로만 복사됩니다.
+  공개할 때 화면 파일 주소에 버전을 붙이므로, 웹 서버가 캐시 설정을 막아 두어도 브라우저에서 새로고침 한 번이면 새 화면이 보입니다.
 - 기록 · 공개 폴더는 설정 파일(`~/.config/devtrack/config.json`)에 저장됩니다. 그래서 셸 설정을 읽지 않고 켜진 프로그램도 같은 곳을 씁니다.
   VS Code 의 Claude 와 훅, tmux, 먼저 켜 둔 `serve` 가 그런 예입니다. `devtrack config` 로 확인하세요.
   전에 `~/.bashrc` 에 `export DEVTRACK_DATA` · `DEVTRACK_PUBLISH_DIR` 를 넣었다면 그 줄은 지우세요.

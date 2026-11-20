@@ -485,6 +485,8 @@ devtrack publish               # once at first (and again after updating the web
 - `git clone` needs a GitHub SSH key registered on the HPC system.
 - From then on, every record Claude makes is copied to the published directory automatically.
   If your center does not offer a public web folder, leave out `devtrack config publish` and `devtrack publish`, and use the live mode ([10-5](#/guide/s10-5)).
+- **After updating DevTrack (`git pull`), run `devtrack publish` again.** Records are copied automatically, but the web page files are copied only by this command.
+  Publishing adds a version to each page file's address, so one browser refresh shows the new page even when the web server does not let you set caching.
 - The records and publish folders are saved in a settings file (`~/.config/devtrack/config.json`). Programs started without reading your shell settings use the same place.
   Examples are Claude and its hooks in VS Code, tmux, and a `serve` you started earlier. Check with `devtrack config`.
   If you put `export DEVTRACK_DATA` or `DEVTRACK_PUBLISH_DIR` in `~/.bashrc` before, remove those lines.

@@ -12,6 +12,7 @@
 
 import contextlib
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
@@ -359,6 +360,48 @@ def mirror_tree(src, dst):
                 pass
             shutil.copy2(s, d)
             _chmod(d, 0o644)
+
+
+_WEB_REF = re.compile(r'((?:src|href)=")((?:js|css|vendor)/[^"?#]+)(")')
+
+
+def write_versioned_index(web_root, dest):
+    """공개한 index.html 의 화면 파일 주소에 내용 해시(?v=…)를 붙이고, js 모듈끼리의 import 는 import map 으로 같은 주소에 맞춘다.
+    정적 웹 서버(Apache 등)는 Cache-Control 을 안 보내는 일이 많아 브라우저가 업데이트 후에도 예전 JS · CSS 를 계속 쓴다
+    (devtrack serve 는 no-cache 를 보내므로 web/index.html 은 그대로 둔다). 바뀐 파일만 주소가 바뀌어 새로 받는다."""
+    with open(os.path.join(web_root, "index.html"), encoding="utf-8") as fh:
+        text = fh.read()
+    seen = {}
+
+    def versioned(rel):
+        if rel not in seen:
+            path = os.path.join(web_root, *rel.split("/"))
+            if not os.path.isfile(path):
+                seen[rel] = rel
+            else:
+                with open(path, "rb") as fh:
+                    seen[rel] = "{}?v={}".format(rel, hashlib.sha1(fh.read()).hexdigest()[:10])
+        return seen[rel]
+
+    text = _WEB_REF.sub(lambda m: m.group(1) + versioned(m.group(2)) + m.group(3), text)
+    jsdir = os.path.join(web_root, "js")
+    names = sorted(n for n in os.listdir(jsdir) if n.endswith(".js")) if os.path.isdir(jsdir) else []
+    at = text.find('<script type="module"')
+    if names and at >= 0:  # import map 은 첫 module 스크립트보다 앞에 있어야 한다
+        imports = dict(("./js/" + n, "./" + versioned("js/" + n)) for n in names)
+        text = '{}<script type="importmap">{}</script>\n  {}'.format(
+            text[:at], json.dumps({"imports": imports}, sort_keys=True), text[at:])
+    out = os.path.join(dest, "index.html")
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=dest)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, out)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    _chmod(out, 0o644)
 
 
 def _chmod(path, mode):
@@ -2048,6 +2091,7 @@ class Store:
         dest = os.path.abspath(os.path.expanduser(dest))
         self.ensure()
         mirror_tree(web_root, dest)
+        write_versioned_index(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
         return dest
 
