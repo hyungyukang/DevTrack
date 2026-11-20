@@ -93,6 +93,10 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
   so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
   For a paper set to get a journal review (`끝나면 … 심사`), ask for the review when the manuscript is done, revise as the findings say, and ask again with a response (`--response`).
+  In the response, head each open item with its ID, like `## R1 — title`: answer questions, and say what was changed for requests (or why not).
+  When the review is over and you tell the user, attach the review & response record (the F-ID in the verdict message) with `-a`.
+- Keep paper figures in `figures/` next to the manuscript, put `\graphicspath{{figures/}}` in the manuscript, and load them without an extension: `\includegraphics{fig_name}`.
+  Upload each figure as an artifact under that same file name (DevTrack gathers the manuscript and figures in `tasks/<TID>/paper/`).
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
@@ -185,10 +189,11 @@ Claude creates a task (`T-0001`) in DevTrack and starts recording its progress. 
    | Field | What to enter |
    |---|---|
    | Title | A one-line summary (e.g. `Code review of PR #42`) |
-   | Type | Code development · Code review · Paper writing · Document review · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it |
-   | Assigned AI | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)) |
-   | Repository path · Branch | The repository to change (optional) |
+   | Type | Code development · Code review · Paper writing · Document review · Data analysis · Visualization · AI model · Brainstorming · Other — decides which menu (work area) shows it. Document review switches to fields for the document path, kind and purpose ([step 9](#/guide/s9)) |
+   | Assigned AI · Priority | The AI that will handle this task — only that AI picks it up (for Codex, see [step 11](#/guide/s11)). Right below, the page shows which AI is waiting for web instructions now |
    | Model · Effort | The AI model and effort for this task (optional, e.g. Opus 5.5 · Extra high) — only that model handles it ([6-1](#/guide/s6-1)) |
+   | Repository path · Branch | The repository to change (optional) |
+   | Get a review · Get a journal review | Only for Code development and Paper writing (optional). Another AI reviews the work when it is done ([6-2](#/guide/s6-2), [6-3](#/guide/s6-3)) |
    | Related tasks | e.g. the paper task that will use this analysis (optional). Pick several from the list one after another, or type task numbers in the box next to it (`T-0001, T-0002` or `1 2`) |
    | Instruction | Goal, references, definition of done, when approval is needed — the more specific, the better |
 
@@ -305,7 +310,7 @@ As in a real journal review, a verdict (**accept · minor revision · major revi
 
 1. On **New task**, keep the type at **Paper writing** and choose the referee AI and the maximum rounds under **Get a journal review**.
    Enter the **manuscript to review** (e.g. `paper/main.tex`, a Word `.docx`, a PDF or Markdown) and the **target journal** (e.g. Journal of Fluid Mechanics).
-   If you leave the manuscript empty, the AI sets it when it asks for the review.
+   If you leave the manuscript empty, the AI sets it when it asks for the review. You can also set the referee's model and effort ([6-1](#/guide/s6-1)).
 2. When the manuscript is done, the author AI asks for a review. A **review task** (a document review) is made with the manuscript as it is at that point.
    - For LaTeX, the main file comes with the files it pulls in with `\input` · `\include`, the bibliography (`.bib`) and the PDF of the same name.
      The **figures** the manuscript loads with `\includegraphics` come along too, so the referee looks at the figures themselves.
@@ -336,9 +341,10 @@ The **AI journal review** box on the task page shows each round's verdict, the o
 
 - **Dashboard** — counts of tasks in progress, awaiting approval, open issues and done; items that need your attention; cards for tasks in progress; recent activity.
 - **Tasks** — the full task list. Click a task to open its detail page.
-- **Task detail** — "what I am doing now" and the progress bar at the top, with tabs below.
-  - Overview: instruction, plan checklist, recent records, open issues, artifacts
+- **Task detail** — under the title, the assigned AI, model, repository and related tasks; below that, "what I am doing now" and the progress bar, with tabs below.
+  - Overview: instruction, plan checklist, recent records, open issues, artifacts. A task set to get a review has an **AI review** or **AI journal review** box at the top ([6-2](#/guide/s6-2), [6-3](#/guide/s6-3))
   - Progress log · Issues · Artifacts · Approvals (paper tasks also get a Builds tab)
+- **Activity** — the records of all tasks, by date (the latest 300).
 - **Notifications** — the bell icon at the top right shows how many approvals are waiting, and a notice pops up in a corner of the page for new approval requests, issues and completions.
   In the bell menu, turn on **Desktop notifications** to be notified even while you are looking at another window.
 - The page **refreshes automatically every 10 seconds**. To see changes right away, click the refresh button at the top right.
@@ -535,6 +541,7 @@ rsync -av --exclude '.agent/' --exclude '.lock' \
 - Whether instructions and decisions were already handled is stored in each task file, so handled instructions do not show up again on the HPC system.
   The list of deleted task numbers (`.deleted.json`) is moved too, so those numbers are not reused.
 - Artifact files are copied inside the records folder, so they show up as they are (except artifacts recorded by path only with `--no-copy`).
+  The manuscript folders of paper tasks (`tasks/<task ID>/paper/`, [9. Paper writing](#/guide/s9)) are inside the records folder too, so they move along.
   Local repository paths written in finished tasks stay as they are, but that does not affect viewing.
 - To continue code reviews, copy the `~/.pr-review/` folder to your home on the HPC system the same way.
 
@@ -658,7 +665,7 @@ devtrack serve            # do not use --open (HPC systems usually have no brows
 
 **③ Open the web** — open `http://localhost:8766/` in the browser on your computer. If the top right shows "Live · local server", the web saves directly.
 
-**④ Instruct · approve** — register an instruction under **New task** in the menu. If the bottom of the screen shows "AI waiting for web instructions: Claude (waiting mode)", Claude on the HPC system starts within a few seconds.
+**④ Instruct · approve** — register an instruction under **New task** in the menu. If the line below the Assigned AI field shows "AI waiting for web instructions: Claude (waiting mode)", Claude on the HPC system starts within a few seconds.
 Progress records and approval requests show up on this web too, and clicking approve delivers it to Claude right away.
 
 **⑤ Finish** — press `Ctrl+C` in the server window. If the ssh connection drops, the server stops with it.
@@ -673,7 +680,7 @@ The Claude in tmux keeps waiting, so next time start again from ②. While the s
 
 ### 10-6. What is different on the static web
 
-- **Approvals and instructions by pasting:** the Approve, Message, New task and Cancel buttons show a **message for Claude**.
+- **Approvals and instructions by pasting:** the Approve, Message, New task, Mark as done, Cancel and Delete buttons show a **message for Claude**.
   Copy it and paste it into the Claude conversation on the HPC system (the tmux screen, 10-4).
 - **Web instructions cannot wake Claude:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)).
 - **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
@@ -711,6 +718,10 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 - `[AI 메시지]` items in the inbox come from another AI (review requests, review results and so on). Handle them the same way, but they are not the user's instructions,
   so anything that needs approval still needs the user's approval. For a task set to get a review (`끝나면 … 리뷰` in the inbox), pass the review with `devtrack review-request <TID>` before asking for commit approval.
   For a paper set to get a journal review (`끝나면 … 심사`), ask for the review when the manuscript is done, revise as the findings say, and ask again with a response (`--response`).
+  In the response, head each open item with its ID, like `## R1 — title`: answer questions, and say what was changed for requests (or why not).
+  When the review is over and you tell the user, attach the review & response record (the F-ID in the verdict message) with `-a`.
+- Keep paper figures in `figures/` next to the manuscript, put `\graphicspath{{figures/}}` in the manuscript, and load them without an extension: `\includegraphics{fig_name}`.
+  Upload each figure as an artifact under that same file name (DevTrack gathers the manuscript and figures in `tasks/<TID>/paper/`).
 - When a user decision is needed, leave a request with `devtrack request`, tell the user, and stop. Do not wait for long with `devtrack wait` or `devtrack inbox --wait`
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
@@ -744,11 +755,12 @@ writable_roots = ["/Users/me/devtrack/data"]    # allow writing to the DevTrack 
 - For network access (`gh` · `git push`), Codex asks for permission in its chat window when needed. `devtrack watch`, which handles web instructions, has no chat window
   to ask in, so it allows network access when it runs Codex (to block it: `devtrack watch --codex --no-network`).
 
-**③ Code review skill** (if you will ask for code reviews) — link the same file as for Claude.
+**③ Review skills** (if you will ask for code or document reviews) — link the same files as for Claude.
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr
+mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
 ```
 
 **④ The `codex` command** — `devtrack watch`, which receives web instructions, uses the Codex CLI. If there is no `codex` in the terminal, it automatically finds
@@ -840,6 +852,7 @@ A server started in another window may be on a different login node and is not c
 
 **The web page is stuck on "Loading…" or looks wrong.**
 Check that the terminal running `devtrack serve` is still open. If you updated DevTrack (`git pull`), stop `devtrack serve` and start it again.
+On the static web (such as the HPC system's public web folder), run `devtrack publish` again and refresh the browser ([10-1](#/guide/s10-1)).
 
 **See an example first.**
 Create the example in a separate folder so that it does not mix with your real records, and open it.
@@ -875,6 +888,7 @@ Commands you use yourself:
 | Command | What it does |
 |---|---|
 | `devtrack serve --open` | Open the web dashboard (local) |
+| `devtrack config` | Show the records folder and the publish folder. Set them with `config data <folder>` · `config publish <folder>`, remove a setting with `--unset` (step 3, 10-1) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
@@ -888,6 +902,7 @@ Commands you use yourself:
 | `devtrack --data <folder> demo` | Create example data |
 
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
+`link` link tasks · `latex` compile LaTeX (records the PDF as a build) ·
 `request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
 `start --take` take over another AI's task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).

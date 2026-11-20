@@ -113,13 +113,14 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 ## Quick start (see the example locally)
 
 ```bash
-bin/devtrack --data demo-data demo        # create 11 example tasks (including a real git repository)
+bin/devtrack --data demo-data demo        # create 13 example tasks (including a real git repository)
 bin/devtrack --data demo-data serve --open
 # → http://localhost:8765
 ```
 
 The example includes a commit request awaiting approval (with a real diff), a PR review report (md/pdf), a blocked
-training task, a LaTeX paper draft, analysis notebooks, document reviews and more. Approve the commit request of `T-0006` on
+training task, a LaTeX paper draft, analysis notebooks, document reviews, an AI-to-AI code review (`T-0006` → `T-0012`), a journal review
+of the paper (`T-0005` → `T-0013`) and more. Approve the commit request of `T-0006` on
 the web, then run the following to make a real commit:
 
 ```bash
@@ -135,6 +136,7 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Task details** — instruction, current step and progress, plan checklist, progress log timeline, issues, artifacts, approval requests.
   At the top right: **Mark as done** (moves an unfinished task to done, with an optional note) · **Cancel task** · **Delete**.
   Next to the assigned AI, the model and effort set for the task (click to change).
+  A task set to get a review has an **AI review** / **AI journal review** box: each round's verdict, open findings, the reviewed changes (and for papers the response and the review & response record).
   For a task not started yet, it shows whether the assigned AI is waiting for web instructions right now (wait mode · `devtrack watch`) and, if not, how to wake it (local server mode)
 - **Approvals** — open the commit diff or the report, then **Approve / Request changes / Reject** with a comment
 - **Code development** — a card per code development task (type `code`) with the target repository · branch and what the agent is working on, the commits made (commit · push records after approval, with GitHub links), code · diff artifacts. The `Awaiting approval` filter shows only tasks that need your check
@@ -149,7 +151,7 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Artifacts** — Markdown, PDF, images/SVG, diff, code/LaTeX (highlighted), CSV tables, Jupyter notebooks, HTML.
   On the Artifacts page and a task's Artifacts tab, the button at the top right switches between **cards** and a **list** (full titles, one per row)
 - **Activity** — the records of all tasks, by date
-- **New task** — create a task with a title, type, assigned AI, model and effort, repository and instruction
+- **New task** — create a task with a title, type, assigned AI, model and effort, repository, a reviewer AI (code and paper tasks), related tasks and instruction
 - **Guide** — a step-by-step manual for first-time users (install → set up Claude → give a task → approve → use by field → HPC). Source: [web/guide.en.md](web/guide.en.md), Korean: [web/guide.md](web/guide.md)
 - **Notifications** — the bell at the top (number awaiting approval), pop-ups for new approval requests / issues / completions, and desktop notifications if you turn them on. Refreshes every 10 seconds
 - **Display language** — the page opens in English. The `한` / `EN` button at the top switches the page frame (menus, headings, buttons, status labels) between English and Korean,
@@ -205,7 +207,7 @@ devtrack inbox                              # new instructions · messages · de
 | `paper` | Rebuild a paper task's manuscript folder (`tasks/<T-ID>/paper`: the latest `.tex` · `.bib` and the figures the manuscript loads) and list figures LaTeX would not find (wrong extension, no figure artifact). It is also rebuilt whenever a manuscript or figure artifact changes |
 | `request` / `wait` / `apply` | Approval request (`--commit` attaches the diff automatically, `--choices` lets the user tick items on the web) / wait for the decision / run an approved commit |
 | `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (in static mode the agent records them for the user) |
-| `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task) |
+| `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task; `--any-model` also for tasks set to another model) |
 | `hook` | PreToolUse hook for Claude Code · Codex: if the user marked the session's task as done, cancelled or deleted it, the next tool call is blocked so the agent stops. Always hook up `bin/devtrack-hook`, which always exits 0 (setup: Guide 5-4 and step 11 ⑤) |
 | `watch` | AI runner: runs the AI for each input sent to it from the web (`--claude` = `claude -p`, `--codex` = `codex exec`, or `-- command`). With `--claude` · `--codex`, each task runs with its own model and effort, and the same task continues the same conversation. For AIs without a wait mode, such as Codex, and for keeping each task on its model |
 | `show` / `list` | Task details / task list |
@@ -231,6 +233,7 @@ data/
   index.json                      summary for the dashboard (rebuilt on every write)
   tasks/T-0001/task.json          instruction, plan, log, issues, artifacts, approvals
   tasks/T-0001/artifacts/F-1_...  artifact files
+  tasks/T-0005/paper/             manuscript folder of a paper task (rebuilt by DevTrack; do not edit)
 ```
 
 The web only reads these files, so it works on static hosting too. Only the CLI and the local server write them (file locks + atomic writes).
@@ -238,6 +241,6 @@ The web only reads these files, so it works on static hosting too. Only the CLI 
 ## Development
 
 - Frontend: `web/js/app.js` (views · routing · polling), `web/js/viewers.js` (artifact viewers), `web/js/latex.js` (LaTeX → document preview), `web/js/util.js`, `web/js/i18n.js` (English/Korean page frame), `web/css/app.css`
-- Backend: `devtrack/store.py` (data), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py` (Markdown → PDF), `devtrack/docx.py` (Word → Markdown)
+- Backend: `devtrack/store.py` (data), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py` (Markdown → PDF), `devtrack/docx.py` (Word → Markdown), `devtrack/models.py` (model and effort per task), `devtrack/manuscript.py` (manuscript snapshots and figures for journal reviews)
 - External libraries are vendored in `web/vendor/` at fixed versions (marked 12.0.2, DOMPurify 3.1.6, highlight.js 11.9.0, KaTeX 0.16.11)
 - Documentation comes in pairs — keep them in step: `README.md` / `README.ko.md` and `web/guide.en.md` / `web/guide.md`

@@ -105,13 +105,13 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 ## 빠른 시작 (로컬에서 예시 화면 보기)
 
 ```bash
-bin/devtrack --data demo-data demo        # 예시 작업 11개 생성 (실제 git 저장소 포함)
+bin/devtrack --data demo-data demo        # 예시 작업 13개 생성 (실제 git 저장소 포함)
 bin/devtrack --data demo-data serve --open
 # → http://localhost:8765
 ```
 
 예시에는 승인 대기 중인 커밋 요청(실제 diff), PR 리뷰 리포트(md/pdf), 막힌 학습 작업, 논문 LaTeX 초안,
-분석 노트북, 문서 리뷰 등이 들어 있습니다. 웹에서 `T-0006` 커밋 요청을 승인한 뒤 아래를 실행하면 실제 커밋이 만들어집니다.
+분석 노트북, 문서 리뷰, AI 끼리 코드 리뷰(`T-0006` → `T-0012`), 논문 심사(`T-0005` → `T-0013`) 등이 들어 있습니다. 웹에서 `T-0006` 커밋 요청을 승인한 뒤 아래를 실행하면 실제 커밋이 만들어집니다.
 
 ```bash
 bin/devtrack --data demo-data inbox             # 승인 결정 확인
@@ -126,6 +126,7 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 - **작업 상세** — 지시 내용, 현재 단계와 진행률, 작업 계획 체크리스트, 진행 기록 타임라인, 문제점, 결과물, 승인 요청.
   오른쪽 위에서 **완료로 처리**(끝나지 않았어도 완료로 넘김, 메모 가능) · **작업 취소** · **삭제**.
   담당 AI 옆에 작업에 정한 모델 · 추론 강도 (눌러서 변경).
+  리뷰 · 심사를 정한 작업은 **AI 리뷰** · **AI 심사** 칸: 차례마다 판정, 열린 항목, 리뷰한 변경 (논문은 답변서와 심사 · 답변 기록도).
   아직 시작하지 않은 작업은 담당 AI 가 지금 웹 지시를 기다리는지(대기 모드 · `devtrack watch`)와, 아니면 깨우는 방법을 표시 (로컬 서버 모드)
 - **승인 요청** — 커밋 diff · 리포트를 펼쳐 보고 **승인 / 수정 요청 / 거절** + 코멘트
 - **코드 개발** — 코드 개발 작업(유형 `code`)별 카드(대상 저장소 · 브랜치, 지금 하는 일), 반영된 커밋(승인 후 커밋 · 푸시 기록, GitHub 링크), 코드 · diff 결과물. `승인 대기` 필터는 확인이 필요한 작업만 표시
@@ -140,7 +141,7 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 - **결과물** — Markdown, PDF, 이미지/SVG, diff, 코드/LaTeX(하이라이트), CSV 표, Jupyter 노트북, HTML.
   결과물 화면과 작업의 결과물 탭은 오른쪽 위 단추로 **카드 · 목록** 보기를 바꿀 수 있습니다 (목록은 제목을 줄이지 않고 세로로 나열)
 - **활동 기록** — 모든 작업의 기록을 날짜별로
-- **새 작업 지시** — 제목 · 유형 · 담당 AI · 모델과 추론 강도 · 저장소 · 지시 내용으로 작업 등록
+- **새 작업 지시** — 제목 · 유형 · 담당 AI · 모델과 추론 강도 · 저장소 · 리뷰어 AI(코드 · 논문 작업) · 관련 작업 · 지시 내용으로 작업 등록
 - **사용 방법** — 처음 쓰는 사람이 차례로 따라 하는 매뉴얼 (설치 → Claude 설정 → 작업 지시 → 승인 → 분야별 사용법 → HPC). 원문: [web/guide.md](web/guide.md), 영어판 [web/guide.en.md](web/guide.en.md)
 - **알림** — 상단 종 아이콘(승인 대기 수), 새 승인 요청/문제/완료 시 토스트, 선택 시 데스크톱 알림. 10초마다 자동 갱신
 - **화면 언어** — 처음 열면 영어 화면입니다. 상단의 `한` / `EN` 단추로 메뉴 · 머리말 · 버튼 · 상태 라벨 같은 화면 틀을 영어 ↔ 한국어로 전환.
@@ -196,7 +197,7 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `paper` | 논문 작업의 원고 폴더(`tasks/<작업 번호>/paper`: 최신 `.tex` · `.bib` 와 원고가 부르는 그림) 다시 만들기, LaTeX 가 찾지 못할 그림(확장자가 다름 · 그림 결과물 없음) 확인. 원고 · 그림 결과물이 바뀔 때마다 저절로도 다시 만든다 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
 | `decide` / `comment` | 사용자 결정(`--select R1 R3`) · 메시지 기록 (정적 모드에서 에이전트가 대신 기록) |
-| `inbox` | 처리할 사용자 입력 — 내게 배정된 작업만 (`--ack` 로 처리 완료 표시, `--wait` 로 새 입력이 올 때까지 대기 — 에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응, `--all-agents` 모든 AI, `--task` 한 작업만) |
+| `inbox` | 처리할 사용자 입력 — 내게 배정된 작업만 (`--ack` 로 처리 완료 표시, `--wait` 로 새 입력이 올 때까지 대기 — 에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응, `--all-agents` 모든 AI, `--task` 한 작업만, `--any-model` 다른 모델로 정한 작업까지) |
 | `hook` | Claude Code · Codex 의 PreToolUse 훅 — 그 세션이 맡은 작업을 사용자가 완료로 처리 · 취소 · 삭제했으면 다음 도구 실행을 막고 멈추게 함. 훅에는 항상 0 으로 끝나는 `bin/devtrack-hook` 을 건다 (설정: 웹의 사용 방법 5-4 · 11단계 ⑤) |
 | `watch` | AI 실행기: 웹에서 그 AI 에게 온 입력마다 AI 를 실행해 처리 (`--claude` = `claude -p`, `--codex` = `codex exec`, 또는 `-- 명령`). `--claude` · `--codex` 는 작업마다 정한 모델 · 강도로 실행하고, 같은 작업은 같은 대화로 이어 감 — Codex 처럼 대기 모드가 없는 AI 용, 작업을 정한 모델로 지킬 때 |
 | `show` / `list` | 작업 상세 / 목록 |
@@ -222,6 +223,7 @@ data/
   index.json                      대시보드용 요약 (기록할 때마다 재생성)
   tasks/T-0001/task.json          지시, 계획, 기록(log), 문제(issues), 결과물(artifacts), 승인(approvals)
   tasks/T-0001/artifacts/F-1_...  결과물 파일
+  tasks/T-0005/paper/             논문 작업의 원고 폴더 (DevTrack 이 다시 만듦 — 직접 고치지 않음)
 ```
 
 웹은 이 파일들을 읽기만 하므로 정적 호스팅에서도 동작합니다. 쓰기는 CLI 와 로컬 서버만 합니다 (파일 잠금 + 원자적 쓰기).
@@ -229,6 +231,6 @@ data/
 ## 개발
 
 - 프런트엔드: `web/js/app.js`(화면 · 라우팅 · 폴링), `web/js/viewers.js`(결과물 뷰어), `web/js/latex.js`(LaTeX → 문서 미리보기), `web/js/util.js`, `web/js/i18n.js`(화면 틀 영어/한국어), `web/css/app.css`
-- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py`(Markdown → PDF), `devtrack/docx.py`(Word → Markdown)
+- 백엔드: `devtrack/store.py`(데이터), `devtrack/cli.py`, `devtrack/server.py`, `devtrack/gitops.py`, `devtrack/demo.py`, `devtrack/latex.py`, `devtrack/pdf.py`(Markdown → PDF), `devtrack/docx.py`(Word → Markdown), `devtrack/models.py`(작업별 모델 · 추론 강도), `devtrack/manuscript.py`(논문 심사용 원고 · 그림 떠 두기)
 - 외부 라이브러리는 `web/vendor/` 에 고정 버전으로 포함 (marked 12.0.2, DOMPurify 3.1.6, highlight.js 11.9.0, KaTeX 0.16.11)
 - 문서는 짝으로 함께 고친다: `README.md`(영어) / `README.ko.md`(한국어), `web/guide.en.md` / `web/guide.md`
