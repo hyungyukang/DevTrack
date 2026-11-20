@@ -741,7 +741,7 @@ ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/
 ```
 
 **④ `codex` 명령** — 웹 지시를 받는 `devtrack watch` 가 Codex CLI 를 씁니다. 터미널의 `codex` 가 없으면 ChatGPT · Codex 앱,
-VS Code 확장에 들어 있는 CLI 중 **가장 새 버전**을 자동으로 찾습니다 (오래된 CLI 는 새 모델을 쓰지 못합니다).
+VS Code 확장(원격 SSH 로 연 HPC 의 `~/.vscode-server` 포함)에 들어 있는 CLI 중 **가장 새 버전**을 자동으로 찾습니다 (오래된 CLI 는 새 모델을 쓰지 못합니다).
 다른 것을 쓰려면 `export DEVTRACK_CODEX=<codex 경로>`. 어떤 CLI 를 쓰는지는 `devtrack watch` 를 켤 때 첫 줄에 표시됩니다.
 
 **⑤ 작업 취소 바로 전달 (훅, 권장)** — Claude 의 5-4 와 같습니다. Codex 앱 · VS Code 에서 대화하며 일하는 Codex 가 작업 도중에

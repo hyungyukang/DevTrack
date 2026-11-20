@@ -1160,6 +1160,7 @@ CODEX_BUNDLED = (
     "/Applications/Codex.app/Contents/Resources/codex",
     "~/Applications/Codex.app/Contents/Resources/codex",
     "~/.vscode/extensions/openai.chatgpt-*/bin/*/codex",
+    "~/.vscode-server/extensions/openai.chatgpt-*/bin/*/codex",  # VS Code 원격(SSH) 서버 — HPC 에서 Codex 확장만 쓸 때
 )
 NOTICE_TYPES = ("cancelled", "deleted", "completed")
 

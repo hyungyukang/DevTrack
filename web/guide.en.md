@@ -744,7 +744,7 @@ ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/
 ```
 
 **④ The `codex` command** — `devtrack watch`, which receives web instructions, uses the Codex CLI. If there is no `codex` in the terminal, it automatically finds
-the **newest** of the CLIs bundled with the ChatGPT · Codex app and the VS Code extension (older CLIs cannot use newer models).
+the **newest** of the CLIs bundled with the ChatGPT · Codex app and the VS Code extension (including `~/.vscode-server` on an HPC system opened over Remote SSH; older CLIs cannot use newer models).
 To use a different one, `export DEVTRACK_CODEX=<path to codex>`. The CLI in use is shown on the first line when `devtrack watch` starts.
 
 **⑤ Deliver cancellations right away (hook, recommended)** — the same as Claude's 5-4. It lets Codex, working in a conversation in the Codex app or VS Code,
