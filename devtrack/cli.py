@@ -420,6 +420,10 @@ def cmd_artifact(store, args, category=None):
     if art.get("kind") == "docx" and not art.get("unchanged"):
         _info("  Word 미리보기: {}".format("만듦 (웹에서 글자 · 표를 볼 수 있음)" if art.get("preview")
                                         else "만들지 못함 — 웹에서는 내려받아 보세요"))
+    for st in store.paper_status.values():  # 논문 원고 · 그림이면 원고 폴더를 다시 만들었다 (.tex 가 아직 없으면 조용히)
+        has_tex = any(f.lower().endswith(".tex") for f in st["files"])
+        for line in _paper_lines(st, brief=True) if has_tex else []:
+            _info("  " + line)
     _out(args, art, art["id"])
 
 
@@ -547,6 +551,52 @@ def cmd_latex(store, args):
     return 1
 
 
+_PAPER_MISSING = (
+    ("ext", "확장자를 빼야 할 그림", "같은 이름의 다른 형식만 있습니다 — \\includegraphics{fig_name} 처럼 확장자 없이 부르세요"),
+    ("format", "LaTeX 가 바로 쓰지 못하는 형식의 그림", "SVG · GIF 등은 \\includegraphics 로 부를 수 없습니다 — PDF 나 PNG 로 만들어 같은 이름으로 올리세요"),
+    ("path", "LaTeX 가 찾지 못하는 그림", "\\graphicspath{{figures/}} 를 넣거나 그림 폴더 이름을 맞추세요"),
+    ("none", "그림 결과물이 없는 그림", "같은 파일 이름(확장자 무관)으로 그림을 결과물로 올리세요 — devtrack artifact <TID> figures/<이름>.png"),
+)
+
+
+def _paper_lines(st, brief=False):
+    """원고 폴더 상태 → 출력 줄. brief: 결과물을 올린 뒤 한 줄 요약."""
+    rel = os.path.relpath(st["dir"], os.path.dirname(os.path.dirname(os.path.dirname(st["dir"]))))
+    tex = [f for f in st["files"] if f.lower().endswith(".tex")]
+    if brief:
+        miss = len(st["missing"]) + len(st.get("missing_bib") or [])
+        return ["원고 폴더 갱신: {} — 원고 {}개 · 그림 {}/{}개{}".format(
+            rel, len(tex), len(st["figures"]), len(st["refs"]),
+            " · 확인할 것 {}개 (devtrack paper {})".format(miss, st["task"]) if miss else "")]
+    lines = ["원고 폴더: {}".format(st["dir"])]
+    if not st["files"]:
+        lines.append("  아직 원고(.tex · .bib) 결과물이 없습니다 — 원고를 결과물로 올리면 만들어집니다")
+        return lines
+    lines.append("  원고: " + " · ".join(st["files"]))
+    folders = sorted({os.path.dirname(f) for f in st["figures"]})
+    lines.append("  그림: {}개 (원고가 부르는 그림 {}개{})".format(
+        len(st["figures"]), len(st["refs"]), " · 폴더 " + ", ".join(d + "/" for d in folders) if folders else ""))
+    if st.get("missing_bib"):
+        lines.append("  참고문헌 파일 없음: {} — 원고가 \\bibliography 로 부릅니다. 그 이름의 .bib 를 결과물로 올리세요".format(
+            ", ".join(st["missing_bib"])))
+    if tex and not st.get("graphicspath") and st["refs"]:
+        lines.append("  참고: \\graphicspath{{figures/}} 가 없습니다 — 그림은 figures/ 에 두고 확장자 없이 부르는 것을 권합니다")
+    for key, label, hint in _PAPER_MISSING:
+        items = [m for m in st["missing"] if m["reason"] == key]
+        if not items:
+            continue
+        shown = ", ".join("{}{}".format(m["ref"], " → " + ", ".join(m["found"]) if m["found"] else "") for m in items[:6])
+        lines.append("  {} {}개: {}{}".format(label, len(items), shown, " 외 {}개".format(len(items) - 6) if len(items) > 6 else ""))
+        lines.append("    " + hint)
+    return lines
+
+
+def cmd_paper(store, args):
+    st = store.rebuild_paper(args.task)
+    _out(args, st, "\n".join(_paper_lines(st)))
+    return 0
+
+
 def cmd_request(store, args):
     commit = None
     if args.commit:
@@ -629,6 +679,13 @@ def cmd_review_request(store, args):
                  ]
         if r.get("response"):
             lines.append("  답변서: " + r["response"])
+        fg = r.get("figures") or {}
+        if fg.get("count"):
+            chg = ", ".join("{} {}".format(label, len(fg[k])) for k, label in (("changed", "바뀜"), ("new", "새 그림"),
+                                                                             ("removed", "빠짐")) if fg.get(k))
+            lines.append("  그림: {}개 붙임{}".format(fg["count"], " ({})".format(chg) if chg else ""))
+        if fg.get("missing"):
+            lines.append("  찾지 못한 그림 {}개 (심사에 빠짐): {}".format(len(fg["missing"]), ", ".join(fg["missing"][:8])))
         lines.append("  판정은 {} 에 [AI 메시지] 로 옵니다 (심사위원 AI 가 켜져 있어야 함)".format(normalize_task_id(args.task)))
         _out(args, r, "\n".join(lines))
         return
@@ -1947,6 +2004,10 @@ def build_parser():
     sp.add_argument("--engine", choices=["pdf", "xe", "lua"], default="pdf", help="pdflatex / xelatex / lualatex")
     sp.add_argument("--timeout", type=int, default=600, help="최대 컴파일 시간(초)")
     sp.add_argument("--pdf", metavar="FILE", help="컴파일하지 않고 이미 만든 PDF 를 기록 (같은 이름 .log 가 있으면 분석)")
+
+    sp = add("paper", cmd_paper, "논문 작업의 원고 폴더(tasks/<T>/paper — 최신 .tex · .bib 와 원고가 부르는 그림) "
+                                 "다시 만들기 · 빠진 그림 확인")
+    sp.add_argument("task")
 
     sp = add("request", cmd_request, "승인 요청 (웹 알림으로 표시, 승인 ID 출력)")
     sp.add_argument("task")

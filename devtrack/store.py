@@ -75,6 +75,11 @@ REVIEW_STATES = {"planned": "리뷰 전", "reviewing": "리뷰 중", "changes": 
 JOURNAL_VERDICT_LABEL = {"ready": "게재 가능 (accept)", "minor_revision": "소폭 수정 (minor revision)",
                          "major_revision": "대폭 수정 (major revision)", "rework": "게재 불가 (reject)"}
 REVIEW_DOC_TYPES = ("paper",)  # 이 유형의 작업은 코드 diff 대신 원고를 심사받는다
+# 논문 작업의 원고 폴더 tasks/<T>/paper — 결과물(최신 .tex · .bib 와 원고가 부르는 그림)에서 DevTrack 이 다시 만든다
+PAPER_TYPES = ("paper",)
+PAPER_DIR = "paper"
+PAPER_FIGURES = "figures"  # \graphicspath 도 그림 폴더도 없는 원고의 그림을 둘 곳 (권장: \graphicspath{{figures/}})
+PAPER_SOURCE_EXT = (".tex", ".bib", ".sty", ".cls", ".bst")
 _REVIEW_PASS = ("approve", "approved", "pass", "passed", "ok", "lgtm", "comment", "통과")
 _REVIEW_CHANGES = ("changes", "change", "request_changes", "changes_requested", "fix", "reject", "수정", "수정필요")
 SEVERITIES = ("low", "medium", "high", "critical")
@@ -411,12 +416,80 @@ def _chmod(path, mode):
         pass
 
 
+def _sync_files(root, want):
+    """root 폴더를 want {상대 이름: 원본 경로} 와 똑같이 맞춘다 (크기 · 수정시각이 같은 파일은 그대로, 없는 이름은 지움).
+    want 가 비면 폴더를 지운다. DevTrack 이 관리하는 폴더(원고 폴더)에만 쓴다."""
+    if not want:
+        shutil.rmtree(root, ignore_errors=True)
+        return
+    for rel, src in want.items():
+        dest = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        try:
+            ss, ds = os.stat(src), os.stat(dest)
+            if ss.st_size == ds.st_size and int(ss.st_mtime) == int(ds.st_mtime):
+                continue
+        except FileNotFoundError:
+            pass
+        fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(dest))
+        os.close(fd)
+        try:
+            shutil.copy2(src, tmp)
+            os.replace(tmp, dest)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        _chmod(dest, 0o644)
+    _prune_tree(root, set(want))
+
+
+def _prune_tree(root, keep):
+    """root 아래에서 keep(상대 이름 집합)에 없는 파일과 빈 폴더를 지우고, 남은 폴더는 웹에서 읽을 수 있게 연다."""
+    for d, dirs, files in os.walk(root, topdown=False):
+        for name in files:
+            rel = os.path.relpath(os.path.join(d, name), root).replace(os.sep, "/")
+            if rel not in keep:
+                os.remove(os.path.join(d, name))
+        if d != root and not os.listdir(d):
+            os.rmdir(d)
+        else:
+            _chmod(d, 0o755)
+
+
+def _mirror_paper(src_task, dst_task):
+    """공개 폴더의 원고 폴더에서 원본에 없는 파일을 지운다 (mirror_tree 는 지우지 않으므로 — 빠진 그림이 남지 않게)."""
+    src, dst = os.path.join(src_task, PAPER_DIR), os.path.join(dst_task, PAPER_DIR)
+    if os.path.normpath(src) == os.path.normpath(dst) or not os.path.isdir(dst):
+        return
+    if not os.path.isdir(src):
+        shutil.rmtree(dst, ignore_errors=True)
+        return
+    keep = set()
+    for d, _, files in os.walk(src):
+        keep |= {os.path.relpath(os.path.join(d, f), src).replace(os.sep, "/") for f in files}
+    _prune_tree(dst, keep)
+
+
+def _paper_dir(ref_dir, gpaths):
+    """그림을 둘 원고 폴더 안의 폴더: \\includegraphics 의 폴더 > 첫 \\graphicspath > figures/ (원고 폴더 밖이면 figures/)."""
+    for cand in (ref_dir, gpaths[0] if gpaths else ""):
+        if cand:
+            rel = os.path.normpath(cand).replace(os.sep, "/").strip("/")
+            if rel and rel != "." and not rel.startswith("..") and not os.path.isabs(cand):
+                return rel
+            break
+    return PAPER_FIGURES
+
+
 class Store:
     def __init__(self, root, publish_dir=None):
         self.root = os.path.abspath(os.path.expanduser(root))
         self.tasks_dir = os.path.join(self.root, "tasks")
         self.index_path = os.path.join(self.root, "index.json")
         self.publish_dir = os.path.abspath(os.path.expanduser(publish_dir)) if publish_dir else None
+        self._paper_dirty = set()  # 원고 · 그림 결과물이 바뀐 작업 — 저장할 때 원고 폴더를 다시 만든다
+        self.paper_status = {}     # 이번 실행에서 다시 만든 원고 폴더의 상태 (paper_folder 의 반환값)
 
     # ------------------------------------------------------------------ 기본 I/O
     def ensure(self):
@@ -491,6 +564,9 @@ class Store:
         task["updated_at"] = now()
         self._write_json(os.path.join(self.tasks_dir, task["id"], "task.json"), task)
         self.rebuild_index()
+        if task["id"] in self._paper_dirty:
+            self._paper_dirty.discard(task["id"])
+            self._refresh_papers(task)
         self._sync_publish(task["id"])
 
     @contextlib.contextmanager
@@ -649,7 +725,14 @@ class Store:
             if changed:
                 self._log(t, ("관련 작업 연결 해제: " if unlink else "관련 작업 연결: ") + self._related_label(changed),
                           kind="info", author=author)
-            return rel
+                self._paper_dirty.add(tid)  # 연결된 작업의 그림도 원고 폴더에 쓰이므로 다시 만든다
+        for rid in changed if unlink else []:  # 연결을 푼 논문 작업은 그쪽 그림이 빠지도록
+            try:
+                if self.load(rid).get("type") in PAPER_TYPES:
+                    self.rebuild_paper(rid)
+            except (DevTrackError, OSError, ValueError):
+                pass
+        return rel
 
     def update_task(self, tid, status=None, progress=None, step=None, message=None, title=None,
                     author=None, kind="info", claim=None, take=False, claim_queued_only=False):
@@ -988,15 +1071,19 @@ class Store:
             raise DevTrackError("답변서 파일을 찾을 수 없습니다: {}".format(response))
         n = len(history) + 1
         who = author or t.get("agent")
+        figs = snap.get("figures") or {}
+        fig_sha = dict((k, v["sha"]) for k, v in figs.items())
         rtid, created = self._review_task(t, plan, n, who, "docreview", "{} 심사: {}".format(tid, t["title"]),
-                                          _doc_review_instruction(t, plan, n, note, path))
-        prev_files = None
+                                          _doc_review_instruction(t, plan, n, note, path, figures=len(figs)))
+        prev_files, prev_figs = None, {}
         if prev:
             try:
                 with open(self._snapshot_path(prev.get("task") or rtid, prev["round"]), encoding="utf-8") as fh:
-                    prev_files = json.load(fh).get("files")
+                    prev_snap = json.load(fh)
+                prev_files, prev_figs = prev_snap.get("files"), prev_snap.get("figures") or {}
             except (OSError, ValueError):
                 prev_files = None
+        figchg = manuscript.figure_changes(prev_figs, fig_sha) if prev else None
         since = manuscript.diff(prev_files, snap["files"]) if prev_files is not None else None
         stat = gitops.diffstat(since) if since else None
         ext = {"latex": ".tex", "word": ".md", "pdf": ".txt"}.get(snap["kind"], os.path.splitext(snap["main"])[1] or ".txt")
@@ -1025,6 +1112,8 @@ class Store:
                 ids["response"] = self._add_artifact(r, path=os.path.expanduser(response),
                                                      title="{}차 답변서 (response to reviewers)".format(n),
                                                      category="source", author=who)["id"]
+            if figs:
+                ids["figures"] = self._attach_figures(r, figs, n, who)
             rv = dict(r.get("review") or {})
             rv["doc"] = dict(rv.get("doc") or {}, **_norm_doc({
                 "title": t["title"], "kind": "paper" if t.get("type") == "paper" else "other",
@@ -1033,7 +1122,8 @@ class Store:
                 "audience": "저널 심사위원 · 편집자", "source": ids.get("file") or ids.get("text")}))
             r["review"] = rv
             if created:
-                r["instruction"] = _doc_review_instruction(t, plan, n, note, path, rtid)
+                r["instruction"] = _doc_review_instruction(t, plan, n, note, path, rtid, figures=len(figs),
+                                                           art_dir=os.path.join(self.tasks_dir, rtid, "artifacts"))
             else:
                 if r["status"] in ("done", "blocked", "changes_requested"):
                     old = r["status"]
@@ -1046,11 +1136,13 @@ class Store:
                                                                          stat["deletions"]))
                 if ids.get("response"):
                     parts.append("답변서 " + ids["response"])
+                if figs:
+                    parts.append(_figure_change_label(len(figs), figchg))
                 msg = "{}차 심사 요청 ({} — {}): {}{}".format(n, tid, t.get("agent"), " · ".join(parts),
                                                           " — " + note.strip() if note and note.strip() else "")
                 self._agent_message(r, msg, who, meta={"review_request": dict(ids, round=n, task=tid)})
         self._write_json(self._snapshot_path(rtid, n), {"round": n, "source": path, "kind": snap["kind"],
-                                                        "files": snap["files"]})
+                                                        "files": snap["files"], "figures": fig_sha})
         with self.edit(tid) as t:
             loop = dict(t.get("review_loop") or {})
             loop.update(plan)
@@ -1058,6 +1150,8 @@ class Store:
             entry = {"round": n, "task": rtid, "requested_at": now(), "requested_by": who, "diff": ids.get("file") or ids.get("text"),
                      "manuscript": ids.get("text"), "file": ids.get("file"), "since": ids.get("since"),
                      "response": ids.get("response"), "stat": stat, "digest": dig, "verdict": None}
+            if figs or snap.get("missing_figures"):
+                entry["figures"] = dict(figchg or {}, count=len(figs), missing=snap.get("missing_figures") or [])
             loop["history"] = history + [entry]
             t["review_loop"] = loop
             self._log(t, "{}차 심사 요청 → {}{} ({}) · 원고 {}".format(
@@ -1066,6 +1160,26 @@ class Store:
                 kind="info", author=who, ref=rtid)
         return dict(entry, rounds=plan["rounds"], reviewer=plan["reviewer"], created=created, kind="doc",
                     excluded=[], stat=stat or {"files": len(snap["files"]), "additions": 0, "deletions": 0})
+
+    def _attach_figures(self, r, figs, n, who):
+        """심사 작업에 원고 그림을 붙인다 — 그림마다 결과물 하나(figure = 원고 폴더 기준 이름), 바뀐 그림은 새 버전."""
+        have = dict((a["figure"], a) for a in r.get("artifacts", []) if a.get("figure"))
+        out, added, changed = [], 0, 0
+        for rel in sorted(figs):
+            a = have.get(rel)
+            if a:
+                if not self._new_version(r, a, figs[rel]["path"], author=who, log=False).get("unchanged"):
+                    changed += 1
+            else:
+                a = self._add_artifact(r, path=figs[rel]["path"], filename=os.path.basename(rel),
+                                       title="그림: {}".format(rel), category="source", author=who,
+                                       extra={"figure": rel}, log=False)
+                added += 1
+            out.append(a["id"])
+        if added or changed:
+            self._log(r, "{}차 원고 그림 {}개 (새로 붙임 {} · 바뀜 {})".format(n, len(out), added, changed),
+                      kind="artifact", author=who, meta={"figures": out})
+        return out
 
     def allow_same_session_review(self, rtid, author=None):
         """이 리뷰 작업은 개발한 대화가 리뷰해도 된다고 적어 둔다 (사용자가 그렇게 하라고 한 경우만)."""
@@ -1293,11 +1407,142 @@ class Store:
         t.setdefault("artifacts", []).append(art)
         if art.get("kind") == "docx" and art.get("path"):
             self._docx_preview(t, art)
+        self._mark_paper(t, art)
         if log:
             label = {"review": "리뷰 리포트 등록", "source": "검토할 문서 등록"}.get(category, "결과물 추가")
             self._log(t, "{}: {}".format(label, art["title"]), kind="artifact", author=author, ref=fid,
                       meta={"category": category, "kind": art["kind"]})
         return art
+
+    def _mark_paper(self, t, art):
+        """원고(.tex · .bib …)나 그림 결과물이면 저장할 때 원고 폴더를 다시 만들게 표시 (연결된 논문 작업 것도)."""
+        ext = os.path.splitext(art.get("filename") or "")[1].lower()
+        if art.get("category", "result") == "result" and not art.get("build") and \
+                (ext in PAPER_SOURCE_EXT or ext in manuscript.FIGURE_EXT):
+            self._paper_dirty.add(t["id"])
+
+    # ------------------------------------------------------------------ 논문 원고 폴더
+    def _artifact_file(self, tid, a):
+        if a.get("path"):
+            return os.path.join(self.tasks_dir, tid, a["path"])
+        return a.get("external_path")
+
+    def _paper_arts(self, t):
+        """원고 폴더에 쓸 수 있는 결과물 (분류 result, 빌드 결과물 제외, 파일이 있는 것)."""
+        return [a for a in t.get("artifacts", []) if a.get("category", "result") == "result" and not a.get("build")
+                and a.get("filename") and self._artifact_file(t["id"], a)
+                and os.path.isfile(self._artifact_file(t["id"], a))]
+
+    @staticmethod
+    def _latest_by_name(arts):
+        """같은 파일 이름이면 가장 최근에 올리거나 고친 것 → {파일 이름: 결과물}."""
+        best = {}
+        for i, a in enumerate(arts):
+            key = (_ts_key(a.get("updated_at") or a.get("created_at")), i)
+            if a["filename"] not in best or key >= best[a["filename"]][0]:
+                best[a["filename"]] = (key, a)
+        return {name: a for name, (_, a) in best.items()}
+
+    def _linked_ids(self, t, tasks):
+        """연결된 작업 (양쪽 방향 — 웹의 관련 작업 표시와 같음)."""
+        ids = set(t.get("related") or [])
+        ids |= {o["id"] for o in tasks.values() if t["id"] in (o.get("related") or [])}
+        ids.discard(t["id"])
+        return ids
+
+    def paper_folder(self, t, tasks=None):
+        """논문 작업의 원고 폴더(tasks/<T>/paper)를 결과물에서 다시 만든다 (잠금은 부르는 쪽에서).
+        - 최신 .tex · .bib · .sty · .cls · .bst 결과물을 원래 파일 이름으로
+        - 원고가 \\includegraphics 로 부르는 그림을 같은 이름(확장자 무관)의 그림 결과물에서 — 이 작업 > 연결된 작업 순 —
+          LaTeX 가 찾는 폴더(\\includegraphics 의 폴더 > 첫 \\graphicspath > figures/)에
+        → {"task", "dir", "files", "figures", "refs", "missing": [{"ref", "reason", "found"}]}. 폴더는 DevTrack 이 관리한다
+        (직접 넣은 파일은 다음에 다시 만들 때 지워진다)."""
+        tid = t["id"]
+        if tasks is None:
+            tasks = {x["id"]: x for x in self.all_tasks()}
+        tasks = dict(tasks, **{tid: t})
+        root = os.path.join(self.tasks_dir, tid, PAPER_DIR)
+        mine = self._paper_arts(t)
+        want, files = {}, []
+        for name, a in sorted(self._latest_by_name(
+                [a for a in mine if os.path.splitext(a["filename"])[1].lower() in PAPER_SOURCE_EXT]).items()):
+            rel = _safe_name(name)
+            if rel not in want:
+                want[rel] = self._artifact_file(tid, a)
+                files.append(rel)
+        gpaths, refs, bibs = [], [], []
+        for rel in files:
+            if rel.lower().endswith(".tex"):
+                with open(want[rel], encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+                p, r = manuscript.graphics(text)
+                gpaths += [x for x in p if x not in gpaths]
+                refs += [x for x in r if x not in refs]
+                bibs += [b for b in manuscript.bibliographies(text) if b not in bibs]
+        # 그림 결과물: 이름(확장자 · F-n 번호 뺌) → [(순위, 작업, 결과물)] — 이 작업 0, 연결된 작업 1
+        by_stem = {}
+        groups = [(0, t)] + [(1, tasks[x]) for x in sorted(self._linked_ids(t, tasks)) if x in tasks]
+        for rank, owner in groups:
+            arts = mine if owner is t else self._paper_arts(owner)
+            figs = [a for a in arts if os.path.splitext(a["filename"])[1].lower() in manuscript.FIGURE_EXT]
+            for name, a in self._latest_by_name(figs).items():
+                by_stem.setdefault(manuscript.graphic_stem(name).lower(), []).append((rank, owner["id"], a))
+        figures, missing = [], []
+        for ref in refs:
+            cands = by_stem.get(manuscript.graphic_stem(ref).lower())
+            if not cands:
+                missing.append({"ref": ref, "reason": "none", "found": []})
+                continue
+            best = min(c[0] for c in cands)
+            ref_dir = os.path.dirname(ref.replace("\\", "/"))
+            folder = _paper_dir(ref_dir, gpaths)
+            for _, owner_id, a in [c for c in cands if c[0] == best]:
+                rel = "{}/{}".format(folder, _safe_name(a["filename"]))
+                if rel not in want:
+                    want[rel] = self._artifact_file(owner_id, a)
+                    figures.append(rel)
+        _sync_files(root, want)
+        for ref in refs:  # LaTeX 가 실제로 찾을 수 있는지 (확장자를 적었는데 다른 형식만 있으면 못 찾음)
+            if any(m["ref"] == ref for m in missing) or manuscript.find_graphic(root, ref, gpaths):
+                continue
+            found = [f for f in figures if manuscript.graphic_stem(f).lower() == manuscript.graphic_stem(ref).lower()]
+            if found and not any(os.path.splitext(f)[1].lower() in manuscript.GRAPHIC_EXT for f in found):
+                reason = "format"  # SVG · GIF 등 — \includegraphics 로 바로 못 씀
+            elif os.path.splitext(ref)[1].lower() in manuscript.GRAPHIC_EXT:
+                reason = "ext"
+            else:
+                reason = "path"
+            missing.append({"ref": ref, "reason": reason, "found": found})
+        status = {"task": tid, "dir": root, "files": files, "figures": figures, "refs": refs, "missing": missing,
+                  "graphicspath": gpaths, "missing_bib": [b for b in bibs if b not in want]}
+        self.paper_status[tid] = status
+        return status
+
+    def _refresh_papers(self, t):
+        """이 작업(논문이면)과 연결된 논문 작업의 원고 폴더를 다시 만든다. 실패해도 저장은 계속 (경고만)."""
+        tasks = {x["id"]: x for x in self.all_tasks()}
+        tasks[t["id"]] = t
+        targets = [t] if t.get("type") in PAPER_TYPES else []
+        targets += [tasks[x] for x in sorted(self._linked_ids(t, tasks)) if tasks[x].get("type") in PAPER_TYPES]
+        for p in targets:
+            try:
+                self.paper_folder(p, tasks)
+            except (OSError, ValueError) as e:
+                sys.stderr.write("[devtrack] {} 원고 폴더를 만들지 못했습니다: {}\n".format(p["id"], e))
+                continue
+            if p["id"] != t["id"]:
+                self._sync_publish(p["id"])
+
+    def rebuild_paper(self, tid):
+        """논문 작업의 원고 폴더를 지금 결과물로 다시 만든다 (devtrack paper)."""
+        tid = normalize_task_id(tid)
+        with self.locked():
+            t = self.load(tid)
+            if t.get("type") not in PAPER_TYPES:
+                raise DevTrackError("{} 은(는) 논문 작업이 아닙니다 — 원고 폴더는 논문 작업(-t paper)에만 만듭니다".format(tid))
+            status = self.paper_folder(t)
+            self._sync_publish(tid)
+            return status
 
     def _docx_preview(self, t, art):
         """Word 문서의 글자 · 표를 Markdown 으로 뽑아 웹 미리보기(art['preview'])로 둔다. 실패해도 결과물 등록은 계속."""
@@ -1380,7 +1625,7 @@ class Store:
                                              description=kw.get("description"), author=kw.get("author"))
             return self._add_artifact(t, **kw)
 
-    def _new_version(self, t, art, path, title=None, description=None, author=None):
+    def _new_version(self, t, art, path, title=None, description=None, author=None, log=True):
         src = os.path.abspath(os.path.expanduser(path))
         if not os.path.isfile(src):
             raise DevTrackError("파일을 찾을 수 없습니다: {}".format(path))
@@ -1410,9 +1655,11 @@ class Store:
             art["description"] = description
         if art.get("kind") == "docx":
             self._docx_preview(t, art)
-        label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신"}.get(art.get("category"), "결과물 갱신")
-        self._log(t, "{} (v{}): {}".format(label, n + 1, art["title"]), kind="artifact", author=author,
-                  ref=art["id"], meta={"category": art.get("category"), "kind": art.get("kind"), "version": n + 1})
+        self._mark_paper(t, art)
+        if log:
+            label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신"}.get(art.get("category"), "결과물 갱신")
+            self._log(t, "{} (v{}): {}".format(label, n + 1, art["title"]), kind="artifact", author=author,
+                      ref=art["id"], meta={"category": art.get("category"), "kind": art.get("kind"), "version": n + 1})
         return art
 
     # ------------------------------------------------------------------ 코드 리뷰 검토 항목
@@ -2081,6 +2328,7 @@ class Store:
             ddata = os.path.join(self.publish_dir, "data")
             if tid:
                 mirror_tree(os.path.join(self.tasks_dir, tid), os.path.join(ddata, "tasks", tid))
+                _mirror_paper(os.path.join(self.tasks_dir, tid), os.path.join(ddata, "tasks", tid))
             os.makedirs(ddata, exist_ok=True)
             shutil.copy2(self.index_path, os.path.join(ddata, "index.json"))
             _chmod(os.path.join(ddata, "index.json"), 0o644)
@@ -2093,6 +2341,8 @@ class Store:
         mirror_tree(web_root, dest)
         write_versioned_index(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
+        for tid in self.task_ids():
+            _mirror_paper(self.task_dir(tid), os.path.join(dest, "data", "tasks", tid))
         return dest
 
 
@@ -2176,7 +2426,20 @@ def _loop_summary(loop):
             "venue": loop.get("venue"), "doc": loop.get("doc"), "verdict": last.get("verdict")}
 
 
-def _doc_review_instruction(t, plan, n, note, path, rtid=None):
+def _figure_change_label(count, chg):
+    """'그림 23개 (바뀜 2: a.png, b.png · 새 1 · 빠짐 1)' — 심사 요청 메시지용."""
+    if not chg or not any(chg.values()):
+        return "그림 {}개{}".format(count, " (바뀐 그림 없음)" if chg is not None else "")
+    parts = []
+    for key, label in (("changed", "바뀜"), ("new", "새 그림"), ("removed", "빠짐")):
+        names = chg.get(key) or []
+        if names:
+            shown = ", ".join(os.path.basename(x) for x in names[:5]) + (" 외 {}개".format(len(names) - 5) if len(names) > 5 else "")
+            parts.append("{} {}: {}".format(label, len(names), shown))
+    return "그림 {}개 ({})".format(count, " · ".join(parts))
+
+
+def _doc_review_instruction(t, plan, n, note, path, rtid=None, figures=0, art_dir=None):
     dev = t.get("agent") or "AI"
     spec = models.spec_label(t.get("model"), t.get("effort"))
     rt = rtid or "<이 작업>"
@@ -2186,6 +2449,13 @@ def _doc_review_instruction(t, plan, n, note, path, rtid=None):
             t["id"], t["title"], venue, dev, " (" + spec + ")" if spec else "", plan["rounds"], n),
         "",
         "- 원고: 이 작업의 결과물 \"{}차 원고\" (PDF · Word 가 있으면 그것을, 원문은 \"{}차 원고 원문\"). 원본 파일: {}".format(n, n, path),
+    ]
+    if figures:
+        lines.append("- 그림: 원고가 \\includegraphics 로 부르는 그림 {}개를 이 작업의 결과물 \"그림: …\" 으로 붙였습니다{}. "
+                     "그림 파일을 직접 열어 보고 내용 · 축 · 단위 · 범례가 맞는지, 캡션 · 본문의 설명과 맞는지도 봅니다 "
+                     "(바뀐 그림은 같은 결과물의 새 버전).".format(figures, " (파일: {}/F-번호_이름)".format(art_dir)
+                                                                if art_dir else ""))
+    lines += [
         "- 저자의 작업 지시와 기록: devtrack show {}".format(t["id"]),
         "- 실제 저널 심사처럼 봅니다: 연구의 새로움과 선행 연구 대비 기여, 방법의 타당성 · 재현성, 결과가 결론을 뒷받침하는지, "
         "그림 · 표, 구성 · 문장, 투고처 규정. 근거 없는 칭찬이나 막연한 지적 대신 위치와 고칠 방법을 적습니다.",

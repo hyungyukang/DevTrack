@@ -308,6 +308,8 @@ As in a real journal review, a verdict (**accept · minor revision · major revi
    If you leave the manuscript empty, the AI sets it when it asks for the review.
 2. When the manuscript is done, the author AI asks for a review. A **review task** (a document review) is made with the manuscript as it is at that point.
    - For LaTeX, the main file comes with the files it pulls in with `\input` · `\include`, the bibliography (`.bib`) and the PDF of the same name.
+     The **figures** the manuscript loads with `\includegraphics` come along too, so the referee looks at the figures themselves.
+     A round where only figures changed can be reviewed again, and the review request names the changed figures.
    - For Word, the original and its text come along.
 3. The referee AI looks at novelty and contribution over prior work, soundness of the method, whether the results support the conclusions, figures and tables, and the writing.
    Each finding has a location, the original text and a fix (in the manuscript's language), and the referee sends a referee report and a verdict.
@@ -409,6 +411,15 @@ Use the buttons at the top right of the task detail page.
    - `.tex` manuscripts can be read in **Document view** instead of as code (with equations, tables and figures; you can switch back to the source)
    - Figures, linked data analyses, open issues
 3. If the paper needs an analysis, click **New analysis for this paper** on the paper card. The analysis task is linked to the paper.
+4. **Manuscript folder** — each paper task keeps a manuscript you can compile as is or upload to Overleaf in `tasks/<task ID>/paper/` in the records folder.
+   - It holds the latest `.tex` and `.bib` the AI uploaded, under their original file names. Figures the manuscript loads with
+     `\includegraphics` are gathered into `figures/` from figure artifacts of the same name (from this task, or else from a linked analysis task).
+     Figures the manuscript does not load are left out.
+   - If the manuscript uses `\graphicspath{{figures/}}` and loads figures without an extension (`\includegraphics{fig_kappa}`),
+     it also compiles with PNG figures when there is no PDF. This is part of the AI's working rules.
+   - The folder is rebuilt whenever the artifacts change, so do not edit files in it.
+     `devtrack paper <task ID>` shows its state and any missing figures (an extension that does not match, or no figure artifact).
+   - Moving just the records folder to another computer brings the manuscript along. For example, a paper started on a Mac can be continued on an HPC system.
 
 ### Document review
 
@@ -858,6 +869,7 @@ Commands you use yourself:
 | `devtrack serve --open` | Open the web dashboard (local) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
+| `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |

@@ -403,6 +403,8 @@ const EN = {
   '심사 최대 횟수': 'Max review rounds',
   '심사위원 모델 (선택)': 'Referee model (optional)',
   'AI 가 원본 문서를 올리면 여기에 표시됩니다': 'The original document shows up here once the AI uploads it',
+  '원고 그림 {n}개': 'Manuscript figures ({n})',
+  '바뀐 적 있는 그림 {n}': 'Revised {n}',
   '아직 리뷰 리포트나 문서가 없습니다': 'No review report or document yet',
   '원본': 'Original',
   '원본 보기': 'View original',

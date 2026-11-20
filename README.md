@@ -87,9 +87,13 @@ In the demo, `T-0006` (Claude) passed review in round 2 by Codex in `T-0012`.
 
 **Papers get a journal review the same way.** For a paper task, the reviewer acts as a referee for the target journal
 (`--review-doc paper/main.tex --review-venue "J. Fluid Mech."`). The verdict is accept, minor revision, major revision or reject.
-Each round carries the manuscript (LaTeX with its `\input` files and `.bib`, Word, PDF or Markdown). From round 2 on it also carries
+Each round carries the manuscript (LaTeX with its `\input` files, `.bib` and the figures it loads, Word, PDF or Markdown). From round 2 on it also carries
 the changes since the last review and the author's response to reviewers. In the demo, `T-0005` went from major revision to minor
 revision in `T-0013`.
+
+Each paper task also keeps a **manuscript folder** in the records, `tasks/<T-ID>/paper/`: the latest `.tex` and `.bib` under their
+own names, plus the figures the manuscript loads, gathered into `figures/` from figure artifacts of the same name. You can compile it
+as is or upload it to Overleaf, and it moves with the records to another computer. `devtrack paper T-ID` shows missing figures.
 
 ## What is in this repository
 
@@ -196,6 +200,7 @@ devtrack inbox                              # new instructions · messages · de
 | `text` | Extract a document's text — Word (`.docx`) → Markdown (standard library), PDF → text (when `pdftotext` is installed). The AI uses it to read the original in a document review |
 | `pdf` | Convert a Markdown document to PDF (A4, Korean fonts, the same look as the web; uses headless Chrome/Chromium, path set with `DEVTRACK_CHROME`) |
 | `latex` | Compile LaTeX. On success, record the PDF as a build (page count, undefined citations/references, overfull warnings); on failure, record where the error is and the log. `--pdf` records a PDF built elsewhere |
+| `paper` | Rebuild a paper task's manuscript folder (`tasks/<T-ID>/paper`: the latest `.tex` · `.bib` and the figures the manuscript loads) and list figures LaTeX would not find (wrong extension, no figure artifact). It is also rebuilt whenever a manuscript or figure artifact changes |
 | `request` / `wait` / `apply` | Approval request (`--commit` attaches the diff automatically, `--choices` lets the user tick items on the web) / wait for the decision / run an approved commit |
 | `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (in static mode the agent records them for the user) |
 | `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task) |

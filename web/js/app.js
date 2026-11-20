@@ -1886,7 +1886,7 @@ function docReviewPanel(t) {
 
 /** 리포트(PDF 먼저) → 그 밖의 결과 문서 → 검토할 문서(원본) 순서 */
 function drDocs(t) {
-  const docs = t.artifacts.filter((a) => DOC_VIEW_KINDS.includes(a.kind) && !isBuildLog(a));
+  const docs = t.artifacts.filter((a) => DOC_VIEW_KINDS.includes(a.kind) && !isBuildLog(a) && !a.figure);
   const rank = (a) => (a.category === 'review' ? (a.kind === 'pdf' ? 0 : 1) : a.category === 'source' ? 3 : 2);
   return docs.map((a, i) => [a, i]).sort((x, y) => rank(x[0]) - rank(y[0]) || y[1] - x[1]).map(([a]) => a);
 }
@@ -1906,7 +1906,8 @@ async function viewDocReview({ rest }) {
   const t = await loadTask(sel.id);
   const docs = drDocs(t);
   const cur = docs.find((a) => a.id === fid) || docs[0];
-  const sources = t.artifacts.filter((a) => a.category === 'source');
+  const sources = t.artifacts.filter((a) => a.category === 'source' && !a.figure);
+  const figures = t.artifacts.filter((a) => a.figure);  // 심사에 붙은 원고 그림 — 한 줄로 묶어 보여 준다
   const pending = t.approvals.filter((a) => a.status === 'pending');
   const now = taskNow(sel);
   const allIds = new Set(all.map((x) => x.id));
@@ -1937,6 +1938,7 @@ async function viewDocReview({ rest }) {
               <div class="wc-label"><span>${L('검토할 문서')}</span></div>
               ${sources.length ? sources.map((a) => html`<a class="mini-row" href="#/docreview/${t.id}/${a.id}">${icon(pick(ART_KIND, a.kind, 'file').icon)}<span class="t">${a.title}</span><span class="badge">${pick(ART_KIND, a.kind, 'file').label}</span>${a.version > 1 ? html`<span class="badge tone-accent">v${a.version}</span>` : ''}</a>`)
                 : html`<div class="muted mini-empty">${L('AI 가 원본 문서를 올리면 여기에 표시됩니다')}</div>`}
+              ${figures.length ? html`<a class="mini-row" href="#/task/${t.id}/artifacts">${icon('image')}<span class="t">${L('원고 그림 {n}개', { n: figures.length })}</span>${figures.some((a) => a.version > 1) ? html`<span class="badge tone-accent">${L('바뀐 적 있는 그림 {n}', { n: figures.filter((a) => a.version > 1).length })}</span>` : ''}</a>` : ''}
             </div>
           </div>
         </article>
