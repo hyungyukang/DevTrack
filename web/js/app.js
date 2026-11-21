@@ -36,6 +36,9 @@ const state = {
   taskSearch: '',
   listeners: null, // 웹 입력을 기다리는 AI (로컬 서버 모드만, null = 알 수 없음)
   guides: {}, // 사용 방법 문서 (파일 이름 → 본문)
+  pendingRender: false, // 입력 중이라 미뤄 둔 화면 갱신 — 입력이 끝나면 저절로 반영
+  writes: 0, // 보내는 중인 쓰기 요청 수 (그동안은 화면을 다시 그리지 않음)
+  pointerDown: false, // 마우스 · 터치를 누르고 있는 중 (그동안 다시 그리면 누르던 버튼의 클릭이 사라짐)
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -67,15 +70,20 @@ async function loadTask(id) {
 }
 
 async function api(path, body) {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  let j = {};
-  try { j = await r.json(); } catch { /* 빈 응답 */ }
-  if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
-  return j;
+  state.writes++;
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let j = {};
+    try { j = await r.json(); } catch { /* 빈 응답 */ }
+    if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+    return j;
+  } finally {
+    state.writes--;
+  }
 }
 
 // ====================================================================== 라우팅 / 렌더링
@@ -105,10 +113,13 @@ const VIEWS = {
 };
 
 let renderSeq = 0;
-async function render({ keepScroll = false } = {}) {
+/** auto: 새 데이터로 저절로 다시 그리는 경우 — 그사이 입력을 시작했으면 바꾸지 않고 미룬다 */
+async function render({ keepScroll = false, auto = false } = {}) {
   const seq = ++renderSeq;
   const route = parseRoute();
-  state.routeKey = [route.name, ...route.rest].join('/');
+  const key = [route.name, ...route.rest].join('/');
+  const sameView = state.routeKey === key;
+  state.routeKey = key;
   const main = $('#main');
   saveDetails(main);
   const y = window.scrollY;
@@ -122,11 +133,42 @@ async function render({ keepScroll = false } = {}) {
     view = viewError(e);
   }
   if (seq !== renderSeq) return;
+  if (auto && isBusy()) { deferRender(); return; }
+  const drafts = sameView ? saveDrafts(main) : null;
   main.innerHTML = String(view);
   restoreDetails(main);
+  if (drafts) restoreDrafts(main, drafts);
   hydrate(main);
+  state.pendingRender = false;
   $('#update-pill').classList.remove('show');
   window.scrollTo(0, keepScroll ? y : 0);
+}
+
+/** 같은 화면을 다시 그릴 때 입력 칸에 써 둔 글(보내기 전 메시지 · 코멘트)을 그대로 둔다 */
+function saveDrafts(root) {
+  const drafts = new Map();
+  $$('textarea[id], input[id]', root).forEach((el) => {
+    if (el.id !== 'task-search' && !['checkbox', 'radio', 'hidden'].includes(el.type) && el.value) drafts.set(el.id, el.value);
+  });
+  return drafts;
+}
+function restoreDrafts(root, drafts) {
+  drafts.forEach((v, id) => {
+    const el = document.getElementById(id);
+    if (el && root.contains(el) && !el.value) el.value = v;
+  });
+}
+
+/** 입력 중이라 지금은 다시 그리지 않음 — '새 업데이트 보기' 를 띄우고, 입력이 끝나면 저절로 반영 */
+function deferRender() {
+  state.pendingRender = true;
+  $('#update-pill').classList.add('show');
+  updateChrome();
+}
+
+/** 입력이 끝났으면 미뤄 둔 갱신을 반영 */
+function applyPending() {
+  if (state.pendingRender && !isBusy()) render({ keepScroll: true, auto: true });
 }
 
 function hydrate(root) {
@@ -146,7 +188,13 @@ function hydrate(root) {
     filterTasks();
   }
   const form = $('#new-task-form', root);
-  if (form) form.addEventListener('submit', submitNewTask);
+  if (form) {
+    form.addEventListener('submit', submitNewTask);
+    // 고르기만 한 항목(유형 · 담당 AI …)도 다시 그리면 사라지므로, 손대기 시작하면 저절로 다시 그리지 않는다
+    const touch = () => { form.dataset.dirty = '1'; };
+    form.addEventListener('input', touch);
+    form.addEventListener('change', touch);
+  }
   const guide = $('.guide-body', root);
   if (guide) setupGuide(guide, $('.guide-toc', root));
 }
@@ -183,18 +231,28 @@ function restoreDetails(root) {
   $$('details[data-key]', root).forEach((d) => { if (state.details.has(d.dataset.key)) d.open = state.details.get(d.dataset.key); });
 }
 
-function isEditing() {
+/** 지금 다시 그리면 사용자가 하던 일이 끊기는가 — 입력 칸에 커서가 있음(한글 조합 중일 수 있음) · 누르는 중 ·
+ *  보내는 중 · 승인 선택지를 고름 · 새 작업 지시를 쓰기 시작함. 써 두기만 한 글은 다시 그려도 남으므로(saveDrafts) 막지 않는다 */
+function isBusy() {
+  if (state.pointerDown || state.writes > 0) return true;
   const main = $('#main');
   const a = document.activeElement;
   if (a && main.contains(a) && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName) && a.id !== 'task-search') return true;
   if ($('.choice-box[data-dirty]', main)) return true;
-  return $$('textarea, #new-task-form input[type="text"]', main).some((t) => t.value.trim());
+  return newTaskTouched();
+}
+
+/** 새 작업 지시를 쓰기 시작했는가 (고르기만 한 항목 포함 — 폼 항목은 다시 그리면 사라진다) */
+function newTaskTouched() {
+  const form = $('#new-task-form', $('#main'));
+  return !!form && (!!form.dataset.dirty || $$('textarea, input[type="text"]', form).some((t) => t.value.trim()));
 }
 
 function isRelevant(changed, prev, idx) {
   if (!prev) return true;
   const r = parseRoute();
   if (r.name === 'guide') return false;
+  if (r.name === 'new') return !newTaskTouched(); // 쓰던 지시를 '새 업데이트 보기' 로 날리지 않게 — 이 화면은 기록과 거의 무관
   if (r.name === 'task' || r.name === 'artifact') return changed.has(r.rest[0]);
   if (r.name === 'reviews') {
     const ids = (x) => codeReviews(x).map((v) => v.task_id + v.id).join();
@@ -339,15 +397,12 @@ async function poll({ force = false } = {}) {
     state.loadError = null;
     processNotifications(idx);
     const dataChanged = !prev || idx.generated_at !== prev.generated_at;
-    if (force || hadError || (dataChanged && isRelevant(changed, prev, idx))) {
-      if (!force && prev && isEditing()) {
-        $('#update-pill').classList.add('show');
-        updateChrome();
-      } else {
-        await render({ keepScroll: !!prev });
-      }
-    } else if (listenersChanged && LISTENER_VIEWS.includes(parseRoute().name) && !isEditing()) {
-      await render({ keepScroll: true }); // 기다리는 AI 표시만 바뀜 — 입력 중이면 다음 폴링에
+    // 미뤄 둔 갱신(state.pendingRender)도 여기서 다시 시도 — state.index 는 이미 새것이라 dataChanged 로는 다시 잡히지 않는다
+    if (force || hadError || state.pendingRender || (dataChanged && isRelevant(changed, prev, idx))) {
+      if (!force && prev && isBusy()) deferRender();
+      else await render({ keepScroll: !!prev, auto: !force && !!prev });
+    } else if (listenersChanged && LISTENER_VIEWS.includes(parseRoute().name) && !isBusy()) {
+      await render({ keepScroll: true, auto: true }); // 기다리는 AI 표시만 바뀜 — 입력 중이면 다음 폴링에
     } else {
       updateChrome();
     }
@@ -2724,7 +2779,7 @@ async function actComment(btn) {
   btn.disabled = true;
   try {
     await api(`api/tasks/${task}/comments`, fid ? { message, artifact: fid } : { message });
-    ta.value = '';
+    ta.value = ''; // 다시 그릴 때 보낸 글이 초안으로 남지 않게 (saveDrafts)
     toast({ title: L('메시지를 보냈습니다'), meta: `${task}${fid ? ` · ${fid}` : ''} — ${L('{ai}에게 devtrack inbox 로 전달됩니다', { ai: aiName(state.tasks.get(task)) })}`, tone: 'green' });
     await poll({ force: true });
   } catch (e) {
@@ -2891,6 +2946,15 @@ async function init() {
   state.mode = await detectMode();
   await poll({ force: true });
   setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
+  // 다른 탭에 있다가 돌아오면 다음 폴링을 기다리지 않고 바로 확인
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  // 입력 칸에서 나오거나 누르기를 마치면, 입력 중이라 미뤄 둔 갱신을 반영 (클릭이 끝날 틈을 둔다)
+  const later = () => setTimeout(applyPending, 600);
+  $('#main').addEventListener('focusout', later);
+  window.addEventListener('pointerdown', () => { state.pointerDown = true; }, true);
+  for (const type of ['pointerup', 'pointercancel']) {
+    window.addEventListener(type, () => { state.pointerDown = false; later(); }, true);
+  }
 }
 
 init();

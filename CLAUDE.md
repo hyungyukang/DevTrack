@@ -69,6 +69,9 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   결과물은 새 버전도 같은 ID 라 `ref` 로 그 결과물의 요청 · 버전 기록(`artifactThread`)이 이어지고, inbox 항목에는 `_comment_artifact` 가 지금 파일과
   새 버전으로 올리는 명령(`artifact --replace` · `review`)을 붙인다. 사용자 메시지의 `ack` 는 웹에 'AI 확인함 / 확인 전' 으로 표시
 - 코드 리뷰: `Store.set_review`(검토 항목 R1… 은 같은 ID 끼리 합침) · 승인 요청의 `choices`/`selected`(웹 체크박스 선택). `integrations/claude-skills/` 는 이를 쓰는 `/review-pr` · `/review-doc` 스킬 (사용자가 `~/.claude/skills` 로 복사해 설치)
+- 자동 갱신: `poll`(10초 · 탭으로 돌아올 때)이 바뀐 화면을 `render({auto})` 로 다시 그린다. 입력 중(`isBusy` — 입력 칸 포커스 · 누르는 중 ·
+  `api` 쓰기 중 · 승인 선택지 · 새 작업 폼)이면 `deferRender` 로 미루고 입력 칸에서 나오면 `applyPending`. 써 두기만 한 글은 같은 화면이면
+  `saveDrafts` 로 남기므로, 보낸 뒤에는 칸을 비우고 다시 그릴 것. 결과물 주소는 `artifactUrl` 이 `?v=<버전>` 을 붙인다 (새 버전도 같은 파일 이름)
 - `web/js/app.js` 라우팅 · 폴링(10초) · 알림 · 모든 화면, `web/js/viewers.js` 결과물 뷰어, `web/js/latex.js` LaTeX → 문서 미리보기, `web/js/util.js` 템플릿/아이콘/라벨,
   `web/js/i18n.js` 화면 틀 한/영 전환(`L()`, 라벨 표는 `translated()`, `index.html` 은 `data-i18n`)
 

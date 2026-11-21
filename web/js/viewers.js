@@ -20,7 +20,9 @@ if (window.DOMPurify) {
 }
 
 export function artifactUrl(taskId, art) {
-  if (art.path) return `data/tasks/${encodeURIComponent(taskId)}/${art.path.split('/').map(encodeURIComponent).join('/')}`;
+  // 새 버전도 같은 파일 이름이라, 버전을 주소에 붙여 브라우저가 예전 파일을 캐시에서 보여 주지 않게 한다
+  const v = art.version > 1 ? `?v=${art.version}` : '';
+  if (art.path) return `data/tasks/${encodeURIComponent(taskId)}/${art.path.split('/').map(encodeURIComponent).join('/')}${v}`;
   if (art.url) return art.url;
   return null;
 }

@@ -347,7 +347,13 @@ The **AI journal review** box on the task page shows each round's verdict, the o
 - **Activity** — the records of all tasks, by date (the latest 300).
 - **Notifications** — the bell icon at the top right shows how many approvals are waiting, and a notice pops up in a corner of the page for new approval requests, issues and completions.
   In the bell menu, turn on **Desktop notifications** to be notified even while you are looking at another window.
-- The page **refreshes automatically every 10 seconds**. To see changes right away, click the refresh button at the top right.
+- The page **refreshes automatically every 10 seconds**. With the local server or on the static web, the records and artifacts the AI leaves show up without reloading the browser,
+  and the page checks right away when you come back from another tab. To see changes right away, click the refresh button at the top right.
+  (On the static web the page changes once the AI's records are copied to the public web folder — [step 10](#/guide/s10))
+  - Text you have typed into a box but not sent stays there when the page refreshes.
+  - While the cursor is in a text box (you are typing) or you have ticked approval choices, the page does not change; it shows **Show new updates** and applies them by itself once you leave the box.
+    The **New task** page is not redrawn once you start filling it in, so what you wrote is not lost.
+  - When an artifact gets a new version, figures and PDFs load the new file.
 - **How artifacts are shown** — the button at the top right of the **Artifacts** page and of a task's **Artifacts** tab switches between **cards** (a grid) and a **list** (one row each).
   The list shows full titles together with the task number, kind, time and size, and figures get a small preview. Your choice is remembered in the browser.
 - **Display language (English / 한국어)** — the page opens in English. Click **한** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to Korean;
