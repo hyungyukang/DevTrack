@@ -34,8 +34,9 @@ class _Clock:
 _PALETTE = ["#3a5ccc", "#e8590c", "#2b8a3e", "#ae3ec9"]
 
 
-def svg_line_chart(series, title, xlabel, ylabel, logy=False, w=640, h=380):
+def svg_line_chart(series, title, xlabel, ylabel, logy=False, w=640, h=380, legend="right"):
     pad_l, pad_r, pad_t, pad_b = 64, 20, 44, 52
+    lx = pad_l + 12 if legend == "left" else w - pad_r - 150  # 범례 위치 (선이 지나가지 않는 위쪽 구석)
     xs = [x for _, pts in series for x, _ in pts]
     ys = [y for _, pts in series for _, y in pts]
     tf = (lambda v: math.log10(v)) if logy else (lambda v: v)
@@ -66,8 +67,8 @@ def svg_line_chart(series, title, xlabel, ylabel, logy=False, w=640, h=380):
         c = _PALETTE[i % len(_PALETTE)]
         d = " ".join("{}{:.1f},{:.1f}".format("M" if j == 0 else "L", px(x), py(y)) for j, (x, y) in enumerate(pts))
         out.append('<path d="{}" fill="none" stroke="{}" stroke-width="2"/>'.format(d, c))
-        out.append('<rect x="{}" y="{}" width="12" height="3" fill="{}"/>'.format(w - pad_r - 150, pad_t + 4 + i * 18, c))
-        out.append('<text x="{}" y="{}" font-size="12" fill="#374151">{}</text>'.format(w - pad_r - 132, pad_t + 9 + i * 18, name))
+        out.append('<rect x="{}" y="{}" width="12" height="3" fill="{}"/>'.format(lx, pad_t + 4 + i * 18, c))
+        out.append('<text x="{}" y="{}" font-size="12" fill="#374151">{}</text>'.format(lx + 18, pad_t + 9 + i * 18, name))
     out.append('<text x="{}" y="{}" font-size="12" fill="#374151" text-anchor="middle">{}</text>'.format((pad_l + w - pad_r) / 2, h - 12, xlabel))
     out.append('<text transform="translate(16 {}) rotate(-90)" font-size="12" fill="#374151" text-anchor="middle">{}</text>'.format((pad_t + h - pad_b) / 2, ylabel))
     out.append("</svg>")
@@ -1318,19 +1319,24 @@ def _scenario(s, clk, tmp):
     conv1 = [(h, 0.5 * h) for h in [1 / 16, 1 / 32, 1 / 64, 1 / 128, 1 / 256]]
     clk.at(200)
     fig1 = s.add_artifact(tid5, path=f("fig4_1_convergence.svg", svg_line_chart(
-        [("L2 error", conv), ("1st order ref.", conv1)], "Fig 4.1  Grid convergence", "grid spacing h", "L2 error", logy=True)),
+        [("L2 error", conv), ("1st order ref.", conv1)], "Fig 4.1  Grid convergence", "grid spacing h", "L2 error", logy=True,
+        legend="left")),
         title="Fig 4.1 격자 수렴성", description="기울기 ≈ 2.0 (2차 정확도 확인)")
     clk.at(185)
     s.add_artifact(tid5, path=f("fig4_2_speedup.svg", svg_bar_chart(
         ["CPU 64c", "A100", "MI250X 1GCD", "MI250X 8GCD"], [1.0, 18.4, 15.9, 112.3],
         "Fig 4.2  Speedup vs. 64-core CPU", "speedup", highlight=3)), title="Fig 4.2 GPU 가속비")
     s.check_plan(tid5, [2])
-    clk.at(150)
-    s.add_user_comment(tid5, "Fig 4.1 은 기준선으로 2차 정확도(h²) 선도 같이 넣어주세요.")
-    with s.edit(tid5) as t:  # 에이전트가 이미 확인한 메시지
-        t["log"][-1]["ack"] = True
+    clk.at(150)  # 결과물 화면의 '결과물 수정 요청 · 추가 지시' 칸에서 보낸 메시지 → 에이전트가 같은 그림의 새 버전으로 반영
+    s.add_user_comment(tid5, "Fig 4.1 은 기준선으로 2차 정확도(h²) 선도 같이 넣어주세요.", artifact=fig1["id"])
+    s.ack_inbox(s.inbox(task=tid5))
     clk.at(140)
-    s.add_log(tid5, "사용자 요청 반영: Fig 4.1 에 h² 기준선 추가 예정 (다음 그림 갱신 때 반영)", kind="info")
+    conv2 = [(h, 2.0 * h ** 2) for h in [1 / 16, 1 / 32, 1 / 64, 1 / 128, 1 / 256]]
+    s.add_artifact(tid5, path=f("fig4_1_convergence.svg", svg_line_chart(
+        [("L2 error", conv), ("1st order ref.", conv1), ("2nd order ref. (h²)", conv2)],
+        "Fig 4.1  Grid convergence", "grid spacing h", "L2 error", logy=True, legend="left")),
+        title="Fig 4.1 격자 수렴성", replace_same_name=True)
+    s.add_log(tid5, "사용자 요청 반영: Fig 4.1 에 h² 기준선 추가 ({} v2)".format(fig1["id"]), kind="info")
     clk.at(120); s.check_plan(tid5, [3])
     clk.at(60)
     s.add_artifact(tid5, path=f("results.tex", RESULTS_TEX), title="results.tex (4장 초안)")

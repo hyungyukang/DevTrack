@@ -260,6 +260,11 @@ devtrack inbox --wait          # 2. 백그라운드로 실행 → 아직 보지 
 - **새 작업**: `devtrack start <TID>` 로 시작해 지시대로 진행한다.
 - **메시지**: 그 작업의 지시 · 이전 기록 · 결과물을 보고 답한다. 답은 웹에서 볼 수 있게 그 작업에 남기고
   (`devtrack log <TID> "답 요약" -d "상세"`, 길면 `devtrack artifact` 로 리포트) `devtrack inbox --task <TID> --ack` 로 처리 표시한다.
+- **결과물에 대한 메시지**: 사용자가 결과물 화면의 '결과물 수정 요청 · 추가 지시' 칸에서 보낸 것은
+  `[메시지] <TID> <L-ID> — 결과물 F-3 '제목' (v2) 에 대해: …` 로 오고, 아래에 그 결과물의 지금 파일과 새 버전으로 올리는 명령이 붙는다.
+  고친 결과물은 **같은 파일 이름으로 새 버전**을 올린다 — `devtrack artifact <TID> <파일> --replace` (리뷰 리포트는 `devtrack review`).
+  새 결과물을 따로 만들지 않아야 사용자가 그 결과물 화면에서 v1 → v2 로 이어 본다. 추가 지시(다른 분석 · 그림 더 만들기 등)면 평소처럼 진행하고,
+  한 일을 `devtrack log` 로 남긴 뒤 `--ack`.
 - **승인 결정**: 평소대로 — 승인이면 `devtrack apply`, 수정 요청이면 고친 뒤 새 승인 요청.
 - 자동으로 진행해도 승인 규칙은 그대로다: 커밋 · 푸시, PR 게시 등은 `devtrack request` 로 승인을 받는다.
 - 채팅 중이었다면 마지막 답에 받은 편지함에서 처리한 것을 한두 줄로 알린다.
@@ -404,7 +409,8 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
 - **정적 모드 (웹 공개 폴더)**: 사용자가 Claude 세션에 `[DevTrack 결정] T-0001 / A-1 ... → 승인` 형태의 메시지를 붙여넣음
   → 에이전트가 `devtrack decide T-0001 A-1 approve -m "코멘트"` 로 기록한 뒤 `apply` 진행
   (선택 항목이 있는 요청이면 메시지에 `선택: R1, R3` 이 있고, 명령에 `--select R1 R3` 가 붙어 있음)
-- `[DevTrack 메시지]` → `devtrack comment <TID> "..."` 로 기록 후 반영
+- `[DevTrack 메시지]` → `devtrack comment <TID> "..."` 로 기록 후 반영. 첫 줄에 `· 결과물 F-3 "제목" 에 대해` 가 있으면
+  `devtrack comment <TID> --artifact F-3 "..."` 로 기록하고 위의 '결과물에 대한 메시지' 처럼 처리
 - `[DevTrack 새 작업 지시]` → `devtrack new ...` 로 등록 후 진행
 - `[DevTrack 작업 완료]` → 사용자가 끝나지 않은 작업을 완료로 넘긴 것: `devtrack done <TID> --by-user -m "메모"` 후 그 작업 중단
 - `[DevTrack 작업 취소]` → `devtrack cancel <TID> -m "사유"` 후 그 작업 중단

@@ -578,7 +578,20 @@ function feedItem(e) {
   </li>`;
 }
 
-function timelineItem(e, { taskLink = false } = {}) {
+/** 사용자 메시지가 AI 에게 전달됐는지 (받은 편지함에서 --ack 로 처리 표시했는지) */
+const ackBadge = (e) => (e.ack === true ? html`<span class="badge tone-green">${icon('check')} ${L('AI 확인함')}</span>`
+  : e.ack === false ? html`<span class="badge tone-amber">${icon('clock')} ${L('AI 확인 전')}</span>` : '');
+
+/** 결과물 화면에서 보낸 메시지가 가리키는 결과물 */
+function msgArtifactLink(e, tid) {
+  const fid = e.meta?.artifact;
+  if (!fid) return '';
+  const v = e.meta.version > 1 ? ` (v${e.meta.version})` : '';
+  const label = html`${icon('file')} ${L('결과물§하나')} ${fid}${e.meta.artifact_title ? ` · ${e.meta.artifact_title}` : ''}${v}`;
+  return tid ? html`<a class="msg-art" href="#/artifact/${tid}/${fid}">${label}</a>` : html`<span class="msg-art">${label}</span>`;
+}
+
+function timelineItem(e, { taskLink = false, tid = e.task_id } = {}) {
   const k = pick(LOG_KIND, e.kind, 'info');
   const isUser = e.author === 'user';
   const commit = e.kind === 'commit' && e.meta?.commit ? html` · ${commitLink(e.meta.remote_url, e.meta.commit)}` : '';
@@ -586,7 +599,7 @@ function timelineItem(e, { taskLink = false } = {}) {
     <span class="ic tone-${k.tone}">${icon(k.icon)}</span>
     <div class="body">
       ${e.kind === 'user'
-        ? html`<div class="head"><span class="msg">${L('사용자 메시지')}</span></div><div class="msg-box markdown-body compact">${raw(renderMarkdown(e.message))}</div>`
+        ? html`<div class="head"><span class="msg">${L('사용자 메시지')}</span>${msgArtifactLink(e, tid)}${ackBadge(e)}</div><div class="msg-box markdown-body compact">${raw(renderMarkdown(e.message))}</div>`
         : e.kind === 'agent'
           ? html`<div class="head"><span class="msg">${L('{from} → {to} AI 메시지', { from: authorName(e.author), to: e.meta?.to || 'AI' })}</span></div><div class="msg-box agent-msg">${e.message}</div>`
           : html`<div class="head"><span class="msg">${e.message}</span></div>`}
@@ -676,14 +689,27 @@ function feedbackHint(t) {
   return L('지금 기다리는 {ai}가 없어, {ai}가 다음에 받은 편지함을 확인할 때 전달됩니다', { ai });
 }
 
-function feedbackBox(t, title = L('{ai}에게 메시지', { ai: aiName(t) })) {
+/** 결과물 화면: 이 결과물에 보낸 메시지와 그 뒤의 새 버전 (오래된 것부터) — 보낸 적이 없으면 비움 */
+function artifactThread(t, art) {
+  const items = (t.log || []).filter((e) => e.ref === art.id && (e.kind === 'user' || e.kind === 'artifact'));
+  if (!items.some((e) => e.kind === 'user')) return '';
+  return html`<div class="fb-thread">
+    <div class="fb-thread-head">${L('이 결과물에 보낸 요청과 새 버전')}</div>
+    <ul class="timeline">${items.slice(-12).map((e) => timelineItem(e, { tid: t.id }))}</ul>
+  </div>`;
+}
+
+/** 작업의 담당 AI 에게 메시지 보내기. artifact 를 주면 결과물 화면의 '수정 요청 · 추가 지시' 칸 (그 결과물을 가리키는 메시지) */
+function feedbackBox(t, title = L('{ai}에게 메시지', { ai: aiName(t) }), { artifact = null } = {}) {
+  const ai = aiName(t);
   return html`<section class="card feedback-card">
     <div class="card-head"><h2>${icon('message')} ${title}</h2></div>
     <div class="card-body">
-      <textarea id="fb-${t.id}" placeholder="${L('추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)')}"></textarea>
+      ${artifact ? html`${artifactThread(t, artifact)}<p class="fb-note">${L('보낸 내용은 결과물 {id} 에 대한 메시지로 {ai}에게 전달됩니다. 고친 결과물은 이 화면에 새 버전으로 올라옵니다.', { id: artifact.id, ai })}</p>` : ''}
+      <textarea id="fb-${t.id}" placeholder="${artifact ? L('이 결과물에서 고칠 부분이나 추가로 할 일을 적어 주세요 (markdown 지원)') : L('추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)')}"></textarea>
       <div class="actions">
         <span class="hint">${feedbackHint(t)}</span>
-        <button class="btn btn-primary" data-action="comment" data-task="${t.id}">${icon('send')} ${L('보내기')}</button>
+        <button class="btn btn-primary" data-action="comment" data-task="${t.id}" data-artifact="${artifact?.id || ''}">${icon('send')} ${L('보내기')}</button>
       </div>
     </div>
   </section>`;
@@ -1336,7 +1362,7 @@ function taskOverview(t, openIssues) {
       </section>
       <section class="card">
         <div class="card-head"><h2>${icon('activity')} ${L('최근 진행 기록')}</h2><a href="#/task/${t.id}/log">${L('전체 {n}건', { n: t.log.length })}</a></div>
-        <div class="card-body"><ul class="timeline">${recent.map((e) => timelineItem(e))}</ul></div>
+        <div class="card-body"><ul class="timeline">${recent.map((e) => timelineItem(e, { tid: t.id }))}</ul></div>
       </section>
       ${feedbackBox(t)}
     </div>
@@ -1364,7 +1390,7 @@ function taskOverview(t, openIssues) {
 function taskLog(t) {
   const items = [...t.log].reverse();
   return html`<div class="detail-grid">
-    <div><section class="card"><div class="card-body"><ul class="timeline">${items.map((e) => timelineItem(e))}</ul></div></section></div>
+    <div><section class="card"><div class="card-body"><ul class="timeline">${items.map((e) => timelineItem(e, { tid: t.id }))}</ul></div></section></div>
     <div>${feedbackBox(t)}</div>
   </div>`;
 }
@@ -2031,7 +2057,8 @@ async function viewArtifact({ rest }) {
       ${art.description ? html`<div class="card-body markdown-body compact" style="border-bottom:1px solid var(--border)">${raw(renderMarkdown(art.description))}</div>` : ''}
       <div data-av="${t.id}/${art.id}"></div>
     </section>
-    ${linked.length ? html`<h2 class="section-title" style="margin-top:22px">${L('연결된 승인 요청')}</h2>${linked.map((a) => approvalCard(t, a, { skip: [art.id] }))}` : ''}`;
+    ${linked.length ? html`<h2 class="section-title" style="margin-top:22px">${L('연결된 승인 요청')}</h2>${linked.map((a) => approvalCard(t, a, { skip: [art.id] }))}` : ''}
+    <div class="art-feedback">${feedbackBox(t, L('결과물 수정 요청 · 추가 지시'), { artifact: art })}</div>`;
 }
 
 // ====================================================================== 화면: 활동 기록
@@ -2678,12 +2705,15 @@ async function actDeleteTask(btn) {
 
 async function actComment(btn) {
   const task = btn.dataset.task;
+  const fid = btn.dataset.artifact || ''; // 결과물 화면에서 보낸 메시지면 그 결과물
   const ta = document.getElementById(`fb-${task}`);
   const message = ta?.value.trim();
   if (!message) { ta?.focus(); return; }
+  const art = fid ? state.tasks.get(task)?.artifacts.find((a) => a.id === fid) : null;
   if (state.mode !== 'live') {
-    const cmd = `devtrack comment ${task} ${shellQuote(message)}`;
-    const msg = `[DevTrack 메시지] ${task}\n${message}`;
+    const cmd = `devtrack comment ${task}${fid ? ` --artifact ${fid}` : ''} ${shellQuote(message)}`;
+    // AI 에게 가는 글이라 한국어 그대로
+    const msg = `[DevTrack 메시지] ${task}${fid ? ` · 결과물 ${fid} "${art?.title || ''}" 에 대해` : ''}\n${message}`;
     const ai = aiName(state.tasks.get(task));
     openModal({
       title: L('{ai}에게 메시지 전달', { ai }),
@@ -2693,9 +2723,9 @@ async function actComment(btn) {
   }
   btn.disabled = true;
   try {
-    await api(`api/tasks/${task}/comments`, { message });
+    await api(`api/tasks/${task}/comments`, fid ? { message, artifact: fid } : { message });
     ta.value = '';
-    toast({ title: L('메시지를 보냈습니다'), meta: `${task} — ${L('{ai}에게 devtrack inbox 로 전달됩니다', { ai: aiName(state.tasks.get(task)) })}`, tone: 'green' });
+    toast({ title: L('메시지를 보냈습니다'), meta: `${task}${fid ? ` · ${fid}` : ''} — ${L('{ai}에게 devtrack inbox 로 전달됩니다', { ai: aiName(state.tasks.get(task)) })}`, tone: 'green' });
     await poll({ force: true });
   } catch (e) {
     toast({ title: L('보내지 못했습니다'), meta: e.message, tone: 'red' });

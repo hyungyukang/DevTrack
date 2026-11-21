@@ -6,7 +6,7 @@
 API
   GET  /api/health
   POST /api/tasks                               {title, instruction, type, agent, repo, branch, priority}
-  POST /api/tasks/<T>/comments                  {message}
+  POST /api/tasks/<T>/comments                  {message, artifact?: F-ID}  (artifact = 결과물 화면에서 보낸 수정 요청 · 추가 지시)
   POST /api/tasks/<T>/approvals/<A>/decision    {decision: approve|changes|reject, comment, selected?: [ID]}
   POST /api/tasks/<T>/cancel                     {reason}
   POST /api/tasks/<T>/complete                   {note}   끝나지 않은 작업을 사용자가 완료로 처리
@@ -133,7 +133,8 @@ def make_handler(store, web_root, verbose=False):
                         return self._json({"ok": True, "task": {"id": t["id"]}}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/comments$", path)
                     if m:
-                        e = store.add_user_comment(m.group(1), body.get("message") or "")
+                        e = store.add_user_comment(m.group(1), body.get("message") or "",
+                                                   artifact=(body.get("artifact") or "").strip() or None)
                         return self._json({"ok": True, "entry": e}, 201)
                     m = re.match(r"^/api/tasks/(T-\d+)/model$", path)
                     if m:

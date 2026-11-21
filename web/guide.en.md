@@ -372,7 +372,14 @@ When Claude reaches a point that needs your check, it shows up in the **Approval
 Safeguard: a commit request **does not run if the actual change differs even slightly from the diff you approved.** If the code changes after your approval, Claude posts a new request.
 The commit holds only the files in the diff. Build outputs (CMake build folders, `.o` files, executables and so on) are left out even when they are not in `.gitignore`, and the request lists them under **Build outputs left out** ([6-2](#/guide/s6-2)).
 
-If you want to tell Claude something during the work, write it in the **Message to Claude** box on the task detail page and send it. Claude picks it up at its next step.
+If you want to tell Claude something during the work, write it in the **Message to Claude** box (named after the assigned AI) on the **Progress log** tab of the task detail page and send it. Claude picks it up at its next step.
+User messages in the progress log show whether the AI has picked them up (**Seen by AI** / **Not yet seen by AI**).
+
+**Request changes · further instructions** — open an artifact (a report, figure, table, code and so on), and this box is at the bottom.
+- A message sent here reaches the AI as **a message about that artifact** (e.g. "show column 2 as percentages", "make a 3D figure the same way").
+- The AI uploads the revised artifact as a **new version (v2, v3…)** of the same artifact. You see the new version on the same page, and earlier ones through the "Earlier versions" link.
+- Once you send one, **requests sent about this artifact, and new versions** pile up above the box in order (request → v2 → next request …).
+- In static mode it creates a message to paste to Claude. In a terminal: `devtrack comment T-0003 --artifact F-2 "…"`.
 
 ### Mark as done · Cancel task · Delete
 

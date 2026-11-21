@@ -149,7 +149,8 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Data analysis** — data analysis and visualization tasks (types `analysis`, `visualization`) with a figure gallery, data · notebooks · reports. The `For paper` filter shows only analyses linked to a paper task
 - **Brainstorming** — brainstorming tasks (type `brainstorm`). For the selected task: topic and plan, the idea notes the AI wrote, **ticking the ideas to pursue** (`request --choices "I1=…"`), the ideas picked so far, feedback, and a new task from the picked ideas (shown as a linked task)
 - **Artifacts** — Markdown, PDF, images/SVG, diff, code/LaTeX (highlighted), CSV tables, Jupyter notebooks, HTML.
-  On the Artifacts page and a task's Artifacts tab, the button at the top right switches between **cards** and a **list** (full titles, one per row)
+  On the Artifacts page and a task's Artifacts tab, the button at the top right switches between **cards** and a **list** (full titles, one per row).
+  An opened artifact ends with a **Request changes · further instructions** box: the message reaches the AI as one about that artifact, the AI uploads the fix as a new version, and the requests and versions so far are listed above the box
 - **Activity** — the records of all tasks, by date
 - **New task** — create a task with a title, type, assigned AI, model and effort, repository, a reviewer AI (code and paper tasks), related tasks and instruction
 - **Guide** — a step-by-step manual for first-time users (install → set up Claude → give a task → approve → use by field → HPC). Source: [web/guide.en.md](web/guide.en.md), Korean: [web/guide.md](web/guide.md)
@@ -206,7 +207,7 @@ devtrack inbox                              # new instructions · messages · de
 | `latex` | Compile LaTeX. On success, record the PDF as a build (page count, undefined citations/references, overfull warnings); on failure, record where the error is and the log. `--pdf` records a PDF built elsewhere |
 | `paper` | Rebuild a paper task's manuscript folder (`tasks/<T-ID>/paper`: the latest `.tex` · `.bib` and the figures the manuscript loads) and list figures LaTeX would not find (wrong extension, no figure artifact). It is also rebuilt whenever a manuscript or figure artifact changes |
 | `request` / `wait` / `apply` | Approval request (`--commit` attaches the diff automatically, `--choices` lets the user tick items on the web) / wait for the decision / run an approved commit |
-| `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (in static mode the agent records them for the user) |
+| `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (`--artifact F-ID` for a message about one artifact; in static mode the agent records them for the user) |
 | `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task; `--any-model` also for tasks set to another model) |
 | `hook` | PreToolUse hook for Claude Code · Codex: if the user marked the session's task as done, cancelled or deleted it, the next tool call is blocked so the agent stops. Always hook up `bin/devtrack-hook`, which always exits 0 (setup: Guide 5-4 and step 11 ⑤) |
 | `watch` | AI runner: runs the AI for each input sent to it from the web (`--claude` = `claude -p`, `--codex` = `codex exec`, or `-- command`). With `--claude` · `--codex`, each task runs with its own model and effort, and the same task continues the same conversation. For AIs without a wait mode, such as Codex, and for keeping each task on its model |

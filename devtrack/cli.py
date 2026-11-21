@@ -717,8 +717,26 @@ def cmd_review_done(store, args):
 
 
 def cmd_comment(store, args):
-    e = store.add_user_comment(args.task, args.message)
+    e = store.add_user_comment(args.task, args.message, artifact=args.artifact)
     _out(args, e, e["id"])
+
+
+def _comment_artifact_lines(it):
+    """결과물 화면에서 보낸 메시지: 어느 결과물(버전)에 대한 것인지와, 고친 결과물을 같은 결과물의 새 버전으로 올리는 방법."""
+    fid, tid = it["artifact"], it["task_id"]
+    if it.get("artifact_missing"):
+        return [_indent("→ 결과물 {} 은(는) 지워졌습니다".format(fid))]
+    out = []
+    if it.get("artifact_file"):
+        out.append(_indent("→ 결과물 파일 (지금 v{}): {}".format(it.get("artifact_latest") or 1, it["artifact_file"])))
+    elif it.get("artifact_url"):
+        out.append(_indent("→ 결과물 주소: " + it["artifact_url"]))
+    name = it.get("artifact_filename")
+    if name and it.get("artifact_file"):
+        how = ("devtrack review {} <고친 {}>".format(tid, name) if it.get("artifact_category") == "review" else
+               "devtrack artifact {} <고친 {}> --replace".format(tid, name))
+        out.append(_indent("  고친 결과물은 같은 파일 이름으로 올리면 {} 의 새 버전이 됩니다: {}".format(fid, how)))
+    return out
 
 
 def _format_inbox(items):
@@ -747,6 +765,12 @@ def _format_inbox(items):
             elif rv:
                 out.append(_indent("→ 개발이 끝나면 커밋 승인 요청 전에 devtrack review-request {} 로 {} 의 리뷰를 받습니다 "
                                    "(결과는 [AI 메시지] 로 옴)".format(it["task_id"], rv["reviewer"])))
+        elif it["type"] == "comment" and it.get("artifact"):
+            ver = it.get("artifact_version")
+            out.append("[메시지] {} {} — 결과물 {} '{}'{} 에 대해: {}".format(
+                it["task_id"], it["id"], it["artifact"], it.get("artifact_title") or "",
+                " (v{})".format(ver) if ver and ver > 1 else "", it["message"]))
+            out.extend(_comment_artifact_lines(it))
         elif it["type"] == "comment":
             out.append("[메시지] {task_id} {id}: {message}".format(**it))
         elif it["type"] == "agent_message":
@@ -2088,6 +2112,8 @@ def build_parser():
     sp = add("comment", cmd_comment, "사용자 메시지 기록 (사용자 → 에이전트)")
     sp.add_argument("task")
     sp.add_argument("message")
+    sp.add_argument("--artifact", metavar="F-ID",
+                    help="이 메시지가 가리키는 결과물 (결과물 화면에서 보낸 수정 요청 · 추가 지시)")
 
     sp = add("inbox", cmd_inbox, "에이전트가 처리할 사용자 입력 확인 (새 지시, 메시지, 결정)")
     sp.add_argument("--ack", action="store_true", help="확인한 메시지/결정을 처리됨으로 표시")

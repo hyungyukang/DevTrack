@@ -898,11 +898,19 @@ class Store:
         with self.edit(tid) as t:
             return self._log(t, message, kind=kind, author=author, detail=detail)
 
-    def add_user_comment(self, tid, message):
+    def add_user_comment(self, tid, message, artifact=None):
+        """사용자 메시지 (사용자 → 담당 AI). artifact: 이 메시지가 가리키는 결과물 (결과물 화면의 수정 요청 · 추가 지시) —
+        결과물은 새 버전이 올라와도 ID 가 같으므로 ref 로 남겨 두면 그 결과물의 기록으로 이어진다."""
         if not message or not message.strip():
             raise DevTrackError("메시지가 비어 있습니다")
         with self.edit(tid) as t:
-            return self._log(t, message.strip(), kind="user", author=USER)
+            if not artifact:
+                return self._log(t, message.strip(), kind="user", author=USER)
+            fid = normalize_item_id(artifact, "F")
+            art = self._find(t.get("artifacts", []), fid, "결과물")
+            return self._log(t, message.strip(), kind="user", author=USER, ref=fid,
+                             meta={"artifact": fid, "artifact_title": art.get("title"),
+                                   "version": art.get("version", 1)})
 
     # ------------------------------------------------------------------ AI 끼리 메시지 · 리뷰 반복
     def _agent_message(self, t, message, author, meta=None, kind_label=None):
@@ -2146,6 +2154,22 @@ class Store:
             return ap
 
     # ------------------------------------------------------------------ 받은 편지함 (에이전트용)
+    def _comment_artifact(self, t, e):
+        """결과물에 대해 보낸 사용자 메시지면 그 결과물 정보 (받은 편지함 항목에 붙임). 그사이 결과물이 지워졌으면 보낼 때의 제목만."""
+        fid = (e.get("meta") or {}).get("artifact")
+        if not fid:
+            return {}
+        a = next((x for x in t.get("artifacts", []) if x.get("id") == fid), None)
+        out = {"artifact": fid, "artifact_title": (a or {}).get("title") or e["meta"].get("artifact_title") or "",
+               "artifact_version": e["meta"].get("version")}
+        if a:
+            out.update(artifact_latest=a.get("version", 1), artifact_category=a.get("category") or "result",
+                       artifact_filename=a.get("filename"), artifact_file=self._artifact_file(t["id"], a),
+                       artifact_url=a.get("url"))
+        else:
+            out["artifact_missing"] = True
+        return out
+
     def inbox(self, ack=False, agent=None, task=None):
         """에이전트가 처리해야 할 사용자 입력: 새 작업 지시, 사용자 메시지, 승인/수정 결정, 취소/삭제/완료 처리 알림.
 
@@ -2173,7 +2197,8 @@ class Store:
                                   review=_loop_summary(t.get("review_loop"))))
             for e in t.get("log", []):
                 if e.get("author") == USER and e.get("kind") == "user" and e.get("ack") is False:
-                    items.append(dict(base, type="comment", id=e["id"], message=e["message"], ts=e["ts"]))
+                    items.append(dict(base, type="comment", id=e["id"], message=e["message"], ts=e["ts"],
+                                      **self._comment_artifact(t, e)))
                 elif e.get("kind") == "agent" and e.get("ack") is False:
                     items.append(dict(base, type="agent_message", id=e["id"], message=e["message"],
                                       sender=e.get("author"), ts=e["ts"]))
