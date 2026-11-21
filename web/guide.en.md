@@ -356,6 +356,9 @@ The **AI journal review** box on the task page shows each round's verdict, the o
   - When an artifact gets a new version, figures and PDFs load the new file.
 - **How artifacts are shown** — the button at the top right of the **Artifacts** page and of a task's **Artifacts** tab switches between **cards** (a grid) and a **list** (one row each).
   The list shows full titles together with the task number, kind, time and size, and figures get a small preview. Your choice is remembered in the browser.
+- **Artifact order** — switch it with the **Newest** · **By task** buttons next to it. It starts as **Newest**: the artifact added or updated to a new version most recently is at the top.
+  **By task** groups artifacts under a heading for each task, highest task number first, and lists each task's artifacts in the order they were made (F-1, F-2 …).
+  A task's **Artifacts** tab offers **Newest** · **Created order**. The browser remembers this choice too.
 - **Display language (English / 한국어)** — the page opens in English. Click **한** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to Korean;
   click **EN** to switch back to English. The browser remembers your choice. Task titles, instructions, progress logs, artifacts and review reports stay in the language they were written in (usually Korean).
   Messages for the AI (the paste-in text in static mode) are also generated in Korean.

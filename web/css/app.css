@@ -545,6 +545,15 @@ table.data .t-prog span { font-size: 12px; color: var(--text-2); font-variant-nu
 .view-toggle button { padding: 5px 9px; display: grid; place-items: center; }
 .view-toggle .icon { width: 15px; height: 15px; }
 .art-tools { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+/* 결과물 순서: 최신순 / 작업별(만든 순서) — 카드 · 목록 단추 옆 */
+.art-toggles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sort-toggle button { padding: 5px 10px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.art-group + .art-group { margin-top: 22px; }
+.art-group-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: 14px; min-width: 0; }
+.art-group-head a { color: var(--text); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-group-head a:hover { color: var(--accent-text); }
+.art-group-head .mono { color: var(--text-3); margin-right: 2px; }
+.art-group-head .n { flex: none; font-size: 12px; font-weight: 600; color: var(--text-3); }
 .art-list .art-row { align-items: flex-start; }
 .art-list .art-row .ic { width: 40px; height: 40px; }
 .art-list .art-row .title { white-space: normal; overflow-wrap: anywhere; }

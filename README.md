@@ -150,6 +150,7 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Brainstorming** — brainstorming tasks (type `brainstorm`). For the selected task: topic and plan, the idea notes the AI wrote, **ticking the ideas to pursue** (`request --choices "I1=…"`), the ideas picked so far, feedback, and a new task from the picked ideas (shown as a linked task)
 - **Artifacts** — Markdown, PDF, images/SVG, diff, code/LaTeX (highlighted), CSV tables, Jupyter notebooks, HTML.
   On the Artifacts page and a task's Artifacts tab, the button at the top right switches between **cards** and a **list** (full titles, one per row).
+  The order switches between **Newest** (most recently added or updated first, the default) and **By task** (grouped by task, in the order made within each task).
   An opened artifact ends with a **Request changes · further instructions** box: the message reaches the AI as one about that artifact, the AI uploads the fix as a new version, and the requests and versions so far are listed above the box
 - **Activity** — the records of all tasks, by date
 - **New task** — create a task with a title, type, assigned AI, model and effort, repository, a reviewer AI (code and paper tasks), related tasks and instruction

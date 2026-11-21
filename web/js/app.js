@@ -717,8 +717,46 @@ function artViewToggle() {
   return html`<div class="seg view-toggle" role="group" aria-label="${L('보기 방식')}">${b('grid', 'grid', L('카드로 보기'))}${b('list', 'list', L('목록으로 보기'))}</div>`;
 }
 
-/** 결과물 모음 — 고른 보기 방식대로 카드 격자 또는 세로 목록 */
+// 결과물 순서: 최신순(마지막으로 올리거나 새 버전이 된 것이 위 — 기본) 또는 작업별(작업 번호가 큰 작업부터 묶고,
+// 작업 안에서는 만든 순서 F-1, F-2 …). 한 작업의 결과물 탭에서는 작업별 = 만든 순서. 보는 사람의 브라우저에 기억한다
+const artSort = () => (LS.get('artSort', 'time') === 'task' ? 'task' : 'time');
+const idNum = (id) => parseInt(String(id ?? '').replace(/^\D*-?/, ''), 10) || 0;
+const artTime = (a) => tsNum(a.updated_at || a.created_at);
+
+function sortArtifacts(items) {
+  const out = [...items];
+  if (artSort() === 'task') out.sort((x, y) => idNum(y.task_id) - idNum(x.task_id) || idNum(x.id) - idNum(y.id));
+  else out.sort((x, y) => artTime(y) - artTime(x) || idNum(y.task_id) - idNum(x.task_id) || idNum(y.id) - idNum(x.id));
+  return out;
+}
+
+function artSortToggle({ single = false } = {}) {
+  const v = artSort();
+  const b = (key, ic, label, tip) => html`<button type="button" class="${v === key ? 'on' : ''}" data-action="art-sort" data-sort="${key}"
+    aria-pressed="${v === key ? 'true' : 'false'}" title="${tip}">${icon(ic)} ${label}</button>`;
+  return html`<div class="seg sort-toggle" role="group" aria-label="${L('순서')}">${b('time', 'clock', L('최신순'), L('최근에 올리거나 새 버전이 된 결과물부터'))}${single
+    ? b('task', 'list', L('만든 순서'), L('만든 순서대로 (F-1, F-2 …)'))
+    : b('task', 'folder', L('작업별'), L('작업별로 묶어서, 작업 안에서는 만든 순서대로'))}</div>`;
+}
+
+const artTools = (opts) => html`<div class="art-toggles">${artSortToggle(opts)}${artViewToggle()}</div>`;
+
+/** 결과물 모음 — 고른 순서와 보기 방식대로. 여러 작업의 결과물을 작업별로 보면 작업마다 제목 줄을 단다 */
 function artCollection(items, { showTask = true } = {}) {
+  const sorted = sortArtifacts(items);
+  if (!showTask || artSort() !== 'task') return artItems(sorted, { showTask });
+  const groups = [];
+  for (const a of sorted) {
+    const g = groups[groups.length - 1];
+    if (g && g.id === a.task_id) g.items.push(a);
+    else groups.push({ id: a.task_id, title: a.task_title, items: [a] });
+  }
+  return html`${groups.map((g) => html`<section class="art-group">
+    <h3 class="art-group-head"><a href="#/task/${g.id}/artifacts"><span class="mono">${g.id}</span> ${g.title || ''}</a><span class="n">${g.items.length}</span></h3>
+    ${artItems(g.items, { showTask: false })}</section>`)}`;
+}
+
+function artItems(items, { showTask }) {
   if (artView() === 'list') {
     return html`<div class="card art-list">${items.map((a) => artRow(a.task_id, a, { showTask, thumb: true }))}</div>`;
   }
@@ -1462,8 +1500,8 @@ function taskIssues(t) {
 
 function taskArtifacts(t) {
   if (!t.artifacts.length) return html`<div class="card empty">${icon('package')}<p>${L('아직 결과물이 없습니다')}</p></div>`;
-  const items = [...t.artifacts].reverse().map((a) => ({ ...a, task_id: t.id }));
-  return html`<div class="art-tools">${artViewToggle()}</div>${artCollection(items, { showTask: false })}`;
+  const items = t.artifacts.map((a) => ({ ...a, task_id: t.id }));
+  return html`<div class="art-tools">${artTools({ single: true })}</div>${artCollection(items, { showTask: false })}`;
 }
 
 function taskApprovals(t) {
@@ -2094,7 +2132,7 @@ function viewArtifacts({ q }) {
   const items = all.filter(ART_GROUPS[g].test);
   return html`
     <div class="page-head"><div><h1>${L('결과물')}</h1><p class="sub">${L('코드 변경, 리포트, 그림, 데이터 등 에이전트가 만든 모든 결과물')}</p></div></div>
-    <div class="filter-bar"><div class="chips">${Object.entries(ART_GROUPS).map(([k, v]) => html`<a class="chip ${g === k ? 'active' : ''}" href="#/artifacts${k === 'all' ? '' : '?kind=' + k}">${v.label} <span class="n">${all.filter(v.test).length}</span></a>`)}</div>${artViewToggle()}</div>
+    <div class="filter-bar"><div class="chips">${Object.entries(ART_GROUPS).map(([k, v]) => html`<a class="chip ${g === k ? 'active' : ''}" href="#/artifacts${k === 'all' ? '' : '?kind=' + k}">${v.label} <span class="n">${all.filter(v.test).length}</span></a>`)}</div>${artTools()}</div>
     ${items.length ? artCollection(items) : html`<div class="card empty">${icon('package')}<p>${L('결과물이 없습니다')}</p></div>`}`;
 }
 
@@ -2847,6 +2885,10 @@ async function onAction(el, ev) {
     }
     case 'art-view': {
       LS.set('artView', el.dataset.view === 'list' ? 'list' : 'grid');
+      return render({ keepScroll: true });
+    }
+    case 'art-sort': {
+      LS.set('artSort', el.dataset.sort === 'task' ? 'task' : 'time');
       return render({ keepScroll: true });
     }
     case 'refresh': return poll({ force: true });
