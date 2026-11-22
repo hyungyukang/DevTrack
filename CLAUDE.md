@@ -71,6 +71,9 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
 - 문서 리뷰(`docreview`): 원본은 결과물 분류 `source`, 리뷰 결과는 코드 리뷰와 같은 `t["review"]` 에 `doc` · `checks` · `strengths`, 항목의 `location` · `quote` · `suggestion`.
   `verdict` 는 `DOC_VERDICTS`. 웹 `viewDocReview` · `docReviewPanel`, 코드 리뷰 화면은 `codeReviews()` 로 문서 리뷰를 뺀다
+- 마크다운 리포트 안의 그림 · 링크: 결과물은 `artifacts/F-<n>_<이름>` 으로 저장되므로 `![](fig.png)` 같은 상대 경로는 그대로면 깨진다.
+  `renderMarkdown(…, { resolveFile })` (viewers.js `linkLocalFiles`) 가 app.js `resolveFile` 로 같은 이름의 결과물(index.json `filename` = 올릴 때 이름,
+  없던 기록은 `_safe_name` 과 같은 `safeName`)에 잇는다 — 이름 정리 규칙은 두 쪽을 함께 고칠 것. `devtrack pdf` 는 `<base>` 를 원본 .md 폴더로 둔다
 - 결과물에 대한 메시지: 결과물 화면 맨 아래 `feedbackBox(t, …, { artifact })` → `add_user_comment(artifact=)` 가 로그 `ref` · `meta.artifact`(보낼 때 버전)로 남긴다.
   결과물은 새 버전도 같은 ID 라 `ref` 로 그 결과물의 요청 · 버전 기록(`artifactThread`)이 이어지고, inbox 항목에는 `_comment_artifact` 가 지금 파일과
   새 버전으로 올리는 명령(`artifact --replace` · `review`)을 붙인다. 사용자 메시지의 `ack` 는 웹에 'AI 확인함 / 확인 전' 으로 표시

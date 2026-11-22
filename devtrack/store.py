@@ -2487,7 +2487,7 @@ class Store:
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
                                                    "created_at", "author", "size", "description", "lang", "build",
-                                                   "version", "updated_at", "preview")})
+                                                   "version", "updated_at", "preview", "filename")})
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)

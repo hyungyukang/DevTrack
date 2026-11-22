@@ -27,11 +27,48 @@ export function artifactUrl(taskId, art) {
   return null;
 }
 
-export function renderMarkdown(text, { breaks = true } = {}) {
+/** opts.resolveFile(ref, { image }) — 리포트 안의 상대 경로(그림 · 링크)를 올라온 결과물과 연결 ({ url, href, title } 또는 null) */
+export function renderMarkdown(text, { breaks = true, resolveFile = null } = {}) {
   if (!text) return '';
   if (!window.marked || !window.DOMPurify) return `<pre>${esc(text)}</pre>`;
-  const out = window.marked.parse(String(text), { gfm: true, breaks });
-  return window.DOMPurify.sanitize(out);
+  const out = window.DOMPurify.sanitize(window.marked.parse(String(text), { gfm: true, breaks }));
+  return resolveFile ? linkLocalFiles(out, resolveFile) : out;
+}
+
+// 상대 경로만 (https: · data: 같은 주소, /절대경로, #앵커 는 그대로)
+const isLocalRef = (ref) => !!ref && !/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(ref);
+
+/** 결과물은 data/tasks/<T>/artifacts/F-<n>_<이름> 으로 저장되므로, 리포트가 원래 이름(fig.png)으로 부른 그림은
+ *  화면 주소 기준으로는 없는 파일이다 — 같은 이름으로 올라온 결과물 주소로 바꾼다. 찾지 못한 그림은 안내로 바꾼다. */
+function linkLocalFiles(markup, resolve) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = markup;
+  tpl.content.querySelectorAll('img[src]').forEach((img) => {
+    const ref = img.getAttribute('src');
+    if (!isLocalRef(ref)) return;
+    const hit = resolve(ref, { image: true });
+    if (hit) {
+      img.setAttribute('src', hit.url);
+      if (!img.title) img.title = hit.title;
+      return;
+    }
+    let name = ref;
+    try { name = decodeURIComponent(ref); } catch { /* 그대로 */ }
+    const box = document.createElement('span');
+    box.className = 'md-fig-missing';
+    box.innerHTML = html`${icon('image')}<code>${name}</code><small>${L('같은 파일 이름의 그림 결과물이 없습니다')}</small>`.s;
+    img.replaceWith(box);
+  });
+  tpl.content.querySelectorAll('a[href]').forEach((a) => {
+    const ref = a.getAttribute('href');
+    if (!isLocalRef(ref)) return;
+    const hit = resolve(ref, { image: !!a.querySelector('img') });
+    if (!hit) return;
+    a.setAttribute('href', hit.href); // 결과물 화면 (같은 탭)
+    a.removeAttribute('target');
+    a.removeAttribute('rel');
+  });
+  return tpl.innerHTML;
 }
 
 export function enhance(root) {
@@ -65,6 +102,7 @@ const truncNote = (t) => (t ? `<div class="av-note">${L('파일이 커서 앞부
 /**
  * LaTeX 원고: '문서 보기'(HTML 미리보기)와 '원본 코드' 전환.
  * opts.resolveImage(path) — \includegraphics 경로를 업로드된 그림과 연결, opts.pdfHref — 컴파일된 PDF 링크
+ * (renderArtifactInto 의 opts 에는 마크다운 리포트용 resolveFile 도 있다 — renderMarkdown 참고)
  */
 function renderTexView(el, text, truncated, opts) {
   let mode = LS.get('texView', 'doc');
@@ -155,7 +193,7 @@ export async function renderArtifactInto(el, taskId, art, opts = {}) {
         break;
       case 'markdown': {
         const { text, truncated } = await fetchText(url);
-        el.innerHTML = `${truncNote(truncated)}<div class="markdown-body av-pad">${renderMarkdown(text, { breaks: false })}</div>`;
+        el.innerHTML = `${truncNote(truncated)}<div class="markdown-body av-pad">${renderMarkdown(text, { breaks: false, resolveFile: opts.resolveFile })}</div>`;
         enhance(el);
         break;
       }

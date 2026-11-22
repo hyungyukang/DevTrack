@@ -65,6 +65,7 @@ img { max-width: 100%; }
 
 HTML = """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>{title}</title>
+<base href="{base}">
 <style>{css}</style>
 {scripts}
 </head><body><article id="doc"></article>
@@ -128,7 +129,10 @@ def markdown_to_pdf(md_path, pdf_path=None, title=None, timeout=120):
     try:
         html_path = os.path.join(tmp, "report.html")
         with open(html_path, "w", encoding="utf-8") as fh:
-            fh.write(HTML.format(title=esc_title, css=CSS, scripts=scripts, md=md_js))
+            # 인쇄용 HTML 은 임시 폴더에 있으므로, 리포트의 ![](fig.png) 같은 상대 경로는 원본 .md 폴더 기준으로 찾게 한다
+            base = _file_url(os.path.dirname(md_path)).rstrip("/") + "/"
+            fh.write(HTML.format(title=esc_title, base=base.replace("&", "&amp;").replace('"', "&quot;"), css=CSS,
+                                 scripts=scripts, md=md_js))
         out_tmp = os.path.join(tmp, "out.pdf")
         cmd = [browser, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
                "--disable-extensions", "--user-data-dir=" + os.path.join(tmp, "profile"),

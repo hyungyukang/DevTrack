@@ -614,6 +614,7 @@ const EN = {
   '인용': 'Citations',
   '해결 안 된 참조': 'Unresolved references',
   '찾지 못한 그림': 'Missing figures',
+  '같은 파일 이름의 그림 결과물이 없습니다': 'No figure artifact with this file name',
   '원본 코드': 'Source',
   'LaTeX 미리보기입니다 — 그림·표·수식 번호와 레이아웃은 컴파일된 PDF 와 다를 수 있습니다.': 'LaTeX preview — figure, table and equation numbers and the layout may differ from the compiled PDF.',
   '웹으로 복사되지 않은 외부 파일입니다': 'External file that was not copied for the web',

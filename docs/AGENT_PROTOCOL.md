@@ -14,6 +14,8 @@ Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 
    `devtrack request --commit` → 사용자 승인 → `devtrack apply` 로만 반영한다.
 3. **문제는 숨기지 않는다.** 막히거나 예상과 다르면 `issue` 로 기록하고, 결정이 필요하면 `status blocked` + 선택지를 남긴다.
 4. **결과물은 웹에서 볼 수 있게 남긴다.** 그림, 리포트, 로그, 노트북, LaTeX, diff 등은 `artifact` 로 첨부한다.
+   Markdown 리포트에 넣은 그림(`![그림 1](figs/fig1.png)`)은 **같은 파일 이름으로 그림도 결과물로 올린다** — 웹은 리포트 안의 상대 경로를
+   같은 이름의 결과물(이 작업 > 연결된 작업)로 이어 보여 준다 (폴더는 상관없음, 올리지 않은 그림은 '그림 결과물이 없음' 으로 표시).
 5. **사용자 입력을 주기적으로 확인하고, 온 것은 묻지 않고 처리한다.** 작업 시작 시, 단계가 끝날 때마다 `devtrack inbox` 를 확인한다.
    웹에서 온 새 작업 지시 · 메시지는 그 자체가 사용자의 지시다 — [다른 작업 중에 온 입력](#다른-작업-중에-온-입력).
 6. **내게 배정된 작업만 처리한다.** `devtrack inbox` 에는 나(`$DEVTRACK_AGENT`)에게 배정된 작업과 담당이 정해지지 않은 작업만 보인다.
@@ -76,7 +78,7 @@ devtrack delete $TID                  # 완전히 삭제 — 작업 ID 를 다�
 | `code` | 계획, 단계별 진행, 테스트 결과, `request --commit` |
 | `review` | **일반 사용자도 읽을 수 있는** 리포트(`templates/review_report.md` 형식: 한 줄 결론 · 한눈에 보기 · 쉬운 설명 · 용어 풀이)와 검토 항목 R1, R2… 를 `devtrack review <TID> report.md [report.pdf] --findings findings.json` 으로 등록. 코멘트할 항목은 `request -k review --choices` 로 사용자가 고르게 하고, PR 에 게시하기 전 초안으로 다시 `request -k review`. 자세한 흐름은 [코드 리뷰](#코드-리뷰) |
 | `paper` | `--plan` 에 원고 구성(절/장)을 넣는다 — 웹의 논문 카드에 체크리스트로 표시. 원고를 고칠 때마다 `.tex` · `.bib` 를 `artifact --replace` 로 올리고 **`devtrack latex <TID> paper/main.tex` 로 컴파일 결과(PDF/오류)를 기록**한다. **그림은 원고 폴더의 `figures/` 에 두고 원고에 `\graphicspath{{figures/}}`, 부를 때는 확장자 없이 `\includegraphics{fig_name}`** (PDF 가 없으면 PNG 로 컴파일됨). 그림은 `\includegraphics` 와 **같은 파일 이름(확장자 무관)** 으로 올린다 — 웹의 문서 보기에서 연결되고, DevTrack 이 `tasks/<TID>/paper/` 에 최신 원고와 원고가 부르는 그림(이 작업 > 연결된 작업)을 모아 둔다. 이 원고 폴더는 DevTrack 이 다시 만드므로 직접 고치지 않는다 (작업은 자기 폴더에서 하고 결과물로 올림). 원고 폴더의 .tex · .bib 는 결과물의 파일 이름으로 한 폴더에 놓이므로 `\input` 으로 나눈 원고는 같은 폴더의 파일로 부르거나 한 파일로 합쳐 올린다. 올릴 때 나오는 `확인할 그림` 은 `devtrack paper <TID>` 로 보고 고친다. 원본 데이터와 다른 수치는 `issue` |
-| `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md). 해석이 필요한 결과는 `request -k result`. **논문에 쓸 분석이면 `--related <논문 T-ID>`** 로 연결 |
+| `analysis` | 노트북(`.ipynb`), CSV 요약, 그림, 요약 리포트(md — 그림은 올린 파일 이름 그대로 `![…](fig.png)`). 해석이 필요한 결과는 `request -k result`. **논문에 쓸 분석이면 `--related <논문 T-ID>`** 로 연결 |
 | `visualization` | 그림/HTML(plotly 등) 결과물, 사용한 스크립트 |
 | `model` | 학습 설정, 손실 곡선 그림, 로그, 평가 결과. 큰 자원 사용 전 `request -k plan` |
 | `docreview` | 논문 · 보고서 · 제안서 등 사용자가 준 문서(PDF · Word · LaTeX) 리뷰. 원본은 `artifact --source`, 리포트는 `devtrack review <TID> report.md --pdf --findings f.json` (문서 요약 · 점검 영역 · 보완할 부분 R1…). **결과물로 제출하는 것은 리포트 PDF**. 자세한 흐름은 [문서 리뷰](#문서-리뷰) |

@@ -211,8 +211,42 @@ function mountArtifact(el) {
   const ok = buildInfo(task)?.ok;
   renderArtifactInto(el, tid, art, {
     resolveImage: (p) => resolveFigure(tid, p),
+    resolveFile: (p, o) => resolveFile(tid, p, o),
     pdfHref: ok ? `#/artifact/${tid}/${ok.pdf}` : null,
   });
+}
+
+/** 결과물을 저장할 때의 파일 이름 정리 (store.py 의 _safe_name 과 같게) — index.json 에 원래 이름(filename)이 없던 기록용 */
+function safeName(name) {
+  const base = baseName(name) || 'file';
+  const i = base.lastIndexOf('.');
+  const [stem, ext] = i > 0 ? [base.slice(0, i), base.slice(i)] : [base, ''];
+  return (stem.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+|[._]+$/g, '') || 'file').slice(0, 100)
+    + ext.replace(/[^A-Za-z0-9.]+/g, '').slice(0, 12);
+}
+
+/** 마크다운 리포트의 ![](figs/fig8.png) · [스크립트](analyze.py) → 같은 파일 이름으로 올라온 결과물.
+ *  올릴 때의 원래 이름(filename)으로 찾고, 없으면 저장된 이름(F-<n>_ 뒤)과 비교한다. 그림(image)은 이름이 같은 그림이 없으면
+ *  확장자만 다른 그림도 받는다. 같은 작업 > 연결된 작업 > 그 외, 같으면 나중에 올린 것 */
+function resolveFile(tid, ref, { image = false } = {}) {
+  let p = String(ref).split(/[?#]/)[0];
+  try { p = decodeURIComponent(p); } catch { /* 그대로 */ }
+  const want = baseName(p).toLowerCase();
+  if (!want) return null;
+  const stemOf = (n) => n.replace(/\.[^.]*$/, '');
+  const stored = (a) => baseName(a.path).replace(/^F-\d+_/, '').toLowerCase();
+  // 한글 등이 섞인 이름은 저장할 때 글자가 빠져(그림2.png → 2.png) 다른 그림과 맞을 수 있으므로 저장된 이름으로 비교하지 않는다
+  const wantSafe = safeName(want).toLowerCase();
+  const safeOk = /^[\x20-\x7e]+$/.test(want);
+  const arts = (state.index?.artifacts || []).filter((a) => a.path && (!image || a.kind === 'image'));
+  const pick = (same) => arts.filter((a) => (a.filename ? same(a.filename.toLowerCase(), want) : safeOk && same(stored(a), wantSafe)));
+  let cands = pick((x, y) => x === y);
+  if (!cands.length && image) cands = pick((x, y) => stemOf(x) === stemOf(y));
+  if (!cands.length) return null;
+  const related = new Set(linksOf(tid).map((x) => x.id));
+  const rank = (a) => (a.task_id === tid ? 0 : related.has(a.task_id) ? 1 : 2);
+  const a = cands.sort((x, y) => rank(x) - rank(y) || String(y.created_at || '').localeCompare(String(x.created_at || '')))[0];
+  return { url: artifactUrl(a.task_id, a), title: `${a.title} (${a.task_id} · ${a.id})`, href: `#/artifact/${a.task_id}/${a.id}` };
 }
 
 /** \includegraphics{figs/fig4_1.pdf} → 같은 이름(확장자 무관)으로 올라온 그림 결과물. 같은 작업 > 연결된 작업 > 그 외 순 */

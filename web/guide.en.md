@@ -475,6 +475,8 @@ Have Claude read a paper, report or proposal and give you a **summary** and **wh
 
 1. Give the instruction with type **Data analysis** or **Visualization**. Say where the data is and what you want to know.
 2. The **Data analysis** menu shows a figure gallery, tables (CSV), notebooks and summary reports. The **For paper** filter shows only analyses linked to a paper.
+   A figure inside a summary report (Markdown), such as `![Figure 1](figs/fig1.png)`, shows the figure artifact uploaded under the same file name (this task first, then linked tasks),
+   and a link such as `[script](analyze.py)` opens that artifact. If no figure artifact has that name, a note appears in its place.
 3. Results that need interpretation are posted by Claude as approval requests (result checks).
 
 ### Brainstorming
