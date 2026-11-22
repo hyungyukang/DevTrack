@@ -6,6 +6,7 @@ import {
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 import { L, translated, translatedStrings, getLang, setLang, applyStatic, locale } from './i18n.js';
+import { checkAccess, showLock, forgetKey, isLocked } from './lock.js';
 
 /** 번역 문구 안의 {이름} 자리에 값을 이스케이프해 넣은 HTML (번역 문구 자체의 태그는 그대로) */
 const LH = (ko, vars = {}) => raw(L(ko).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(html`${vars[k]}`) : m)));
@@ -27,6 +28,7 @@ const FIGURE_KINDS = ['image', 'html'];
 
 const state = {
   mode: 'static',
+  access: null, // 웹 비밀번호 (lock.js 의 checkAccess 결과 — auth 가 있으면 비밀번호가 걸린 사이트)
   index: null,
   loadError: null,
   tasks: new Map(),
@@ -47,7 +49,7 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 // ====================================================================== 데이터
 async function getJSON(path) {
   const r = await fetch(`${path}${path.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText || ''} — ${path}`);
+  if (!r.ok) throw Object.assign(new Error(`${r.status} ${r.statusText || ''} — ${path}`), { status: r.status });
   return r.json();
 }
 
@@ -380,6 +382,7 @@ function listenersSummary() {
 
 // ====================================================================== 폴링 / 알림
 async function poll({ force = false } = {}) {
+  if (isLocked()) return;
   const btn = $('#refresh-btn');
   try {
     const [idx, listenersChanged] = await Promise.all([getJSON('data/index.json'), refreshListeners()]);
@@ -407,6 +410,11 @@ async function poll({ force = false } = {}) {
       updateChrome();
     }
   } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      // 비밀번호를 새로 걸었거나 바꿨거나, 이 브라우저의 쿠키가 지워짐 — 비밀번호를 묻는다
+      const a = await checkAccess();
+      if (a.state === 'locked') return showLock(a.auth);
+    }
     state.loadError = e;
     if (!state.index) await render();
     else updateChrome();
@@ -513,9 +521,12 @@ function updateChrome(route = parseRoute()) {
     chip.innerHTML = `<span class="dot"></span><span>${L('정적')}<span class="label-long"> · ${L('읽기 전용')}</span></span>`;
     chip.title = L('정적 호스팅 모드: 데이터는 자동 갱신되지만, 승인/피드백은 담당 AI 에게 전달할 메시지로 표시됩니다');
   }
-  $('#sync-info').innerHTML = idx
-    ? html`${L('데이터 갱신')} <b>${ago(idx.generated_at)}</b><br>${L('{n}초마다 자동 확인', { n: POLL_MS / 1000 })}`.s
-    : L('데이터 없음');
+  const guard = state.access?.state === 'unprotected'
+    ? html`<div class="lock-warn" title="${L('data/ 폴더를 누구나 읽을 수 있습니다 — .htaccess 를 읽는 Apache 서버에 올리거나 devtrack serve 로 여세요')}">${icon('alert')} ${L('비밀번호 보호가 동작하지 않음')}</div>`
+    : state.access?.auth ? html`<button class="lock-btn" data-action="lock" title="${L('이 브라우저에서 비밀번호를 지우고 잠급니다')}">${icon('lock')} ${L('잠그기')}</button>` : '';
+  $('#sync-info').innerHTML = html`${idx
+    ? html`${L('데이터 갱신')} <b>${ago(idx.generated_at)}</b><br>${L('{n}초마다 자동 확인', { n: POLL_MS / 1000 })}`
+    : L('데이터 없음')}${guard}`.s;
   if ($('#notif-dd').classList.contains('open')) renderDropdown();
 }
 
@@ -2876,6 +2887,7 @@ async function onAction(el, ev) {
       syncThemeIcon();
       return;
     }
+    case 'lock': forgetKey(); location.reload(); return;
     case 'lang': {
       setLang(getLang() === 'en' ? 'ko' : 'en');
       applyStatic();
@@ -2985,8 +2997,14 @@ async function init() {
   syncLangBtn();
   syncThemeIcon();
   bindEvents();
+  state.access = await checkAccess();
+  if (state.access.state === 'locked') return showLock(state.access.auth); // 맞는 비밀번호를 넣으면 다시 불러온다
   state.mode = await detectMode();
   await poll({ force: true });
+  if (state.access.state === 'unprotected') {
+    toast({ title: L('비밀번호를 정했지만 이 웹 서버는 기록을 막지 않습니다'), tone: 'red', sticky: true,
+      meta: L('data/ 폴더를 누구나 읽을 수 있습니다 — .htaccess 를 읽는 Apache 서버에 올리거나 devtrack serve 로 여세요') });
+  }
   setInterval(() => { if (!document.hidden) poll(); }, POLL_MS);
   // 다른 탭에 있다가 돌아오면 다음 폴링을 기다리지 않고 바로 확인
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });

@@ -11,6 +11,9 @@ API
   POST /api/tasks/<T>/cancel                     {reason}
   POST /api/tasks/<T>/complete                   {note}   끝나지 않은 작업을 사용자가 완료로 처리
   POST /api/tasks/<T>/delete                     {confirm: "<작업 ID>"}  (ID 가 일치해야 삭제)
+
+웹 비밀번호(devtrack password)가 있으면 data/ · api/ 는 비밀번호를 넣은 브라우저의 쿠키가 있어야 열린다 (access.py).
+/auth.json 은 비밀번호가 있는지와, 화면이 비밀번호를 물을 때 쓰는 값(salt · 반복 횟수)을 준다.
 """
 
 import http.server
@@ -24,7 +27,7 @@ import threading
 import urllib.parse
 import webbrowser
 
-from . import DevTrackError, __version__
+from . import DevTrackError, __version__, access
 from .store import USER
 
 TEXT_TYPES = {
@@ -67,6 +70,21 @@ def make_handler(store, web_root, verbose=False):
             parts = [x for x in rel.split("/") if x and x not in (".", "..") and not x.startswith(".")]
             return os.path.join(base, *parts)
 
+        # ------------------------------------------------------------ 웹 비밀번호
+        def _authorized(self):
+            try:
+                auth = store.auth()
+            except DevTrackError:
+                return False  # 망가진 설정 — 풀린 채로 두지 않고 막는다 (devtrack password 로 다시 정하면 열림)
+            return not auth or access.cookie_ok(self.headers.get("Cookie"), auth)
+
+        def send_head(self):  # GET · HEAD 의 정적 파일 — data/ 는 비밀번호를 넣은 브라우저만
+            p = urllib.parse.urlsplit(self.path).path
+            if (p == "/data" or p.startswith("/data/")) and not self._authorized():
+                self.send_error(403, "Password required")
+                return None
+            return super().send_head()
+
         def list_directory(self, path):
             self.send_error(404, "Not Found")
             return None
@@ -93,8 +111,18 @@ def make_handler(store, web_root, verbose=False):
         # ------------------------------------------------------------ API
         def do_GET(self):
             path = urllib.parse.urlsplit(self.path).path
+            if path == "/auth.json":
+                try:
+                    auth = store.auth()
+                except DevTrackError as e:
+                    return self._json({"error": str(e)}, 500)
+                return self._json(access.site_info(auth))
             if path == "/api/health":
-                return self._json({"ok": True, "mode": "live", "version": __version__, "data": data_root})
+                ok = self._authorized()
+                return self._json(dict({"ok": True, "mode": "live", "version": __version__, "locked": not ok},
+                                       **({"data": data_root} if ok else {})))
+            if path.startswith("/api/") and not self._authorized():
+                return self._json({"error": "비밀번호가 필요합니다 — 화면을 새로고침해 비밀번호를 넣으세요"}, 403)
             if path == "/api/agents":
                 # 지금 웹 입력을 기다리는 AI (devtrack inbox --wait · devtrack watch) — 대기 중인 작업 화면에 표시
                 return self._json({"listeners": store.listeners()})
@@ -104,6 +132,8 @@ def make_handler(store, web_root, verbose=False):
 
         def do_POST(self):
             path = urllib.parse.urlsplit(self.path).path.rstrip("/")
+            if not self._authorized():
+                return self._json({"error": "비밀번호가 필요합니다 — 화면을 새로고침해 비밀번호를 넣으세요"}, 403)
             try:
                 body = self._body()
                 with write_lock:
@@ -200,8 +230,15 @@ def serve(store, web_root, host="127.0.0.1", port=8765, open_browser=False, verb
     httpd = _Server((host, port), make_handler(store, web_root, verbose=verbose))
     url = "http://{}:{}/".format("localhost" if host in ("127.0.0.1", "0.0.0.0", "") else host, port)
     sys.stderr.write("DevTrack 서버 실행 중: {}\n  데이터: {}\n  종료: Ctrl+C\n".format(url, store.root))
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        sys.stderr.write("  ⚠ 인증 기능이 없으므로 신뢰할 수 있는 네트워크에서만 외부 바인딩하세요.\n")
+    try:
+        locked = bool(store.auth())
+    except DevTrackError as e:
+        locked = True
+        sys.stderr.write("  ⚠ {} — 고칠 때까지 기록을 열지 않습니다.\n".format(e))
+    if locked:
+        sys.stderr.write("  웹 비밀번호: 켜짐 (devtrack password)\n")
+    elif host not in ("127.0.0.1", "localhost", "::1"):
+        sys.stderr.write("  ⚠ 웹 비밀번호가 없으므로 신뢰할 수 있는 네트워크에서만 외부 바인딩하세요 (devtrack password).\n")
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

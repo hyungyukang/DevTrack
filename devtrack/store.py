@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
-from . import DevTrackError, gitops, manuscript, models
+from . import DevTrackError, access, gitops, manuscript, models
 
 # 데모 데이터 생성 시 시간을 조작하기 위한 훅 (callable -> datetime)
 _clock = None
@@ -515,7 +515,7 @@ class Store:
                 if got:
                     fcntl.flock(fh, fcntl.LOCK_UN)
 
-    def _write_json(self, path, obj):
+    def _write_json(self, path, obj, mode=0o644):
         d = os.path.dirname(path)
         os.makedirs(d, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=d)
@@ -523,12 +523,12 @@ class Store:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(obj, fh, ensure_ascii=False, indent=2)
                 fh.write("\n")
+            _chmod(tmp, mode)
             os.replace(tmp, path)
         except BaseException:
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
-        _chmod(path, 0o644)
 
     def task_dir(self, tid):
         return os.path.join(self.tasks_dir, normalize_task_id(tid))
@@ -2535,12 +2535,47 @@ class Store:
     def publish(self, web_root, dest):
         dest = os.path.abspath(os.path.expanduser(dest))
         self.ensure()
+        auth = self.auth()  # 망가진 비밀번호 설정이면 공개하기 전에 멈춘다
+        os.makedirs(dest, exist_ok=True)
+        if auth:  # 기록을 복사하기 전에 막는다
+            access.write_site(dest, auth)
         mirror_tree(web_root, dest)
         write_versioned_index(web_root, dest)
         mirror_tree(self.root, os.path.join(dest, "data"))
         for tid in self.task_ids():
             _mirror_paper(self.task_dir(tid), os.path.join(dest, "data", "tasks", tid))
+        self.sync_access(dest)
         return dest
+
+    # ------------------------------------------------------------------ 웹 접근 비밀번호 (access.py)
+    def auth(self):
+        """비밀번호 설정 (없으면 None, 망가졌으면 DevTrackError)."""
+        return access.load(self.root)
+
+    def set_password(self, password):
+        a = access.new_auth(password)
+        a["set_at"] = now()
+        with self.locked():  # 웹 서버가 읽을 일이 없으므로 나만 읽게
+            self._write_json(os.path.join(self.root, access.AUTH_FILE), a, mode=0o600)
+        return a
+
+    def clear_password(self):
+        path = os.path.join(self.root, access.AUTH_FILE)
+        with self.locked():
+            if not os.path.exists(path):
+                return False
+            os.remove(path)
+        return True
+
+    def sync_access(self, dest=None):
+        """비밀번호 설정을 웹 쪽 파일에 맞춘다 — 기록 폴더의 .htaccess (기록 폴더가 웹에서 바로 열리는 곳이어도 막히게)와
+        공개 폴더(dest 또는 publish_dir)의 auth.json · data/.htaccess. 손댄 파일 목록."""
+        auth = self.auth()
+        changed = [access.write_htaccess(self.root, auth)]
+        target = dest or self.publish_dir
+        if target:
+            changed += access.write_site(target, auth)
+        return sorted(set(p for p in changed if p))
 
 
 def _norm_review_plan(plan, task_type=None):

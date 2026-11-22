@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-from . import DevTrackError, __version__, gitops, models
+from . import DevTrackError, __version__, access, gitops, models
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
@@ -1849,7 +1849,64 @@ def cmd_publish(store, args):
         raise DevTrackError("배포할 디렉토리를 --to 로 지정하거나 devtrack config publish <폴더> 로 정해 두세요 "
                             "($DEVTRACK_PUBLISH_DIR 도 됨)")
     path = store.publish(WEB_ROOT, dest)
-    _out(args, {"published": path}, "배포 완료: {}".format(path))
+    _out(args, {"published": path, "password": bool(store.auth())},
+         "배포 완료: {}{}".format(path, " (비밀번호 보호)" if store.auth() else ""))
+
+
+def _read_password(args):
+    if args.stdin:
+        pw = sys.stdin.readline().rstrip("\r\n")
+    else:
+        if not sys.stdin.isatty():
+            raise DevTrackError("비밀번호는 터미널에서 직접 입력하세요 (스크립트에서는 --stdin 으로 표준입력의 첫 줄을 씀)")
+        import getpass
+        pw = getpass.getpass("웹 비밀번호 ({}자 이상): ".format(access.MIN_LENGTH))
+        if pw and getpass.getpass("한 번 더: ") != pw:
+            raise DevTrackError("두 입력이 다릅니다 — 바꾸지 않았습니다")
+    if not pw:
+        raise DevTrackError("비밀번호를 입력하지 않았습니다 — 바꾸지 않았습니다")
+    return pw
+
+
+def cmd_password(store, args):
+    dest = publish_location(store.root)[0]
+    if args.off and args.status:
+        raise DevTrackError("--off 와 --status 는 함께 쓸 수 없습니다")
+    if args.status:
+        a = store.auth()
+        info = {"password": bool(a), "set_at": (a or {}).get("set_at"), "publish": dest}
+        if not a:
+            return _out(args, info, "웹 비밀번호 없음 — 공개 폴더의 웹은 주소를 아는 누구나 볼 수 있습니다 (정하기: devtrack password)")
+        return _out(args, info, "웹 비밀번호 켜짐 (정한 때: {}){}".format(
+            a.get("set_at") or "?", "" if dest else "\n  공개 폴더가 정해지지 않았습니다 — devtrack publish --to <폴더> 할 때 반영됩니다"))
+    if args.off:
+        had = store.clear_password()
+        files = store.sync_access(dest)
+        _out(args, {"password": False, "removed": files},
+             "웹 비밀번호를 풀었습니다{}".format("" if had else " (원래 없었음)"))
+        sys.stdout.flush()
+        if had and not args.json:
+            _info("⚠ 이제 공개 폴더의 웹은 주소를 아는 누구나 볼 수 있습니다")
+        return
+    try:
+        had = bool(store.auth())
+    except DevTrackError:
+        had = True  # 망가진 설정 — 새로 정해서 고친다
+    store.set_password(_read_password(args))
+    files = store.sync_access(dest)
+    _out(args, {"password": True, "files": files, "publish": dest},
+         "웹 비밀번호를 {}습니다 (비밀번호 자체는 저장하지 않음)".format("바꾸었" if had else "정했"))
+    sys.stdout.flush()
+    if args.json:
+        return
+    if dest:
+        _info("  공개 폴더 반영: {}".format(dest))
+    else:
+        _info("  공개 폴더가 정해지지 않았습니다 — devtrack publish --to <폴더> 할 때 반영됩니다")
+    _info("  사이트를 열면 비밀번호를 묻습니다. 한 번 넣은 브라우저는 쿠키 · 사이트 데이터를 지울 때까지 다시 묻지 않습니다.")
+    if had:
+        _info("  전에 비밀번호를 넣은 브라우저도 새 비밀번호를 다시 넣어야 합니다.")
+    _info("  기록(data/)을 막는 것은 웹 서버입니다: Apache(.htaccess) 와 devtrack serve. 다른 웹 서버에서는 화면에 경고가 나옵니다.")
 
 
 def cmd_demo(store, args):
@@ -2178,6 +2235,13 @@ def build_parser():
 
     sp = add("publish", cmd_publish, "정적 웹사이트 배포 (예: 웹 서버의 공개 폴더)")
     sp.add_argument("--to", metavar="DIR", help="배포 디렉토리 (기본: $DEVTRACK_PUBLISH_DIR > devtrack config publish)")
+
+    sp = add("password", cmd_password,
+             "웹 비밀번호 정하기 · 바꾸기 — 비밀번호를 넣은 브라우저만 기록을 봄 (정적 웹: Apache .htaccess, devtrack serve)",
+             epilog="예: devtrack password   ·   devtrack password --status   ·   devtrack password --off")
+    sp.add_argument("--off", action="store_true", help="비밀번호 풀기 (공개 폴더의 웹을 다시 누구나 볼 수 있게)")
+    sp.add_argument("--status", action="store_true", help="비밀번호가 걸려 있는지 보기")
+    sp.add_argument("--stdin", action="store_true", help="비밀번호를 표준입력의 첫 줄에서 읽기 (묻지 않음)")
 
     sp = add("demo", cmd_demo, "예시 데이터 생성")
     sp.add_argument("--force", action="store_true", help="기존 데이터 디렉토리를 비우고 생성")

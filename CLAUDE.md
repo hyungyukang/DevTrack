@@ -60,6 +60,12 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   DevTrack 이 관리하는 폴더라 없는 파일은 지우고, 공개 폴더도 `_mirror_paper` 로 맞춘다. `devtrack paper <T>` 는 다시 만들기 · 빠진 그림 확인
 - diff 범위: `gitops.capture_changes` 가 빌드 결과물(CMake 빌드 폴더 · CMakeFiles · 오브젝트 · 실행 파일 등)을 빼고 `paths` · `excluded` 를 돌려준다.
   커밋(`commit_and_push(paths=)`)도 그 파일만. `snapshot_tree` 는 임시 index 로 트리를 만들어 차례 사이 diff · 리뷰 후 변경 확인에 쓴다 (사용자 index 는 건드리지 않음)
+- 웹 비밀번호: `devtrack/access.py` (`devtrack password`) — 기록 폴더 `.auth.json`(salt · 반복 · 열쇠의 SHA-1, 비밀번호 · 열쇠는 저장 안 함),
+  공개 폴더 `auth.json`(비밀번호 없으면 `password: false`) · `data/.htaccess`(Apache `Require expr` 가 쿠키 `devtrack_key` 의 sha1 확인 —
+  OLCF users.nccs.gov 에서 동작 확인, `Header` · `Expires` 와 달리 `Require` 는 허용됨).
+  `Store.sync_access` · `publish` 가 맞추고, `server.py` 가 같은 쿠키로 `data/` · `api/` 를 막는다(망가진 설정이면 닫힘). 웹 `lock.js` 가 PBKDF2(WebCrypto)로
+  열쇠를 만들어 쿠키(https · localhost 는 `SameSite=None; Secure` — sandbox iframe 의 HTML 결과물이 옆 파일을 부를 때 필요)에 둔다.
+  열쇠 계산(`derive_key` ↔ `deriveKey`, NFC)은 두 쪽을 함께 고칠 것. 쿠키 없이 data/ 가 열리면 '보호가 동작하지 않음' 경고
 - `devtrack/latex.py` LaTeX 컴파일 · 로그 분석 (`Store.record_build` 로 기록)
 - `devtrack/pdf.py` Markdown → PDF (web/vendor 렌더러 + 헤드리스 Chrome 인쇄, `review --pdf` · `devtrack pdf`)
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
@@ -110,5 +116,8 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
 - 기록 위치 변경 후: `XDG_CONFIG_HOME=<임시>` 로 실제 `~/.config` 를 건드리지 않고 `config data` · `config publish` →
   환경 변수 없이 `new` 가 그곳에 쓰고 공개 폴더로 반영되는지, 훅(`bin/devtrack-hook`)이 그곳의 취소를 보는지, `$DEVTRACK_DATA` 가 다르면
   `config` 가 경고하는지, `--data` 로 연 폴더에서는 공개 · 경고가 꺼지는지 본다.
+- 웹 비밀번호 변경 후: 임시 데이터에 `echo '<비밀번호>' | devtrack --data <임시> password --stdin` → `serve` 에서 curl 로 쿠키 없이 403 ·
+  `access.derive_key` 로 만든 쿠키로 200 · POST 403, 웹은 잠금 화면 → 틀린 비밀번호 · 맞는 비밀번호 → 다시 열 때 안 묻는지 · **잠그기**.
+  `publish --to` 한 폴더를 `python3 -m http.server`(.htaccess 무시)로 열면 경고가 나오는지. 실제 Apache 는 `~/www` 아래 임시 폴더에 데모를 공개해 보고 지운다.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

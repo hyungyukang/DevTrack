@@ -258,7 +258,7 @@ main { padding: 26px 32px 72px; min-width: 0; width: 100%; max-width: 1320px; }
 .alert-body { flex: 1; min-width: 0; }
 .alert-body p { margin: 2px 0 0; color: var(--text-2); }
 
-input[type="text"], input[type="search"], select, textarea {
+input[type="text"], input[type="search"], input[type="password"], select, textarea {
   width: 100%; border: 1px solid var(--border-strong); background: var(--surface); border-radius: var(--radius-sm);
   padding: 8px 11px; outline: none; transition: border-color .12s, box-shadow .12s; }
 textarea { resize: vertical; min-height: 76px; line-height: 1.5; }
@@ -1111,3 +1111,25 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .timeline .msg-box.agent-msg { white-space: pre-line; font-size: 13px; }
 .review-fields .review-same { margin-top: 10px; }
 .review-fields .review-same[hidden] { display: none !important; }
+
+/* 웹 비밀번호 (lock.js) — 비밀번호를 넣기 전에는 화면 틀도 감춘다 */
+body.locked .app, body.locked #toasts, body.locked #notif-dd { display: none; }
+#lock-root { display: none; }
+body.locked #lock-root { display: flex; min-height: 100vh; min-height: 100dvh; align-items: center; justify-content: center;
+  padding: 24px 16px; box-sizing: border-box; }
+.lock-card { width: 100%; max-width: 380px; padding: 24px 24px 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); box-sizing: border-box; }
+.lock-card .lock-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.lock-card .lock-brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+.lock-card h1 { font-size: 19px; margin: 0 0 4px; }
+.lock-card .lock-sub { margin: 0 0 18px; color: var(--text-2); font-size: 13.5px; }
+.lock-card .lock-go { width: 100%; justify-content: center; margin-bottom: 14px; }
+.lock-card .form-note { color: var(--text-3); margin: 0 0 14px; }
+.lock-error { display: flex; gap: 6px; align-items: flex-start; color: var(--red); font-size: 13px; margin: -6px 0 12px; }
+.lock-error .icon { width: 14px; height: 14px; margin-top: 2px; flex: none; }
+/* 사이드바 아래: 잠그기 · 보호가 동작하지 않는다는 경고 */
+.sidebar-foot .lock-btn { display: flex; width: fit-content; align-items: center; gap: 5px; margin-top: 8px; padding: 3px 8px; border: 1px solid var(--border);
+  border-radius: 99px; background: none; color: var(--text-3); font: inherit; font-size: 12px; cursor: pointer; }
+.sidebar-foot .lock-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+.sidebar-foot .lock-btn .icon, .sidebar-foot .lock-warn .icon { width: 13px; height: 13px; }
+.sidebar-foot .lock-warn { display: flex; gap: 5px; align-items: center; margin-top: 8px; color: var(--red); font-weight: 600; }

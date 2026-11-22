@@ -97,6 +97,7 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `web/` | 대시보드. 빌드 없는 정적 HTML/JS — 그대로 정적 호스팅 가능 |
 | `devtrack serve` | 로컬 웹 서버. 웹에서 바로 승인 · 피드백 · 작업 지시 저장 |
 | `devtrack publish` | 웹 + 데이터를 정적 디렉토리(예: 웹 서버의 공개 폴더)로 배포 |
+| `devtrack password` | 웹에 비밀번호 걸기. 비밀번호를 넣은 브라우저만 기록을 읽음 (Apache `.htaccess` 와 `devtrack serve` 가 막음) |
 | `devtrack config` | 기록 폴더 · 웹 공개 폴더 확인 · 설정. `devtrack config data <폴더>` 로 정하면 어느 터미널 · 프로그램에서 실행하든 같은 곳에 기록 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
@@ -159,7 +160,8 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 화면 우측 상단의 표시(`실시간 · 로컬 서버` / `정적 · 읽기 전용`)로 현재 모드를 알 수 있습니다.
 
 > ⚠️ 공개 폴더에 올라간 내용(코드 diff, 리포트, 로그)은 URL 을 아는 누구나 볼 수 있습니다.
-> 민감한 내용이 있다면 접근 제한이 가능한 위치를 사용하세요.
+> `devtrack password` 로 비밀번호를 거세요. 브라우저마다 한 번 묻고, 비밀번호 없이는 웹 서버(Apache `.htaccess`)가 데이터를 내주지 않습니다.
+> `.htaccess` 를 읽지 않는 서버에서는 데이터가 아직 공개되어 있다고 화면에 경고가 나옵니다 ([사용 방법 10-7](web/guide.md#10-7-정적-웹에-비밀번호-걸기-권장)).
 
 HPC 같은 원격 서버에서 쓰는 방법(정적 웹, SSH 터널, tmux 로 Claude 띄워 두기)은 [사용 방법 10단계](web/guide.md#10-hpc-에서-쓰기)에 있습니다.
 

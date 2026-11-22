@@ -499,7 +499,7 @@ The module names, paths and login addresses below are examples; adjust them for 
 | Where you look | The address of the HPC system's public web folder (e.g. `~/www`) | `localhost` in your own browser (through a tunnel) |
 | Approvals · instructions | Paste the message the web creates into the Claude conversation on the HPC system | Saved directly from the web — the waiting Claude starts right away |
 | How long it runs | Always (updated every time something is recorded) | Only while you use the web |
-| Caution | Anyone who knows the address can see it | While it runs, other users on the same login node can connect too |
+| Caution | Anyone who knows the address can see it — you can set a password ([10-7](#/guide/s10-7)) | While it runs, other users on the same login node can connect too (the same password blocks them) |
 
 We recommend following progress on the static web and turning on the live mode briefly only when you give instructions or approve.
 If this is your first time, follow 10-1 → 10-3 → 10-4 → 10-5 in order (10-2 only when you move records from your own computer).
@@ -700,9 +700,31 @@ The Claude in tmux keeps waiting, so next time start again from ②. While the s
   Copy it and paste it into the Claude conversation on the HPC system (the tmux screen, 10-4).
 - **Web instructions cannot wake Claude:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)).
 - **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
-  and PR reviews. Use a location with access control for sensitive work.
+  and PR reviews. Set a password ([10-7](#/guide/s10-7)).
 - **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
   If the HPC system lacks them, only that step is skipped; the Markdown reports and manuscripts still show.
+
+### 10-7. Put a password on the static web (recommended)
+
+Anyone who knows the address can open the public web folder. With a password, the site asks for it when opened, and only browsers that entered it can see the records.
+
+```bash
+devtrack password            # set or change the password (8+ characters, typed twice)
+devtrack password --status   # check whether one is set
+devtrack password --off      # remove it
+```
+
+- **Enter it once:** a browser that entered the password does not ask again until you clear its cookies and site data.
+  On a shared computer, press **Lock** at the bottom of the sidebar when you are done.
+- **Takes effect right away:** if a publish folder is set (`devtrack config publish`), it is updated on the spot. Otherwise it takes effect at the next `devtrack publish --to <folder>`.
+  After you change the password, every browser has to enter the new one.
+- **The web server blocks the records:** it is not just the screen. Opening a file under `data/` by its address without the password gives 403.
+  The Apache web server reads `data/.htaccess` in the publish folder and blocks it. Neither the password nor the key made from it is stored anywhere; only a value for checking is kept.
+  `devtrack serve` in the live mode ([10-5](#/guide/s10-5)) asks for the same password, so other users on the same login node cannot get in either.
+- **Web servers that do not read `.htaccess`** (nginx, GitHub Pages, etc.) leave `data/` open. The site then shows a
+  **Password protection is not working** warning. The data is public, so host it elsewhere or use the live mode.
+- **If you are setting it for the first time after updating DevTrack,** run `devtrack publish` once so the web page files are copied again ([10-1](#/guide/s10-1)).
+- If the publish folder already has a `data/.htaccess` that DevTrack did not make, DevTrack stops instead of overwriting it. Move that file and run again.
 
 ## 11. Using it with Codex (optional)
 
@@ -906,6 +928,7 @@ Commands you use yourself:
 | `devtrack serve --open` | Open the web dashboard (local) |
 | `devtrack config` | Show the records folder and the publish folder. Set them with `config data <folder>` · `config publish <folder>`, remove a setting with `--unset` (step 3, 10-1) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
+| `devtrack password` | Set or change the web password (`--status` to check, `--off` to remove, 10-7) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |

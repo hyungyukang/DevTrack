@@ -105,6 +105,7 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `web/` | The dashboard. Static HTML/JS with no build step, so it can be hosted as is |
 | `devtrack serve` | Local web server. Approvals, feedback and new tasks from the web are saved directly |
 | `devtrack publish` | Publishes the dashboard and the data to a static directory (e.g. a web server's public folder) |
+| `devtrack password` | Puts a password on the web. Only browsers that entered it can read the records (Apache `.htaccess` and `devtrack serve` enforce it) |
 | `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
@@ -169,7 +170,8 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 The badge at the top right (`Live · local server` / `Static · read-only`) shows the current mode.
 
 > ⚠️ Anything in a published folder (code diffs, reports, logs) can be seen by anyone who knows the URL.
-> If it contains sensitive material, use a location where access can be restricted.
+> Set a password with `devtrack password`: the site asks for it once per browser, and the web server (Apache `.htaccess`) refuses the data without it.
+> On a server that ignores `.htaccess` the site warns you that the data is still public ([Guide 10-7](web/guide.en.md#10-7-put-a-password-on-the-static-web-recommended)).
 
 Running DevTrack on a remote server such as an HPC system (static web, SSH tunnel, Claude in tmux): [Guide step 10](web/guide.en.md#10-using-devtrack-on-an-hpc-system).
 
