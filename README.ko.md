@@ -98,6 +98,7 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `devtrack serve` | 로컬 웹 서버. 웹에서 바로 승인 · 피드백 · 작업 지시 저장 |
 | `devtrack publish` | 웹 + 데이터를 정적 디렉토리(예: 웹 서버의 공개 폴더)로 배포 |
 | `devtrack password` | 웹에 비밀번호 걸기. 비밀번호를 넣은 브라우저만 기록을 읽음 (Apache `.htaccess` 와 `devtrack serve` 가 막음) |
+| `devtrack mailbox` | GitHub 비공개 저장소의 이슈를 우편함으로: 정적 웹에서 이슈로 보낸 지시 · 메시지 · 승인을 기다리던 `watch` · 대기 모드가 받아 기록 |
 | `devtrack config` | 기록 폴더 · 웹 공개 폴더 확인 · 설정. `devtrack config data <폴더>` 로 정하면 어느 터미널 · 프로그램에서 실행하든 같은 곳에 기록 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
@@ -155,7 +156,7 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 | | 로컬 서버 모드 (`devtrack serve`) | 정적 모드 (웹 공개 폴더) |
 |---|---|---|
 | 진행 상황 · 알림 보기 | ✅ 자동 갱신 | ✅ 자동 갱신 |
-| 승인 · 피드백 · 작업 지시 | 웹에서 바로 저장 | Claude 세션에 붙여넣을 **메시지/명령이 생성됨** |
+| 승인 · 피드백 · 작업 지시 | 웹에서 바로 저장 | Claude 세션에 붙여넣을 **메시지/명령이 생성됨** — 또는 **GitHub 이슈로 보내면** DevTrack 이 받아 처리 (`devtrack mailbox`, [사용 방법 10-8](web/guide.md#10-8-정적-웹에서-github-이슈로-지시-보내기-우편함)) |
 
 화면 우측 상단의 표시(`실시간 · 로컬 서버` / `정적 · 읽기 전용`)로 현재 모드를 알 수 있습니다.
 

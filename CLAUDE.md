@@ -71,6 +71,13 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
 - 문서 리뷰(`docreview`): 원본은 결과물 분류 `source`, 리뷰 결과는 코드 리뷰와 같은 `t["review"]` 에 `doc` · `checks` · `strengths`, 항목의 `location` · `quote` · `suggestion`.
   `verdict` 는 `DOC_VERDICTS`. 웹 `viewDocReview` · `docReviewPanel`, 코드 리뷰 화면은 `codeReviews()` 로 문서 리뷰를 뺀다
+- GitHub 이슈 우편함: `devtrack/mailbox.py` (`devtrack mailbox`) — 정적 웹 보내기 창의 'GitHub 이슈로 보내기'(app.js `ghIssueBlock`, 정적 모드 ·
+  `index.json` 의 `mailbox` 가 있을 때만)가 붙여 넣기 메시지를 본문으로 새 이슈 주소를 연다 (7000자 넘으면 본문은 클립보드, `devtrack-paste-here`).
+  `watch` · `inbox --wait` 의 `on_tick` 이 `Poller` 로 `.agent/mailbox-state.json` 의 시각을 보고 한 프로세스만 확인 → `parse_issue` · `parse_comment`
+  (붙여 넣기 메시지 `[DevTrack …]` · 제목 `T-0041 …` · `이름: 값` 머리말 · 라벨) → `apply` 가 서버 POST 와 같은 Store 호출. **본인 계정의 글만**,
+  삭제는 거절, 새 작업 이슈 = 그 작업의 대화(댓글 → 메시지 · `승인 A-1` …, 승인 요청 🔔, 끝나면 닫음). 우리 답글은 `BOT_MARK` 로 건너뜀(토큰이 사용자 것).
+  설정은 기록 폴더 `.mailbox.json`(저장소 · 계정), 토큰은 `~/.config/devtrack/github-token`(0600) · `$DEVTRACK_GITHUB_TOKEN` — 기록 폴더에 두지 말 것.
+  웹의 붙여 넣기 메시지 형식을 바꾸면 `mailbox._paste` 도 함께 고칠 것
 - 마크다운 리포트 안의 그림 · 링크: 결과물은 `artifacts/F-<n>_<이름>` 으로 저장되므로 `![](fig.png)` 같은 상대 경로는 그대로면 깨진다.
   `renderMarkdown(…, { resolveFile })` (viewers.js `linkLocalFiles`) 가 app.js `resolveFile` 로 같은 이름의 결과물(index.json `filename` = 올릴 때 이름,
   없던 기록은 `_safe_name` 과 같은 `safeName`)에 잇는다 — 이름 정리 규칙은 두 쪽을 함께 고칠 것. `devtrack pdf` 는 `<base>` 를 원본 .md 폴더로 둔다
@@ -122,5 +129,10 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
 - 웹 비밀번호 변경 후: 임시 데이터에 `echo '<비밀번호>' | devtrack --data <임시> password --stdin` → `serve` 에서 curl 로 쿠키 없이 403 ·
   `access.derive_key` 로 만든 쿠키로 200 · POST 403, 웹은 잠금 화면 → 틀린 비밀번호 · 맞는 비밀번호 → 다시 열 때 안 묻는지 · **잠그기**.
   `publish --to` 한 폴더를 `python3 -m http.server`(.htaccess 무시)로 열면 경고가 나오는지. 실제 Apache 는 `~/www` 아래 임시 폴더에 데모를 공개해 보고 지운다.
+- GitHub 우편함 변경 후: 가짜 GitHub 서버(`$DEVTRACK_GITHUB_API`, `/user` · `/repos/o/r` · issues · comments · labels · reactions 흉내)와
+  `XDG_CONFIG_HOME=<임시>` 로 `echo <토큰> | devtrack --data <임시> mailbox o/r --stdin` → 손으로 쓴 이슈 · 붙여 넣기 형식 · `T-0001 메시지` ·
+  `T-0001 A-1 승인` · 삭제(거절) · 다른 계정(건너뜀) · 대화 이슈 댓글(메시지 · `승인 A-1` · `완료`) → `mailbox --check` 와 답글 · 닫힘을 본다.
+  웹은 `publish --to` 한 정적 폴더에서 보내기 창의 버튼이 연 주소를 그대로 가짜 서버에 이슈로 넣어 폼 값이 그대로 돌아오는지(왕복), 긴 지시의
+  붙여 넣을 자리, 실시간(`serve`)에는 버튼이 없는지 본다. `inbox --wait` 두 개를 함께 켜 이슈가 한 번만 들어오는지도.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

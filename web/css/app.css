@@ -994,6 +994,8 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .modal .m-body { padding: 18px 20px; }
 .modal .m-body p { margin: 0 0 12px; color: var(--text-2); }
 .modal .m-foot { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+.gh-send { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 12px 0 16px; }
+.gh-send .hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.55; }
 .copy-block { position: relative; margin-bottom: 14px; }
 .copy-block pre { margin: 0; padding: 12px 14px; padding-right: 76px; background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }

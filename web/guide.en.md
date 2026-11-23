@@ -700,7 +700,8 @@ The Claude in tmux keeps waiting, so next time start again from ②. While the s
 
 - **Approvals and instructions by pasting:** the Approve, Message, New task, Mark as done, Cancel and Delete buttons show a **message for Claude**.
   Copy it and paste it into the Claude conversation on the HPC system (the tmux screen, 10-4).
-- **Web instructions cannot wake Claude:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)).
+- **Web instructions cannot wake Claude directly:** the static web cannot write records, so an instruction sent from the web cannot wake a waiting Claude by itself. To instruct directly from the web, turn on the live mode ([10-5](#/guide/s10-5)),
+  or turn on the **GitHub issue mailbox** ([10-8](#/guide/s10-8)) and use **Send as a GitHub issue** in the send window from anywhere.
 - **⚠️ Who can see it:** anyone who knows the address can see the contents of the published directory. This includes code diffs, reports, logs, **unpublished paper manuscripts and analysis figures**,
   and PR reviews. Set a password ([10-7](#/guide/s10-7)).
 - **PDF · LaTeX:** review report PDFs need a Chrome-family browser, and paper compilation needs TeX.
@@ -727,6 +728,119 @@ devtrack password --off      # remove it
   **Password protection is not working** warning. The data is public, so host it elsewhere or use the live mode.
 - **If you are setting it for the first time after updating DevTrack,** run `devtrack publish` once so the web page files are copied again ([10-1](#/guide/s10-1)).
 - If the publish folder already has a `data/.htaccess` that DevTrack did not make, DevTrack stops instead of overwriting it. Move that file and run again.
+
+### 10-8. Send instructions from the static web as GitHub issues (mailbox)
+
+The static web (e.g. `users.nccs.gov`) cannot write records, so an instruction sent from it never reaches the HPC system.
+If you use the **issues of a private GitHub repository as a mailbox**, you can send instructions, messages and approvals from the static web anywhere, including your phone.
+The live mode (localhost — [10-5](#/guide/s10-5)) still saves directly from the web, so it does not need this and shows no button.
+
+> **Flow:** **Send as a GitHub issue** on the static web → a new GitHub issue, already filled in → you check it and **Submit** →
+> `devtrack watch` · wait mode on the HPC system checks every 30 seconds and records it → Claude · Codex starts → a reply on the issue (`✅ T-0045 로 등록했습니다`)
+
+A free GitHub account is enough; nothing costs money (private repositories, the API and tokens are free; GitHub Actions is not used).
+
+**① Create the mailbox repository** (once)
+
+GitHub top right **+** → **New repository** → name `devtrack-inbox`, choose **Private** → **Create repository**. It needs no files.
+
+**② Create a token** (once — again when it expires)
+
+GitHub top-right profile picture → **Settings** → **Developer settings** at the bottom left → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
+
+| Field | Value |
+|---|---|
+| Token name | `devtrack-inbox` |
+| Expiration | any period (e.g. 1 year — when it expires, make a new one and repeat ③) |
+| Repository access | **Only select repositories** → `devtrack-inbox` |
+| Permissions → Repository permissions → **Issues** | **Read and write** (Metadata read is added automatically) |
+
+Press **Generate token** and copy the token (`github_pat_…`). You cannot see it again after leaving that page.
+The token can only handle issues of that one repository, so even if it leaks it cannot touch other repositories or code.
+
+**③ Turn on the mailbox on the HPC system**
+
+```bash
+devtrack mailbox hyungyukang/devtrack-inbox    # paste the token and press Enter (it is not shown)
+```
+
+DevTrack checks the account, that the repository is private, and the permissions, creates the `claude` · `codex` labels and saves the token in `~/.config/devtrack/github-token` (readable only by you).
+The token is never stored in the records folder (which is published on the web). With a publish folder set, the button appears on the static web right away (otherwise after `devtrack publish`).
+**If you are turning it on for the first time after updating DevTrack,** run `devtrack publish` once so the web page files are copied again ([10-1](#/guide/s10-1)).
+
+**④ Keep the receiving AI running** — the waiting processes check the mailbox every 30 seconds. Keep them in tmux ([10-4](#/guide/s10-4)).
+
+```bash
+devtrack watch --claude      # handles instructions for Claude
+devtrack watch --codex       # handles instructions for Codex (another window)
+```
+
+An interactive Claude told to "wait for web instructions" (`devtrack inbox --wait`) checks it the same way. Even with several of them running, each issue is taken only once.
+
+**⑤ Send**
+
+1. On the static web, press **New task** (or Message, Approve, Request changes, Mark as done, Cancel task, Model) as usual.
+2. Press **Send as a GitHub issue** at the top of the send window: a new GitHub issue page opens, filled in with the message below it.
+3. Check it (you may edit it) and press **Submit new issue**.
+4. Within 30 seconds to a minute devtrack records it and the assigned AI starts. The issue gets a reply such as `✅ T-0045 로 등록했습니다` ("registered as T-0045" — replies are in Korean) with a link to the web.
+
+- It works the same on a phone — it opens in a browser signed in to GitHub or in the GitHub app.
+- **If the instruction is very long** it does not fit in the address, so the body is copied to the clipboard and an empty issue opens. Paste it into the body and Submit.
+  If you submit without pasting, devtrack does not take it and replies that the body is empty.
+- **Delete task** has no such button. It cannot be undone, so it is only done from the live web or the terminal.
+
+**⑥ One issue = one task (continue in comments)**
+
+An issue registered as a new task stays open until the task ends and becomes that task's conversation.
+
+| Comment on that issue | What it does |
+|---|---|
+| any text | a message to that task (e.g. "please redraw figure 2 too") |
+| `승인 A-1` or `approve A-1` (`…: looks good`) | approve request A-1 |
+| `수정 요청 A-1: <reason>` or `changes A-1: <reason>` | request changes (reason required) |
+| `거절 A-1: <reason>` or `reject A-1: <reason>` | reject |
+| `선택: R1, R3` on the second line | the picked items of an approval request with choices |
+| `완료` / `done` (`: <note>`) | mark as done |
+| `취소` / `cancel` (`: <reason>`) | cancel the task |
+
+- Comments that were taken get a 👍. If one cannot be handled, the reason is posted as a reply.
+- When the AI posts an **approval request**, a 🔔 comment on this issue says so (with how to answer).
+  These replies are posted with your own token, so GitHub treats them as your comments and sends no notification — open the issue or the static web to check.
+- When the task is done, cancelled or deleted, a last reply is posted and the issue is closed. You can also close it yourself on GitHub (no more notices after that).
+
+**You can also write on GitHub directly** (without the web, e.g. in the GitHub app on your phone)
+
+| New issue | What it does |
+|---|---|
+| title = task title, body = instruction | a new task (Claude, type Other) |
+| label `claude` · `codex`, or `담당: Codex` / `agent: Codex` at the top of the body | assigned AI |
+| `유형: analysis` / `type: analysis` at the top (`code` · `paper` · `analysis` · `docreview` · `brainstorm` …) | type |
+| `repo:` `branch:` `priority: high` `related: T-0031` `model:` `effort:` `review: Codex` at the top (Korean names work too) | those fields |
+| title `T-0041 …`, body = message | a message to that task (handled once, then closed) |
+| title `T-0041 A-2 approve` · `T-0041 done` · `T-0041 cancel` | decision · done · cancel |
+| a static-web paste message (`[DevTrack …]`) as the body | handled as is |
+
+The `name: value` lines must come first and in a row; from the first line that is not one of them, the rest is the instruction.
+The default AI for issues that name none can be changed with `devtrack mailbox <repo> --agent Codex`.
+
+**Safety**
+- Only issues and comments **written by your own GitHub account** are taken. Others' posts are skipped even if you invited them to the repository.
+- Public repositories are refused (anyone could read the instructions).
+- Only issues written after the mailbox was turned on are taken. Older issues are left alone.
+- Instructions stay on GitHub. Check your institution's rules before sending unpublished results or export-controlled code.
+
+**Check and troubleshoot**
+
+```bash
+devtrack mailbox                  # status: repository, account, last check, last error, open task issues
+devtrack mailbox --check          # check once right now
+devtrack mailbox --off            # turn off (add --forget-token to delete the saved token too)
+```
+
+- **Issues are not taken:** check that ④'s `watch` or wait mode is running and look at the last error in `devtrack mailbox`.
+  `401 Bad credentials` means the token expired or was deleted — make a new one (②) and run ③ again (the handling records stay).
+- **No button in the send window:** you are in the live mode (not needed), the mailbox is off, or the static web has old files — run `devtrack publish` once.
+- Change the check interval with `devtrack mailbox <repo> --interval 60` (default 30 seconds).
 
 ## 11. Using it with Codex (optional)
 
@@ -931,6 +1045,7 @@ Commands you use yourself:
 | `devtrack config` | Show the records folder and the publish folder. Set them with `config data <folder>` · `config publish <folder>`, remove a setting with `--unset` (step 3, 10-1) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack password` | Set or change the web password (`--status` to check, `--off` to remove, 10-7) |
+| `devtrack mailbox <owner>/<repo>` | Turn on the mailbox that receives the static web's 'Send as a GitHub issue' (status without arguments, `--check` to check now, `--off` to turn off, 10-8) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |

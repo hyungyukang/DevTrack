@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
-from . import DevTrackError, access, gitops, manuscript, models
+from . import DevTrackError, access, gitops, mailbox, manuscript, models
 
 # 데모 데이터 생성 시 시간을 조작하기 위한 훅 (callable -> datetime)
 _clock = None
@@ -2513,6 +2513,7 @@ class Store:
             "reviews": reviews,
             "artifacts": artifacts,
             "models": models.catalog(),  # 웹의 모델 선택 목록 (Codex 는 이 컴퓨터의 Codex 가 받아 둔 목록)
+            "mailbox": self.mailbox_info(),  # 정적 웹의 'GitHub 이슈로 보내기' (devtrack mailbox)
         }
         os.makedirs(self.root, exist_ok=True)
         self._write_json(self.index_path, index)
@@ -2548,6 +2549,11 @@ class Store:
         return dest
 
     # ------------------------------------------------------------------ 웹 접근 비밀번호 (access.py)
+    def mailbox_info(self):
+        """웹이 알아야 할 우편함 설정 — 저장소 이름만 (토큰은 기록 폴더에 두지 않는다)."""
+        cfg = mailbox.load_config(self.root)
+        return {"github": cfg["github"]} if cfg else None
+
     def auth(self):
         """비밀번호 설정 (없으면 None, 망가졌으면 DevTrackError)."""
         return access.load(self.root)

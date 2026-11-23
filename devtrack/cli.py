@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-from . import DevTrackError, __version__, access, gitops, models
+from . import DevTrackError, __version__, access, gitops, mailbox, models
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
@@ -936,6 +936,17 @@ def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_
         time.sleep(max(1, interval))
 
 
+def _with_mailbox(store, tick, out):
+    """기다리는 동안 GitHub 우편함도 확인한다 (설정이 없으면 하는 일 없음, 오류가 나도 대기는 계속)."""
+    box = mailbox.Poller(store, user=USER, out=out)
+
+    def run():
+        if tick:
+            tick()
+        box.maybe()
+    return run
+
+
 def _inbox_wait(store, args):
     """아직 보지 않은 사용자 입력이 생길 때까지 기다린다 (백그라운드 실행용)."""
     if args.ack:
@@ -952,7 +963,7 @@ def _inbox_wait(store, args):
     with _Listening(store, "wait", agent, task=task, seen=args.author, model=me and me[0],
                     effort=me and me[1]) as listening:
         new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval,
-                            on_tick=listening.tick, keep=keep)
+                            on_tick=_with_mailbox(store, listening.tick, _info), keep=keep)
     if new is None:
         _out(args, [])
         _info("시간 초과: 새 입력이 없습니다")
@@ -1649,10 +1660,14 @@ def cmd_watch(store, args):
               "(명령이 그 값을 써야 지정 모델로 실행됩니다)")
     # 실행기가 작업마다 지정 모델로 띄우면 어떤 지정이든 받는다 ('*')
     listening = _Listening(store, "watch", agent, seen=seen_name, model="*" if runner else None).__enter__()
+    box_tick = _with_mailbox(store, listening.tick, _stamp)
+    if mailbox.load_config(store.root):
+        _info("GitHub 우편함: {} — 기다리는 동안 확인합니다 (devtrack mailbox)".format(
+            mailbox.load_config(store.root)["github"]))
     try:
         while True:
             new = _wait_for_new(store, agent, seen_name, timeout=args.timeout, interval=args.interval,
-                                on_tick=listening.tick)
+                                on_tick=box_tick)
             if new is None:
                 _info("시간 초과: 새 입력이 없습니다")
                 return 3
@@ -1907,6 +1922,143 @@ def cmd_password(store, args):
     if had:
         _info("  전에 비밀번호를 넣은 브라우저도 새 비밀번호를 다시 넣어야 합니다.")
     _info("  기록(data/)을 막는 것은 웹 서버입니다: Apache(.htaccess) 와 devtrack serve. 다른 웹 서버에서는 화면에 경고가 나옵니다.")
+
+
+def _repo_name(value):
+    v = re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", (value or "").strip()).strip("/")
+    v = re.sub(r"\.git$", "", v)
+    if not mailbox.REPO_RE.match(v):
+        raise DevTrackError("저장소는 <계정>/<저장소> 로 적어 주세요 (예: hyungyukang/devtrack-inbox)")
+    return v
+
+
+def _read_token(args):
+    if args.stdin:
+        return sys.stdin.readline().strip(), "stdin"
+    env = os.environ.get(mailbox.TOKEN_ENV, "").strip()
+    if env:
+        return env, "$" + mailbox.TOKEN_ENV
+    saved, _ = mailbox.load_token()
+    if not sys.stdin.isatty():
+        if saved:
+            return saved, "saved"
+        raise DevTrackError("토큰은 터미널에서 직접 입력하세요 (스크립트에서는 --stdin 으로 표준입력의 첫 줄을 씀)")
+    import getpass
+    tok = getpass.getpass("GitHub 토큰 (Fine-grained, 이 저장소의 Issues 읽기 · 쓰기){}: ".format(
+        " — Enter 만 누르면 저장된 토큰" if saved else "")).strip()
+    if not tok and saved:
+        return saved, "saved"
+    if not tok:
+        raise DevTrackError("토큰을 입력하지 않았습니다 — 바꾸지 않았습니다")
+    return tok, "typed"
+
+
+def _mailbox_status(store, args):
+    cfg = mailbox.load_config(store.root)
+    if not cfg:
+        return _out(args, {"mailbox": None}, "GitHub 우편함 꺼짐 — 켜기: devtrack mailbox <계정>/<저장소>")
+    tok, src = mailbox.load_token()
+    st = mailbox.load_state(store.root)
+    threads = [(n, v["task"]) for n, v in st["issues"].items() if v.get("kind") == "thread" and not v.get("closed")]
+    last = st.get("last_poll")
+    info = {"mailbox": cfg, "token": src, "last_poll": last, "last_error": st.get("last_error"),
+            "open_threads": [{"issue": int(n), "task": t} for n, t in threads]}
+    lines = ["GitHub 우편함: {} (받는 계정: {})".format(cfg["github"], cfg.get("login") or "?"),
+             "  토큰: {}".format(src or "없음 — devtrack mailbox {} 로 다시 넣으세요".format(cfg["github"])),
+             "  확인 간격: {}초 · 마지막 확인: {}".format(
+                 cfg.get("interval") or mailbox.DEFAULT_INTERVAL,
+                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last)) if last else "아직 없음"),
+             "  새 작업의 기본 담당 AI: {}".format(cfg.get("default_agent") or "Claude")]
+    if cfg.get("site") or st.get("site"):
+        lines.append("  웹 주소 (답글의 링크): {}".format(cfg.get("site") or st.get("site")))
+    if st.get("last_error"):
+        lines.append("  ⚠ 마지막 오류: {}".format(st["last_error"]))
+    if threads:
+        lines.append("  열린 작업 이슈: " + ", ".join("#{} → {}".format(n, t) for n, t in threads))
+    lines.append("  확인은 devtrack watch · inbox --wait 가 기다리는 동안 합니다 (지금 바로: devtrack mailbox --check)")
+    return _out(args, info, "\n".join(lines))
+
+
+def cmd_mailbox(store, args):
+    if sum(1 for x in (args.repo, args.off, args.check) if x) > 1:
+        raise DevTrackError("저장소 · --off · --check 는 하나만 쓰세요")
+    if args.off:
+        had = bool(mailbox.load_config(store.root))
+        mailbox.remove_config(store.root)
+        forgot = mailbox.forget_token() if args.forget_token else False
+        store.rebuild_index()
+        store._sync_publish()
+        return _out(args, {"mailbox": None, "token_removed": forgot},
+                    "GitHub 우편함을 껐습니다{}{}".format("" if had else " (원래 꺼져 있었음)",
+                                                    " · 저장한 토큰도 지웠습니다" if forgot else ""))
+    if args.check:
+        cfg = mailbox.load_config(store.root)
+        if not cfg:
+            raise DevTrackError("GitHub 우편함이 설정되지 않았습니다 — devtrack mailbox <계정>/<저장소>")
+        r = mailbox.poll(store, cfg=cfg, user=USER, force=True) or {}
+        for line in r.get("done", []):
+            print(line)
+        if r.get("error"):
+            raise DevTrackError(r["error"])
+        if not r.get("done"):
+            print("새로 받은 것 없음 ({})".format(cfg["github"]))
+        return 0
+    if not args.repo:
+        return _mailbox_status(store, args)
+    repo = _repo_name(args.repo)
+    token, src = _read_token(args)
+    gh = mailbox.GitHub(token, repo)
+    login = (gh.user() or {}).get("login")
+    if not login:
+        raise DevTrackError("토큰으로 GitHub 계정을 확인하지 못했습니다")
+    try:
+        info = gh.repo_info() or {}
+    except mailbox.GitHubError as e:
+        if e.status == 404:
+            raise DevTrackError("{} 저장소가 없거나 이 토큰에 그 저장소 권한이 없습니다 — 토큰의 Repository access 에 이 저장소를 "
+                                "넣었는지 확인하세요".format(repo))
+        raise
+    if not info.get("private") and not args.allow_public:
+        raise DevTrackError("{} 은(는) 공개 저장소입니다 — 지시 내용이 누구에게나 보이므로 비공개 저장소를 쓰세요 "
+                            "(그래도 쓰려면 --allow-public)".format(repo))
+    if info.get("has_issues") is False:
+        raise DevTrackError("{} 의 Issues 가 꺼져 있습니다 — 저장소 Settings → Features → Issues 를 켜세요".format(repo))
+    gh.issues_since(mailbox.iso_now())  # 읽기 권한
+    try:  # 쓰기 권한 (답글 · 닫기에 필요) — 라벨을 만들어 확인한다
+        for name, color, desc in (("claude", "d97757", "DevTrack: 담당 AI Claude"),
+                                  ("codex", "10a37f", "DevTrack: 담당 AI Codex")):
+            gh.ensure_label(name, color, desc)
+    except mailbox.GitHubError as e:
+        if e.status in (401, 403):
+            raise DevTrackError("토큰에 Issues 쓰기 권한이 없습니다 — Repository permissions 의 Issues 를 'Read and write' 로 "
+                                "만든 토큰을 쓰세요")
+        raise
+    old = mailbox.load_config(store.root) or {}
+    if src in ("typed", "stdin"):
+        mailbox.save_token(token)
+    cfg = {"version": 1, "github": repo, "login": login, "since": mailbox.iso_now(),
+           "interval": args.interval or old.get("interval") or mailbox.DEFAULT_INTERVAL,
+           "default_agent": args.agent or old.get("default_agent") or "Claude"}
+    site = args.site or old.get("site")
+    if site:
+        cfg["site"] = site
+    if old.get("github") != repo:
+        mailbox.remove_config(store.root)  # 다른 저장소의 처리 기록은 버린다
+    mailbox.save_config(store.root, cfg)
+    store.rebuild_index()
+    store._sync_publish()
+    _out(args, {"mailbox": cfg, "token": "saved" if src in ("typed", "stdin") else src},
+         "GitHub 우편함을 켰습니다: {} (받는 계정: {})".format(repo, login))
+    sys.stdout.flush()
+    if args.json:
+        return 0
+    if src in ("typed", "stdin"):
+        _info("  토큰 저장: {} (나만 읽기)".format(mailbox.token_path()))
+    _info("  지금부터 {} 이(가) 쓴 이슈 · 댓글만 받습니다 (이전 이슈는 받지 않음).".format(login))
+    _info("  확인은 devtrack watch · inbox --wait 가 기다리는 동안 {}초마다 합니다 — 켜 두세요.".format(cfg["interval"]))
+    _info("  정적 웹의 보내기 창에 'GitHub 이슈로 보내기' 가 나타납니다 (공개 폴더가 정해져 있으면 바로, 아니면 devtrack publish 뒤 —\n"
+          "  DevTrack 을 업데이트한 뒤 처음이면 devtrack publish 를 한 번 실행해 웹 화면 파일도 새로 복사하세요).")
+    return 0
 
 
 def cmd_demo(store, args):
@@ -2242,6 +2394,20 @@ def build_parser():
     sp.add_argument("--off", action="store_true", help="비밀번호 풀기 (공개 폴더의 웹을 다시 누구나 볼 수 있게)")
     sp.add_argument("--status", action="store_true", help="비밀번호가 걸려 있는지 보기")
     sp.add_argument("--stdin", action="store_true", help="비밀번호를 표준입력의 첫 줄에서 읽기 (묻지 않음)")
+
+    sp = add("mailbox", cmd_mailbox,
+             "GitHub 이슈 우편함 — 정적 웹(공개 폴더)에서 'GitHub 이슈로 보내기' 한 지시 · 메시지 · 결정을 받아 기록",
+             epilog="예: devtrack mailbox hyungyukang/devtrack-inbox   ·   devtrack mailbox (상태)   ·   "
+                    "devtrack mailbox --check   ·   devtrack mailbox --off")
+    sp.add_argument("repo", nargs="?", help="우편함으로 쓸 비공개 저장소 (<계정>/<저장소>) — 토큰을 묻고 확인한 뒤 켬")
+    sp.add_argument("--stdin", action="store_true", help="토큰을 표준입력의 첫 줄에서 읽기 (묻지 않음)")
+    sp.add_argument("--interval", type=int, help="확인 간격 (초, 기본 {})".format(mailbox.DEFAULT_INTERVAL))
+    sp.add_argument("--agent", help="담당 AI 를 적지 않은 이슈의 담당 (기본 Claude)")
+    sp.add_argument("--site", help="정적 웹 주소 — 이슈 답글에 작업 링크를 붙임 (웹에서 보낸 이슈에서 저절로 알아냄)")
+    sp.add_argument("--allow-public", action="store_true", help="공개 저장소도 허용 (지시 내용이 누구에게나 보임)")
+    sp.add_argument("--check", action="store_true", help="지금 바로 한 번 확인")
+    sp.add_argument("--off", action="store_true", help="우편함 끄기")
+    sp.add_argument("--forget-token", action="store_true", help="--off 와 함께: 저장한 토큰도 지우기")
 
     sp = add("demo", cmd_demo, "예시 데이터 생성")
     sp.add_argument("--force", action="store_true", help="기존 데이터 디렉토리를 비우고 생성")
