@@ -166,6 +166,10 @@ def make_handler(store, web_root, verbose=False):
                         e = store.add_user_comment(m.group(1), body.get("message") or "",
                                                    artifact=(body.get("artifact") or "").strip() or None)
                         return self._json({"ok": True, "entry": e}, 201)
+                    m = re.match(r"^/api/tasks/(T-\d+)/note$", path)
+                    if m:  # 인계 메모를 사용자가 고침 (빈 글이면 지움)
+                        t, _ = store.set_note(m.group(1), body.get("text") or "", author=USER)
+                        return self._json({"ok": True, "note": t.get("note")})
                     m = re.match(r"^/api/tasks/(T-\d+)/model$", path)
                     if m:
                         t = store.set_model(m.group(1), (body.get("model") or "").strip() or None,

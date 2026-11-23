@@ -22,6 +22,7 @@ from . import DevTrackError, __version__, access, gitops, mailbox, models
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
+    NOTE_SOFT, NOTE_STALE,
     pid_alive,
     now as now_iso, _choice_labels,
 )
@@ -300,6 +301,10 @@ def cmd_start(store, args):
     t = store.update_task(args.task, status="in_progress", step=args.step, author=args.author,
                           claim=args.author, take=args.take)
     _out(args, t, "{} 진행 중".format(t["id"]))
+    sys.stdout.flush()
+    if not args.json:
+        for line in _related_note_lines(store, t):
+            _info(line)
 
 
 def cmd_step(store, args):
@@ -610,6 +615,7 @@ def cmd_request(store, args):
     if excluded:
         _info("빌드 결과물은 diff · 커밋에서 뺐습니다: " + gitops.excluded_text(excluded))
     _info("승인 요청 등록: {} {} — 웹에 알림으로 표시됩니다".format(normalize_task_id(args.task), ap["id"]))
+    _note_reminder(store, args.task)
     _out(args, ap, ap["id"])
 
 
@@ -757,6 +763,9 @@ def _format_inbox(items):
             if it.get("instruction"):
                 out.append(_indent(it["instruction"]))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
+            if it.get("related"):
+                out.append(_indent("→ 관련 작업 {}: 먼저 devtrack show <작업> --brief (인계 메모) 를 읽고, 리포트 · 파일은 필요한 것만"
+                                   .format(", ".join(it["related"]))))
             if rv and doc:
                 out.append(_indent("→ 원고를 다 쓰면 devtrack review-request {}{} 로 {} 에게 {}심사위원 관점의 심사를 받습니다. "
                                    "판정은 [AI 메시지] 로 오고, 고친 뒤에는 답변서와 함께 다시 요청 (--response)".format(
@@ -1258,6 +1267,9 @@ def _watch_prompt(agent, tid, items):
         "- 처리한 입력은 devtrack inbox --ack 로 처리됨 표시합니다 (이 실행에서는 {} 의 입력만 보입니다).".format(tid),
         "- 사용자 결정이 필요하면 devtrack request 로 요청을 남기고 이번 실행을 끝내세요. devtrack wait 나 "
         "devtrack inbox --wait 로 기다리지 마세요 — 결정이 오면 devtrack watch 가 다시 실행합니다.",
+        "- 다른 작업을 참고할 때는 먼저 devtrack show <작업> --brief (인계 메모)를 읽고, 리포트 · 파일은 필요한 것만 엽니다. "
+        "이 작업의 인계 메모는 단계가 끝날 때 · 승인을 요청하기 전에 devtrack note {} 로 최신으로 둡니다 "
+        "(틀: --template, 저장: devtrack note {} -).".format(tid, tid),
         "- 마지막에 무엇을 했는지 한국어로 두세 문장 요약해 주세요.",
         "",
         "[입력]",
@@ -1742,6 +1754,7 @@ def cmd_done(store, args):
         return
     t = store.update_task(args.task, status="done", message=args.message, author=args.author)
     _out(args, t, "{} 완료".format(t["id"]))
+    _note_reminder(store, t["id"])
 
 
 def _loop_state_label(loop):
@@ -1750,11 +1763,144 @@ def _loop_state_label(loop):
     return label.replace("리뷰", "심사") if loop.get("kind") == "doc" else label
 
 
+NOTE_SKIP_TYPES = ("review", "docreview")  # 리뷰 작업은 검토 항목 · 리포트가 인계 역할을 한다
+BRIEF_KINDS = ("markdown", "pdf", "html", "notebook", "latex", "docx")
+
+
+def _note_meta(t, stale=None):
+    n = t.get("note") or {}
+    return "{} · {} · {:,}자{}".format((n.get("updated_at") or "")[:16].replace("T", " "),
+                                     "사용자" if n.get("by") == USER else n.get("by") or "?", n.get("chars") or 0,
+                                     " · 그 뒤 기록 {}건".format(stale) if stale else "")
+
+
+def _print_note(store, t, indent="  "):
+    text = store.read_note(t["id"])
+    if not text:
+        return False
+    print("{}인계 메모 ({}):".format(indent, _note_meta(t, store.note_stale(t))))
+    print(_indent(text.strip(), len(indent) + 2))
+    return True
+
+
+def _note_reminder(store, tid):
+    """인계 메모가 없거나 오래됐으면 한 줄 알린다 (AI 가 다음 대화 · 다른 작업을 위해 남기게)."""
+    try:
+        t = store.load(tid)
+    except DevTrackError:
+        return
+    if t.get("type") in NOTE_SKIP_TYPES:
+        return
+    stale = store.note_stale(t)
+    if stale is None:
+        _info("💡 인계 메모가 없습니다 — 남겨 두면 다음 대화 · 이 작업을 참고하는 다른 작업이 기록 · 리포트 · 파일을 다시 뒤지지 "
+              "않습니다: devtrack note {0} --template 로 틀을 보고, 채운 글을 devtrack note {0} - (표준입력)로 저장".format(t["id"]))
+    elif stale >= NOTE_STALE:
+        _info("💡 인계 메모를 쓴 뒤 기록이 {}건 쌓였습니다 — 바뀐 결론 · 숫자 · 위치가 있으면 고쳐 두세요 "
+              "(devtrack note {} 로 보고 고친 글을 devtrack note {} -)".format(stale, t["id"], t["id"]))
+
+
+def _related_note_lines(store, t):
+    """작업을 시작할 때: 관련 작업마다 인계 메모가 있는지와 읽는 명령."""
+    out = []
+    for rid in t.get("related") or []:
+        try:
+            r = store.load(rid)
+        except DevTrackError:
+            continue
+        has = bool((r.get("note") or {}).get("updated_at"))
+        out.append("관련 작업 {} {} — {}: devtrack show {} --brief".format(
+            r["id"], r["title"], "인계 메모 있음 ({})".format(_note_meta(r)) if has else "인계 메모 없음 (요약 · 최근 기록)",
+            r["id"]))
+    if out:
+        out.append("→ 관련 작업은 먼저 --brief 로 보고, 리포트 · 파일은 필요한 것만 여세요")
+    return out
+
+
+def _show_brief(store, t):
+    """다른 작업 · 다음 대화가 이 작업을 참고할 때 먼저 읽는 짧은 보기: 상태 · 주요 결과물 · 인계 메모."""
+    print("{}  {}".format(t["id"], t["title"]))
+    print("  {} · {} · {}% · 에이전트 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
+                                             t.get("progress", 0), t.get("agent")))
+    repo = t.get("repo") or {}
+    if repo:
+        print("  저장소: {}{}".format(repo.get("path") or repo.get("url"),
+                                    " ({})".format(repo["branch"]) if repo.get("branch") else ""))
+    if t.get("related"):
+        print("  관련 작업: " + ", ".join(t["related"]))
+    if t.get("current_step"):
+        print("  현재 단계: " + t["current_step"])
+    for a in t.get("approvals", []):
+        if a["status"] == "pending":
+            print("  승인 대기: {} {}".format(a["id"], a["title"]))
+    opened = [i for i in t.get("issues", []) if i["status"] == "open"]
+    if opened:
+        print("  열린 문제: " + " · ".join("{} {}".format(i["id"], i["title"]) for i in opened[:5]))
+    docs = [a for a in t.get("artifacts", []) if a.get("kind") in BRIEF_KINDS and a.get("category") != "source"]
+    if docs:
+        print("  주요 결과물 (리포트 · 문서):")
+        for a in docs[-5:]:
+            print("    {} [{}] {}".format(a["id"], a["kind"], a["title"]))
+    print("  결과물 {}개 · 기록 {}건 — 전체: devtrack show {}".format(len(t.get("artifacts", [])), len(t.get("log", [])),
+                                                                 t["id"]))
+    if _print_note(store, t):
+        return 0
+    print("  인계 메모 없음")
+    done = (t.get("completed") or {}).get("note")
+    if done:
+        print("  완료 메모: " + done)
+    for e in t.get("log", [])[-3:]:
+        first = (e.get("message") or "").strip().split("\n")[0]
+        print("    {} [{}] {}".format(e["ts"][5:16].replace("T", " "), e["kind"], first[:160]))
+    return 0
+
+
+def cmd_note(store, args):
+    """인계 메모 보기 · 쓰기 (파일 또는 - = 표준입력) · 틀 · 지우기."""
+    t = store.load(args.task)
+    if args.template:
+        print(store.note_template(t["id"]))
+        return 0
+    if args.clear:
+        store.set_note(t["id"], "", author=args.author)
+        return _out(args, {"task": t["id"], "note": None}, "{} 인계 메모를 지웠습니다".format(t["id"]))
+    if args.file is None:
+        text = store.read_note(t["id"])
+        if args.json:
+            return _out(args, {"task": t["id"], "note": t.get("note"), "text": text})
+        if not text:
+            print("{} 인계 메모 없음 — 틀: devtrack note {} --template".format(t["id"], t["id"]))
+            return 0
+        _info("{} 인계 메모 ({})".format(t["id"], _note_meta(t, store.note_stale(t))))
+        print(text.rstrip())
+        return 0
+    if args.file == "-":
+        text = sys.stdin.read()
+    else:
+        with open(os.path.expanduser(args.file), encoding="utf-8") as fh:
+            text = fh.read()
+    if not text.strip():
+        raise DevTrackError("메모가 비어 있습니다 — 지우려면 --clear")
+    t2, prev_by = store.set_note(t["id"], text, author=args.author)
+    n = t2["note"]
+    _out(args, n, "{} 인계 메모 저장 ({:,}자, {}판)".format(t["id"], n["chars"], n["version"]))
+    sys.stdout.flush()
+    if prev_by == USER and args.author != USER:
+        _info("⚠ 바로 전 메모는 사용자가 웹에서 고친 것이었습니다 — 그 내용을 살렸는지 확인하세요 (전 판: {})".format(
+            store.note_path(t["id"], prev=True)))
+    if n["chars"] > NOTE_SOFT:
+        _info("메모가 깁니다 ({:,}자) — 결론 · 숫자 · 위치 · 명령만 남기고, 긴 설명은 리포트 결과물로 올린 뒤 그 ID 를 적으세요".format(
+            n["chars"]))
+    return 0
+
+
 def cmd_show(store, args):
     t = store.load(args.task)
     if args.json:
         _out(args, t)
         return 0
+    if args.brief:
+        return _show_brief(store, t)
     repo = t.get("repo") or {}
     print("{}  {}".format(t["id"], t["title"]))
     print("  {} · {} · {}% · 에이전트 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
@@ -1789,9 +1935,10 @@ def cmd_show(store, args):
         print("  저장소: {}{}".format(repo.get("path") or repo.get("url"),
                                     " ({})".format(repo["branch"]) if repo.get("branch") else ""))
     if t.get("related"):
-        print("  관련 작업: " + ", ".join(t["related"]))
+        print("  관련 작업: {} (각 작업의 인계 메모: devtrack show <작업> --brief)".format(", ".join(t["related"])))
     if t.get("current_step"):
         print("  현재 단계: " + t["current_step"])
+    _print_note(store, t)
     if t.get("plan"):
         print("  계획:")
         for i, p in enumerate(t["plan"]):
@@ -2374,6 +2521,16 @@ def build_parser():
     sp = add("show", cmd_show, "작업 상세 보기")
     sp.add_argument("task")
     sp.add_argument("-n", "--lines", type=int, default=10, help="최근 기록 줄 수")
+    sp.add_argument("--brief", action="store_true",
+                    help="짧게: 상태 · 주요 결과물 · 인계 메모 (다른 작업이 이 작업을 참고할 때 먼저 읽는 것)")
+
+    sp = add("note", cmd_note, "인계 메모 보기 · 쓰기 — 이 작업에서 알아낸 것 (결론 · 숫자 · 위치 · 명령 · 결정 · 주의점)",
+             epilog="예: devtrack note T-0040 (보기)   ·   devtrack note T-0040 --template   ·   "
+                    "devtrack note T-0040 - <<'EOF' … EOF   ·   devtrack note T-0040 notes.md")
+    sp.add_argument("task")
+    sp.add_argument("file", nargs="?", help="메모 파일 (- = 표준입력). 없으면 지금 메모를 보여 줌")
+    sp.add_argument("--template", action="store_true", help="채울 틀 보기 (목적 · 결론 · 숫자 · 위치 · 명령 · 결정 · 주의점 · 남은 일)")
+    sp.add_argument("--clear", action="store_true", help="메모 지우기")
 
     sp = add("list", cmd_list, "작업 목록")
     sp.add_argument("--status", choices=list(STATUSES))

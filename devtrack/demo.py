@@ -1450,6 +1450,21 @@ def _scenario(s, clk, tmp):
         "3. 왜도 차이(10.7%)는 실험 열선 풍속계의 공간 분해능 한계로 추정 — 본문에 한계로 명시 권장\n")),
         title="검증 결과 요약")
     s.check_plan(tid8, [4])
+    clk.at(35)
+    s.set_note(tid8, (
+        "# {} 인계 메모 — 4.3절 난류 통계 검증\n"
+        "기준: DNS `run_042` (스냅샷 2,000개 시간 평균) · 풍동 실험 T-0002 정리본\n\n"
+        "## 결론 (지금까지)\n"
+        "- 평균 속도 프로파일은 전 구간에서 2.1% 이내로 일치 (확인됨)\n"
+        "- 속도 변동 PDF 는 양의 왜도 — DNS S = 0.31, 실험 0.28 (차이 10.7%, 열선 공간 분해능 한계로 추정)\n\n"
+        "## 핵심 숫자\n"
+        "- U_c 12.40 vs 12.31 m/s (0.7%) · u_rms 최대 1.87 vs 1.83 m/s (2.1%) — 표: `turb_stats_comparison.csv`\n\n"
+        "## 파일 · 데이터 위치\n"
+        "- 그림: Fig 4.3(a)(b) 결과물 (SVG) · 요약: `validation_summary.md`\n\n"
+        "## 주의할 점\n"
+        "- 실험 x 좌표는 노즐 출구 기준 → DNS 와 비교 전 +0.05 m 이동해야 함 (I-1)\n\n"
+        "## 남은 일\n"
+        "- 4.3절 수치 확정 승인 대기 (A-1)\n").format(tid8))
     clk.at(30)
     s.request_approval(tid8, "논문 4.3절에 사용할 그림 · 수치 확정", kind="result",
                        artifact_ids=[summ["id"], fa["id"], fb["id"]],

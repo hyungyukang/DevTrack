@@ -173,6 +173,7 @@ HPC 같은 원격 서버에서 쓰는 방법(정적 웹, SSH 터널, tmux 로 Cl
 ```bash
 TID=$(devtrack new "작업 제목" -t code --repo ~/project --plan "분석" "구현" "테스트")
 devtrack step    $TID "지금 하는 일" -p 40
+devtrack note    $TID - < notes.md          # 인계 메모: 이 작업에서 알아낸 것 (다른 작업 · 다음 대화가 먼저 읽음)
 devtrack check   $TID 1
 devtrack issue   $TID "문제 내용" -s high -d "상세"
 devtrack artifact $TID result.png -n "결과 그림"

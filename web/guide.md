@@ -101,6 +101,9 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
+- 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
+  결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
+  리포트 · 파일은 필요한 것만 연다.
 - 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
 - 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.
 - DevTrack 작업의 결과를 저장소에 반영할 때는 git commit/push 를 직접 하지 않고 `devtrack request <TID> "..." --commit -m "..."` 로
@@ -341,6 +344,10 @@ DevTrack 이 그 대화의 모델 · 강도를 Claude Code 기록에서 읽어 �
 - **작업** — 전체 작업 목록. 작업을 누르면 상세 화면으로 갑니다.
 - **작업 상세** — 제목 아래에 담당 AI · 모델 · 저장소 · 관련 작업, 그 아래 "지금 하는 일"과 진행률, 아래 탭으로 나뉩니다.
   - 개요: 지시 내용, 작업 계획 체크리스트, 최근 기록, 열린 문제, 결과물. 리뷰 · 심사를 정한 작업은 맨 위에 **AI 리뷰** · **AI 심사** 칸이 있습니다 ([6-2](#/guide/s6-2), [6-3](#/guide/s6-3))
+  - **인계 메모**: AI 가 단계를 마칠 때 이 작업에서 알아낸 것(결론 · 핵심 숫자 · 파일 · 데이터 위치 · 재현 명령 · 결정 · 주의점)을 짧게 남깁니다.
+    다음 대화나 이 작업을 참고하는 다른 작업은 기록 전체 · 리포트 · 파일을 다시 뒤지는 대신 이것부터 읽어서 **토큰을 아낍니다**
+    (관련 작업으로 연결해 두면 AI 가 시작할 때 메모가 있다고 알려 줍니다). 틀린 내용은 로컬 서버(실시간) 화면에서 **고치기** 로 바로 고치거나,
+    정적 웹에서는 메시지로 고쳐 달라고 하세요. AI 는 다음에 메모를 고칠 때 그 내용을 바탕으로 합니다.
   - 진행 기록 · 문제점 · 결과물 · 승인 (논문이면 빌드 탭도 생깁니다)
 - **활동 기록** — 모든 작업의 기록을 날짜별로 모아 봅니다 (최근 300건).
 - **알림** — 오른쪽 위 종 아이콘에 승인 대기 수가 표시되고, 새 승인 요청 · 문제 · 완료가 생기면 화면 구석에 알림이 뜹니다.
@@ -877,6 +884,9 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
+- 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
+  결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
+  리포트 · 파일은 필요한 것만 연다.
 - 문제는 `devtrack issue`, 결과물은 `devtrack artifact` / 리뷰 리포트는 `devtrack review` 로 남긴다.
 - 코드 리뷰 리포트는 개발자가 아닌 사람도 이해할 수 있게 쓴다: 한 줄 결론, 비개발자용 "한눈에 보기", 항목별 "쉽게 말하면", 용어 풀이.
 - DevTrack 작업의 결과를 저장소에 반영할 때는 git commit/push 를 직접 하지 않고 `devtrack request <TID> "..." --commit -m "..."` 로
@@ -1042,6 +1052,7 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | `devtrack config` | 기록 폴더 · 웹 공개 폴더 보기. `config data <폴더>` · `config publish <폴더>` 로 정하고 `--unset` 으로 지움 (3단계, 10-1) |
 | `devtrack publish` | 정적 웹으로 배포 (HPC 의 웹 공개 폴더 등) |
 | `devtrack password` | 웹 비밀번호 정하기 · 바꾸기 (`--status` 확인, `--off` 풀기, 10-7) |
+| `devtrack note T-0001` | 작업의 인계 메모 보기 (AI 가 `devtrack note T-0001 -` 로 씀, `--template` 틀) — 다른 작업은 `devtrack show T-0001 --brief` 로 메모부터 읽음 |
 | `devtrack mailbox <계정>/<저장소>` | 정적 웹의 'GitHub 이슈로 보내기' 를 받을 우편함 켜기 (상태: 인자 없이, `--check` 지금 확인, `--off` 끄기, 10-8) |
 | `devtrack list` · `devtrack show T-0001` | 터미널에서 작업 목록 · 상세 보기 |
 | `devtrack paper T-0005` | 논문 작업의 원고 폴더(`tasks/T-0005/paper`) 다시 만들기 · 빠진 그림 확인 (9. 논문 작성) |
@@ -1057,5 +1068,5 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 일 · `issue` 문제 · `artifact` 결과물 · `review` 리뷰 리포트 · `text` Word · PDF 의 글자 뽑기 ·
 `link` 작업 연결 · `latex` LaTeX 컴파일 (PDF 를 빌드로 기록) ·
 `request` 승인 요청 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
-`start --take` 다른 AI 의 작업 가져오기 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
+`start --take` 다른 AI 의 작업 가져오기 · `note` 인계 메모 · `show --brief` 다른 작업의 요약 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
 전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.

@@ -94,6 +94,16 @@ DECISION_LABEL = {"approved": "승인", "rejected": "거절", "changes_requested
 
 USER = "user"  # 사용자가 남긴 기록의 author 값
 
+# 인계 메모 — 작업마다 '이 작업에서 알아낸 것' 을 짧게 (tasks/<T>/notes.md). 다른 작업 · 다음 대화가 이 작업을 참고할 때
+# 기록 전체 · 리포트 · 파일을 다시 뒤지지 않고 먼저 읽는다 (devtrack show <T> --brief).
+NOTE_FILE = "notes.md"
+NOTE_PREV = "notes.prev.md"   # 바로 전 판 (AI 가 사용자가 고친 메모를 덮어썼을 때 되살릴 수 있게)
+NOTE_SOFT = 6000              # 자 — 넘으면 줄이라고 알린다 (대략 2–3천 토큰)
+NOTE_MAX = 40000
+NOTE_STALE = 15               # 메모를 쓴 뒤 기록이 이만큼 쌓이면 고쳐 두라고 알린다
+NOTE_SECTIONS = ("목적", "결론 (지금까지)", "핵심 숫자 (단위 · 기간 · 기준 포함)", "파일 · 데이터 위치", "재현 · 실행 명령",
+                 "결정 · 사용자 지시", "주의할 점 (함정 · 실패한 시도)", "남은 일 · 열린 질문")
+
 # 담당 AI 가 이 값이면 아직 정해지지 않은 작업 — 어느 AI 든 먼저 시작한 쪽이 맡는다
 UNASSIGNED_AGENTS = ("", "누구나", "기타", "any", "*")
 
@@ -897,6 +907,71 @@ class Store:
     def add_log(self, tid, message, kind="info", detail=None, author=None):
         with self.edit(tid) as t:
             return self._log(t, message, kind=kind, author=author, detail=detail)
+
+    # ------------------------------------------------------------------ 인계 메모
+    def note_path(self, tid, prev=False):
+        return os.path.join(self.tasks_dir, normalize_task_id(tid), NOTE_PREV if prev else NOTE_FILE)
+
+    def read_note(self, tid):
+        try:
+            with open(self.note_path(tid), encoding="utf-8") as fh:
+                return fh.read()
+        except FileNotFoundError:
+            return None
+
+    def note_template(self, tid):
+        t = self.load(tid)
+        repo = t.get("repo") or {}
+        base = "기준: {} · ".format(now()[:10])
+        if repo.get("path"):
+            base += "저장소 {}{} @<커밋> · ".format(repo["path"], " ({})".format(repo["branch"]) if repo.get("branch") else "")
+        base += "데이터 <경로 · 버전>"
+        lines = ["# {} 인계 메모 — {}".format(t["id"], t["title"]), base, ""]
+        for sec in NOTE_SECTIONS:
+            lines += ["## " + sec, "- ", ""]
+        return "\n".join(lines)
+
+    def set_note(self, tid, text, author=None):
+        """인계 메모를 쓴다 (빈 글이면 지운다). 바로 전 판은 notes.prev.md 로 남긴다. → (task, 전 판을 쓴 사람)."""
+        text = (text or "").replace("\r\n", "\n").strip()
+        if len(text) > NOTE_MAX:
+            raise DevTrackError("인계 메모가 너무 깁니다 ({:,}자, 최대 {:,}자) — 결론 · 위치 · 명령 위주로 줄이고, 긴 내용은 "
+                                "리포트 결과물로 올린 뒤 메모에는 그 ID 를 적으세요".format(len(text), NOTE_MAX))
+        with self.edit(tid) as t:
+            path = self.note_path(tid)
+            old = t.get("note") or {}
+            if os.path.exists(path):
+                shutil.copy2(path, self.note_path(tid, prev=True))
+            if text:
+                fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(path))
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(text + "\n")
+                _chmod(tmp, 0o644)
+                os.replace(tmp, path)
+                t["note"] = {"updated_at": now(), "by": author or t.get("agent") or "agent", "chars": len(text),
+                             "version": int(old.get("version") or 0) + 1}
+                self._log(t, "{}인계 메모를 {} ({:,}자)".format("사용자가 " if author == USER else "",
+                                                          "고쳤습니다" if old else "남겼습니다", len(text)),
+                          author=author, meta={"note_version": t["note"]["version"]})
+            else:
+                if os.path.exists(path):
+                    os.remove(path)
+                t["note"] = None
+                self._log(t, "인계 메모를 지웠습니다", author=author)
+        if not text and self.publish_dir:  # 공개 폴더 동기화는 지운 파일을 따라 지우지 않는다
+            try:
+                os.remove(os.path.join(self.publish_dir, "data", "tasks", t["id"], NOTE_FILE))
+            except OSError:
+                pass
+        return t, old.get("by")
+
+    def note_stale(self, t):
+        """메모를 쓴 뒤 쌓인 기록 수 (메모가 없으면 None)."""
+        n = t.get("note") or {}
+        if not n.get("updated_at"):
+            return None
+        return sum(1 for e in t.get("log", []) if e.get("ts", "") > n["updated_at"]
+                   and not (e.get("meta") or {}).get("note_version"))
 
     def add_user_comment(self, tid, message, artifact=None):
         """사용자 메시지 (사용자 → 담당 AI). artifact: 이 메시지가 가리키는 결과물 (결과물 화면의 수정 요청 · 추가 지시) —
@@ -2193,7 +2268,7 @@ class Store:
                 items.append(dict(base, type="completed", reason=d.get("note", ""), ts=d.get("at")))
             if t["status"] == "queued":
                 items.append(dict(base, type="new_task", instruction=t.get("instruction", ""), task_type=t["type"],
-                                  repo=t.get("repo") or {}, ts=t["created_at"],
+                                  repo=t.get("repo") or {}, ts=t["created_at"], related=t.get("related") or [],
                                   review=_loop_summary(t.get("review_loop"))))
             for e in t.get("log", []):
                 if e.get("author") == USER and e.get("kind") == "user" and e.get("ack") is False:

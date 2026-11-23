@@ -190,6 +190,7 @@ devtrack review  $TID review_report.md
 AID=$(devtrack request $TID "Commit the changes" --commit -m "Commit message")
 devtrack wait    $TID $AID --timeout 1800   # exits 0 when approved
 devtrack apply   $TID $AID                  # commit + push
+devtrack note    $TID - < notes.md          # handoff note: what this task found out (other tasks read it first)
 devtrack done    $TID -m "Summary"
 devtrack inbox                              # new instructions · messages · decisions from the web
 ```

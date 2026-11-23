@@ -101,6 +101,9 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
+- Keep a handoff note per task (`devtrack note <TID>`) up to date when a step ends, before an approval request and before done — only
+  conclusions, numbers, file locations, commands, decisions and pitfalls, kept short (template: `--template`, save: `devtrack note <TID> -`).
+  When referring to another task, read `devtrack show <T> --brief` first and open reports or files only as needed.
 - Record issues with `devtrack issue`, artifacts with `devtrack artifact`, and review reports with `devtrack review`.
 - Write code review reports so that non-developers can follow them: a one-line conclusion, an "at a glance" part for non-developers, a plain-language explanation per item, and a glossary.
 - To apply a DevTrack task's result to a repository, do not run git commit/push yourself: request approval with `devtrack request <TID> "..." --commit -m "..."`,
@@ -343,6 +346,10 @@ The **AI journal review** box on the task page shows each round's verdict, the o
 - **Tasks** — the full task list. Click a task to open its detail page.
 - **Task detail** — under the title, the assigned AI, model, repository and related tasks; below that, "what I am doing now" and the progress bar, with tabs below.
   - Overview: instruction, plan checklist, recent records, open issues, artifacts. A task set to get a review has an **AI review** or **AI journal review** box at the top ([6-2](#/guide/s6-2), [6-3](#/guide/s6-3))
+  - **Handoff note**: when the AI finishes a step it writes a short note of what this task found out (conclusions, key numbers, file and data locations,
+    commands to reproduce, decisions, pitfalls). The next conversation and other tasks that refer to this one read it first instead of digging through
+    the whole record, reports and files again, which **saves tokens** (link tasks as related and the AI is told about the note when it starts).
+    Fix anything wrong with **Edit** on the local server (live) page, or ask for a fix in a message on the static web. The AI builds on it next time.
   - Progress log · Issues · Artifacts · Approvals (paper tasks also get a Builds tab)
 - **Activity** — the records of all tasks, by date (the latest 300).
 - **Notifications** — the bell icon at the top right shows how many approvals are waiting, and a notice pops up in a corner of the page for new approval requests, issues and completions.
@@ -880,6 +887,9 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
+- Keep a handoff note per task (`devtrack note <TID>`) up to date when a step ends, before an approval request and before done — only
+  conclusions, numbers, file locations, commands, decisions and pitfalls, kept short (template: `--template`, save: `devtrack note <TID> -`).
+  When referring to another task, read `devtrack show <T> --brief` first and open reports or files only as needed.
 - Record issues with `devtrack issue`, artifacts with `devtrack artifact`, and review reports with `devtrack review`.
 - Write code review reports so that non-developers can follow them: a one-line conclusion, an "at a glance" part for non-developers, a plain-language explanation per item, and a glossary.
 - To apply a DevTrack task's result to a repository, do not run git commit/push yourself: request approval with `devtrack request <TID> "..." --commit -m "..."`,
@@ -1045,6 +1055,7 @@ Commands you use yourself:
 | `devtrack config` | Show the records folder and the publish folder. Set them with `config data <folder>` · `config publish <folder>`, remove a setting with `--unset` (step 3, 10-1) |
 | `devtrack publish` | Publish as a static website (e.g. the HPC system's public web folder) |
 | `devtrack password` | Set or change the web password (`--status` to check, `--off` to remove, 10-7) |
+| `devtrack note T-0001` | Show a task's handoff note (the AI writes it with `devtrack note T-0001 -`, `--template` for the outline) — other tasks read it first with `devtrack show T-0001 --brief` |
 | `devtrack mailbox <owner>/<repo>` | Turn on the mailbox that receives the static web's 'Send as a GitHub issue' (status without arguments, `--check` to check now, `--off` to turn off, 10-8) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
@@ -1060,5 +1071,5 @@ Commands you use yourself:
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
 `link` link tasks · `latex` compile LaTeX (records the PDF as a build) ·
 `request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
-`start --take` take over another AI's task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
+`start --take` take over another AI's task · `note` handoff note · `show --brief` short view of another task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).

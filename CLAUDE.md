@@ -71,6 +71,10 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
 - `devtrack/docx.py` Word(.docx) → Markdown (zipfile + ElementTree). `.docx` 결과물을 올리면 `preview`(웹 미리보기)를 만들고, `devtrack text` 가 쓴다
 - 문서 리뷰(`docreview`): 원본은 결과물 분류 `source`, 리뷰 결과는 코드 리뷰와 같은 `t["review"]` 에 `doc` · `checks` · `strengths`, 항목의 `location` · `quote` · `suggestion`.
   `verdict` 는 `DOC_VERDICTS`. 웹 `viewDocReview` · `docReviewPanel`, 코드 리뷰 화면은 `codeReviews()` 로 문서 리뷰를 뺀다
+- 인계 메모: `tasks/<T>/notes.md` (`Store.set_note` · `read_note` · `note_template`, 작업의 `note` = 쓴 때 · 쓴 사람 · 글자 수 · 판, 바로 전 판 `notes.prev.md`).
+  `devtrack note` 보기 · 쓰기(`-` 표준입력) · `--template` · `--clear`, `show --brief` 는 상태 · 주요 결과물 · 메모만 (다른 작업이 먼저 읽는 것),
+  `start` · inbox 새 작업 · `watch` 안내가 관련 작업의 메모를 가리키고, `request` · `done` 은 메모가 없거나 `NOTE_STALE` 건 넘게 지나면 알린다.
+  웹 `noteCard`(개요, 실시간은 **고치기** → `api/tasks/<T>/note`, 고치는 글은 `state.noteEdit` 로 다시 그려도 남음)
 - GitHub 이슈 우편함: `devtrack/mailbox.py` (`devtrack mailbox`) — 정적 웹 보내기 창의 'GitHub 이슈로 보내기'(app.js `ghIssueBlock`, 정적 모드 ·
   `index.json` 의 `mailbox` 가 있을 때만)가 붙여 넣기 메시지를 본문으로 새 이슈 주소를 연다 (7000자 넘으면 본문은 클립보드, `devtrack-paste-here`).
   `watch` · `inbox --wait` 의 `on_tick` 이 `Poller` 로 `.agent/mailbox-state.json` 의 시각을 보고 한 프로세스만 확인 → `parse_issue` · `parse_comment`
@@ -129,6 +133,9 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
 - 웹 비밀번호 변경 후: 임시 데이터에 `echo '<비밀번호>' | devtrack --data <임시> password --stdin` → `serve` 에서 curl 로 쿠키 없이 403 ·
   `access.derive_key` 로 만든 쿠키로 200 · POST 403, 웹은 잠금 화면 → 틀린 비밀번호 · 맞는 비밀번호 → 다시 열 때 안 묻는지 · **잠그기**.
   `publish --to` 한 폴더를 `python3 -m http.server`(.htaccess 무시)로 열면 경고가 나오는지. 실제 Apache 는 `~/www` 아래 임시 폴더에 데모를 공개해 보고 지운다.
+- 인계 메모 변경 후: 임시 데이터에서 `note --template` → `note <T> -` (표준입력) → `show --brief` · `show` → `--related` 로 만든 대기 작업의 inbox 안내 ·
+  `start` 안내 → 메모 없이 `request` · `done` 의 `💡`, 기록 15건 뒤 오래된 메모 알림 → `serve` 의 `api/tasks/<T>/note` 로 사용자가 고친 뒤 AI 가 쓰면 경고 ·
+  `notes.prev.md` → `--clear`. 웹은 실시간에서 고치기 → 저장, 정적 화면은 보기만 (390px · 영어 포함).
 - GitHub 우편함 변경 후: 가짜 GitHub 서버(`$DEVTRACK_GITHUB_API`, `/user` · `/repos/o/r` · issues · comments · labels · reactions 흉내)와
   `XDG_CONFIG_HOME=<임시>` 로 `echo <토큰> | devtrack --data <임시> mailbox o/r --stdin` → 손으로 쓴 이슈 · 붙여 넣기 형식 · `T-0001 메시지` ·
   `T-0001 A-1 승인` · 삭제(거절) · 다른 계정(건너뜀) · 대화 이슈 댓글(메시지 · `승인 A-1` · `완료`) → `mailbox --check` 와 답글 · 닫힘을 본다.

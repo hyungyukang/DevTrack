@@ -41,6 +41,8 @@ const state = {
   pendingRender: false, // 입력 중이라 미뤄 둔 화면 갱신 — 입력이 끝나면 저절로 반영
   writes: 0, // 보내는 중인 쓰기 요청 수 (그동안은 화면을 다시 그리지 않음)
   pointerDown: false, // 마우스 · 터치를 누르고 있는 중 (그동안 다시 그리면 누르던 버튼의 클릭이 사라짐)
+  noteText: new Map(), // 인계 메모 본문 ('작업 ID@판' → 글)
+  noteEdit: null, // 고치는 중인 인계 메모 { tid, text } — 다시 그려도 쓰던 글이 남게
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -197,6 +199,9 @@ function hydrate(root) {
     form.addEventListener('input', touch);
     form.addEventListener('change', touch);
   }
+  $$('[data-note]', root).forEach(loadNote);
+  const noteTa = $('textarea[data-note-edit]', root);
+  if (noteTa) noteTa.addEventListener('input', () => { if (state.noteEdit) state.noteEdit.text = noteTa.value; });
   const guide = $('.guide-body', root);
   if (guide) setupGuide(guide, $('.guide-toc', root));
 }
@@ -1498,6 +1503,7 @@ function taskOverview(t, openIssues) {
         <div class="card-head"><h2>${icon('message')} ${L('작업 지시')}</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
         <div class="card-body">${t.instruction ? html`<div class="markdown-body">${raw(renderMarkdown(t.instruction))}</div>` : html`<div class="muted">${L('지시 내용이 기록되지 않았습니다')}</div>`}</div>
       </section>
+      ${noteCard(t)}
       <section class="card">
         <div class="card-head"><h2>${icon('activity')} ${L('최근 진행 기록')}</h2><a href="#/task/${t.id}/log">${L('전체 {n}건', { n: t.log.length })}</a></div>
         <div class="card-body"><ul class="timeline">${recent.map((e) => timelineItem(e, { tid: t.id }))}</ul></div>
@@ -1523,6 +1529,88 @@ function taskOverview(t, openIssues) {
       </section>
     </div>
   </div>`;
+}
+
+// ---------------------------------------------------------------------- 인계 메모 (devtrack note — tasks/<T>/notes.md)
+/** 이 작업에서 알아낸 것을 짧게. 다른 작업 · 다음 대화가 이 작업을 참고할 때 기록 전체 대신 먼저 읽는다 (devtrack show --brief) */
+function noteCard(t) {
+  const n = t.note;
+  if (!n && ['review', 'docreview'].includes(t.type)) return '';
+  const live = state.mode === 'live';
+  const editing = live && state.noteEdit?.tid === t.id;
+  const meta = n ? `${authorName(n.by)} · ${fmtAbs(n.updated_at)} · ${L('{n}자', { n: (n.chars || 0).toLocaleString() })}` : '';
+  const key = n ? `${t.id}@${n.version || 1}` : '';
+  const cached = n ? state.noteText.get(key) : null;
+  let body;
+  if (editing) {
+    body = html`<textarea id="note-edit-${t.id}" data-note-edit rows="16" spellcheck="false">${state.noteEdit.text}</textarea>
+      <div class="actions"><span class="hint">${L('AI 가 다음에 메모를 고칠 때 이 내용을 바탕으로 합니다. 비우고 저장하면 메모를 지웁니다.')}</span>
+        <button class="btn" data-action="note-cancel" data-task="${t.id}">${L('취소§편집')}</button>
+        <button class="btn btn-primary" data-action="note-save" data-task="${t.id}">${icon('check')} ${L('저장')}</button></div>`;
+  } else if (n) {
+    body = html`<div class="markdown-body compact" data-note="${t.id}" data-ver="${n.version || 1}">${cached != null ? raw(renderMarkdown(cached, { breaks: false })) : L('불러오는 중…')}</div>
+      ${live ? '' : html`<p class="note-hint">${L('틀린 내용은 아래 메시지로 AI 에게 고쳐 달라고 하세요.')}</p>`}`;
+  } else {
+    body = html`<p class="muted">${L('아직 인계 메모가 없습니다. AI 가 단계를 마칠 때 이 작업에서 알아낸 것(결론 · 숫자 · 파일 위치 · 명령 · 주의점)을 짧게 남기고, 다른 작업이 이 작업을 참고할 때 기록 전체 대신 이 메모를 먼저 읽습니다.')}</p>`;
+  }
+  return html`<section class="card note-card">
+    <div class="card-head"><h2>${icon('book')} ${L('인계 메모')}</h2>
+      <span class="muted note-meta">${meta}</span>
+      ${live && !editing ? html`<button class="btn btn-sm" data-action="note-edit" data-task="${t.id}">${icon('edit')} ${n ? L('고치기§메모') : L('쓰기§메모')}</button>` : ''}</div>
+    <div class="card-body">${body}</div>
+  </section>`;
+}
+
+async function noteText(tid, ver) {
+  const key = `${tid}@${ver}`;
+  if (!state.noteText.has(key)) {
+    const r = await fetch(`data/tasks/${encodeURIComponent(tid)}/notes.md?v=${ver}`);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    state.noteText.set(key, await r.text());
+  }
+  return state.noteText.get(key);
+}
+
+async function loadNote(el) {
+  if (el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  try {
+    el.innerHTML = renderMarkdown(await noteText(el.dataset.note, el.dataset.ver), { breaks: false });
+    enhance(el);
+  } catch (e) {
+    el.innerHTML = html`<span class="muted">${L('인계 메모를 불러오지 못했습니다')}: ${e.message}</span>`.s;
+  }
+}
+
+async function actNote(el, what) {
+  const tid = el.dataset.task;
+  if (what === 'edit') {
+    const n = state.tasks.get(tid)?.note;
+    let text = '';
+    try { text = n ? await noteText(tid, n.version || 1) : ''; } catch { /* 빈 칸에서 시작 */ }
+    state.noteEdit = { tid, text };
+    await render({ keepScroll: true });
+    document.getElementById(`note-edit-${tid}`)?.focus();
+    return;
+  }
+  if (what === 'cancel') {
+    state.noteEdit = null;
+    await render({ keepScroll: true });
+    return;
+  }
+  const ta = document.getElementById(`note-edit-${tid}`);
+  const text = ta ? ta.value : state.noteEdit?.text || '';
+  el.disabled = true;
+  try {
+    await api(`api/tasks/${tid}/note`, { text });
+    state.noteEdit = null;
+    if (ta) ta.value = ''; // 다시 그릴 때 초안으로 남지 않게 (saveDrafts)
+    toast({ title: text.trim() ? L('인계 메모를 저장했습니다') : L('인계 메모를 지웠습니다'), meta: tid, tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: L('저장하지 못했습니다'), meta: e.message, tone: 'red' });
+    el.disabled = false;
+  }
 }
 
 function taskLog(t) {
@@ -2913,6 +3001,9 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'note-edit': return actNote(el, 'edit');
+    case 'note-cancel': return actNote(el, 'cancel');
+    case 'note-save': return actNote(el, 'save');
     case 'task-complete': return openCompleteTask(el.dataset.task);
     case 'task-complete-go': return actCompleteTask(el);
     case 'task-cancel': return openCancelTask(el.dataset.task);

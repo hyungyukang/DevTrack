@@ -994,6 +994,14 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .modal .m-body { padding: 18px 20px; }
 .modal .m-body p { margin: 0 0 12px; color: var(--text-2); }
 .modal .m-foot { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+.note-card .card-head .note-meta { margin-left: auto; font-size: 12.5px; }
+.note-card .card-head .btn { margin-left: 10px; }
+.note-card textarea { width: 100%; min-height: 260px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+.note-card .actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.note-card .actions .hint { flex: 1 1 220px; font-size: 12.5px; color: var(--text-2); }
+.note-card .markdown-body h1 { font-size: 1.15em; margin-top: 0; }
+.note-card .markdown-body h2 { font-size: 1.02em; margin: 1em 0 .4em; }
+.note-card .note-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--text-2); }
 .gh-send { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 12px 0 16px; }
 .gh-send .hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.55; }
 .copy-block { position: relative; margin-bottom: 14px; }
