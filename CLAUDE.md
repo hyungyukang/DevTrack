@@ -24,7 +24,8 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   `~/.config/devtrack/config.json`, `devtrack config`) > `<저장소>/data`. 웹 공개 폴더도 같은 순서(`publish_location`, 설정 파일 값은
   설정한 기록 폴더를 쓸 때만). 환경 변수는 그 셸에서 켠 프로세스에만 있으므로(먼저 켠 serve, VS Code 의 AI · 훅) 설정 파일이 기본 수단.
   `_warn_other_data` 가 init · serve · watch · `inbox --wait` 에서 다른 곳의 기록을 알린다 (`--data` 일 때는 조용히)
-- `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화)
+- `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화 —
+  기록 폴더가 곧 공개 폴더의 `data/` 이면(`publish_is_root`, 심볼릭 링크 · 다른 경로 이름도 `same_dir` 로 판단) 복사 · 정리를 건너뜀)
 - `devtrack/cli.py` argparse CLI, `devtrack/server.py` 로컬 서버(정적 + POST API), `devtrack/gitops.py` diff/commit/push, `devtrack/demo.py` 예시 데이터
 - 담당 AI: 작업의 `agent` (`누구나` = 미정). `Store.inbox(agent=, task=)` 는 그 AI 의 입력만, `update_task(claim=)` 는 시작할 때 담당 확인.
   `devtrack watch` (cli.py) 는 Codex 등 대기 모드가 없는 AI 의 실행기 — 입력마다 `codex exec`/명령을 작업별로 실행

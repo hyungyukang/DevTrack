@@ -467,10 +467,18 @@ def _prune_tree(root, keep):
             _chmod(d, 0o755)
 
 
+def same_dir(a, b):
+    """두 경로가 같은 폴더인지 — 심볼릭 링크나 다른 이름(~/www → /autofs/…)으로 가리켜도 같으면 True."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:  # 한쪽이 아직 없음
+        return os.path.realpath(a) == os.path.realpath(b)
+
+
 def _mirror_paper(src_task, dst_task):
     """공개 폴더의 원고 폴더에서 원본에 없는 파일을 지운다 (mirror_tree 는 지우지 않으므로 — 빠진 그림이 남지 않게)."""
     src, dst = os.path.join(src_task, PAPER_DIR), os.path.join(dst_task, PAPER_DIR)
-    if os.path.normpath(src) == os.path.normpath(dst) or not os.path.isdir(dst):
+    if same_dir(src, dst) or not os.path.isdir(dst):
         return
     if not os.path.isdir(src):
         shutil.rmtree(dst, ignore_errors=True)
@@ -897,7 +905,7 @@ class Store:
                           "status": t["status"], "at": now(), "by": author, "ack": author != USER})
             self._write_json(self.deleted_path, {"deleted": items})
             self.rebuild_index()
-        if self.publish_dir:
+        if self.publish_dir and not self.publish_is_root():
             shutil.rmtree(os.path.join(self.publish_dir, "data", "tasks", tid), ignore_errors=True)
             for oid in touched:
                 self._sync_publish(oid)
@@ -958,7 +966,7 @@ class Store:
                     os.remove(path)
                 t["note"] = None
                 self._log(t, "인계 메모를 지웠습니다", author=author)
-        if not text and self.publish_dir:  # 공개 폴더 동기화는 지운 파일을 따라 지우지 않는다
+        if not text and self.publish_dir and not self.publish_is_root():  # 동기화는 지운 파일을 따라 지우지 않는다
             try:
                 os.remove(os.path.join(self.publish_dir, "data", "tasks", t["id"], NOTE_FILE))
             except OSError:
@@ -2594,8 +2602,13 @@ class Store:
         self._write_json(self.index_path, index)
         return index
 
+    def publish_is_root(self, dest=None):
+        """공개 폴더의 data/ 가 기록 폴더 자체인지 — 그러면 웹이 기록을 바로 읽으므로 복사하지 않는다."""
+        dest = dest or self.publish_dir
+        return bool(dest) and same_dir(os.path.join(dest, "data"), self.root)
+
     def _sync_publish(self, tid=None):
-        if not self.publish_dir:
+        if not self.publish_dir or self.publish_is_root():
             return
         try:
             ddata = os.path.join(self.publish_dir, "data")
@@ -2617,9 +2630,10 @@ class Store:
             access.write_site(dest, auth)
         mirror_tree(web_root, dest)
         write_versioned_index(web_root, dest)
-        mirror_tree(self.root, os.path.join(dest, "data"))
-        for tid in self.task_ids():
-            _mirror_paper(self.task_dir(tid), os.path.join(dest, "data", "tasks", tid))
+        if not self.publish_is_root(dest):  # 기록 폴더가 곧 dest/data 이면 이미 그 자리에 있다
+            mirror_tree(self.root, os.path.join(dest, "data"))
+            for tid in self.task_ids():
+                _mirror_paper(self.task_dir(tid), os.path.join(dest, "data", "tasks", tid))
         self.sync_access(dest)
         return dest
 
