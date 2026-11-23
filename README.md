@@ -109,7 +109,7 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
-| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`) |
+| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`, and `/prove-fix`, `/surgical-check`, `/adversarial-review`, `/deep-read` adapted from [claude-skills](https://github.com/alirezarezvani/claude-skills), MIT) |
 
 ## Quick start (see the example locally)
 

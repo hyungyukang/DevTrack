@@ -129,6 +129,26 @@ ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skill
 리뷰 리포트를 메일로 받는 기능은 `pr-review-report` 스킬이 함께 설치되어 있어야 합니다
 ([자세히](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills)).
 
+**작업을 돕는 스킬 (선택)** — 공개 스킬 모음 [claude-skills](https://github.com/alirezarezvani/claude-skills)(MIT)에서 코드 개발 · 리뷰 · 논문 ·
+분석에 쓸 만한 것을 DevTrack 에 맞게 고친 것입니다. 모두 **사용자 승인 없이는 커밋하지 않고**, diff 와 리뷰는 **바뀐 소스만**(빌드 결과물 제외),
+리포트는 PDF 로도 올립니다.
+
+| 스킬 | 언제 쓰나 |
+|---|---|
+| `/prove-fix <버그>` | 버그 · 틀린 값 · NaN 을 고칠 때 — 지금 코드에서 실패하는 검사를 만들고, 고친 뒤 **수정을 되돌려 다시 실패하는지**까지 확인해 기록 |
+| `/surgical-check` | 커밋 승인을 요청하기 전 — 요청과 관계없는 변경(서식 · 이름 바꾸기 · 디버그 출력 · 딸려 온 파일)을 걷어 내고 점검 결과를 붙여 요청 |
+| `/adversarial-review` | 바뀐 코드를 세 관점(파괴자 · 수치 감사관 · 새 팀원)으로 거칠게 리뷰 — 검토 항목 R1… 과 PDF 리포트. AI 끼리 리뷰의 리뷰어로도 |
+| `/deep-read <파일> [check]` | 논문을 꼼꼼히 읽을 때 — 주장 ↔ 그림 · 표 · 수치를 대조한 PDF 리포트. `check` 는 내 원고 · 분석 리포트에서 근거가 부족한 주장을 찾음 |
+
+```bash
+for s in prove-fix surgical-check adversarial-review deep-read; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
+```
+
+웹의 새 작업 지시에 `/prove-fix …` 처럼 적어도 됩니다. Codex 에 까는 방법은 [자세히](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills) 를 보세요.
+
 ### 5-3. 권한 확인 창 줄이기 (선택)
 
 Claude 가 `devtrack` 명령을 실행할 때마다 확인 창이 뜨면, Claude Code 에서 `/permissions` 를 열어 허용 규칙

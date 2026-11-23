@@ -131,6 +131,26 @@ Linking instead of copying means `git pull` keeps the skill up to date too.
 To receive review reports by email, the `pr-review-report` skill must also be installed
 ([details](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills)).
 
+**Skills that help with the work (optional)** — picked from the public collection [claude-skills](https://github.com/alirezarezvani/claude-skills) (MIT)
+for code development, review, papers and analysis, and rewritten for DevTrack. None of them **commits without your approval**, diffs and reviews
+cover **only the changed source** (no build outputs), and reports are posted as PDFs too.
+
+| Skill | When to use it |
+|---|---|
+| `/prove-fix <bug>` | Fixing a bug, a wrong value or a NaN — writes a check that fails on the current code, fixes it, then **puts the old code back to see the check fail again**, and records the evidence |
+| `/surgical-check` | Before asking for commit approval — strips changes the request did not need (reformatting, renames, debug prints, stray files) and attaches the check to the request |
+| `/adversarial-review` | A tough review of the changed code from three angles (Saboteur, Numerics Auditor, New Hire) — findings R1… and a PDF report. Also works as the reviewer in AI-to-AI review |
+| `/deep-read <file> [check]` | Reading a paper closely — a PDF report matching claims to figures, tables and numbers. `check` finds weakly supported claims in your own manuscript or analysis report |
+
+```bash
+for s in prove-fix surgical-check adversarial-review deep-read; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
+```
+
+You can also write `/prove-fix …` in a new task instruction on the web. For Codex, see the [details](https://github.com/hyungyukang/DevTrack/tree/main/integrations/claude-skills).
+
 ### 5-3. Fewer permission prompts (optional)
 
 If a confirmation prompt appears every time Claude runs `devtrack`, open `/permissions` in Claude Code and add the allow rule

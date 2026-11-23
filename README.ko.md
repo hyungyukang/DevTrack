@@ -101,7 +101,7 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `devtrack config` | 기록 폴더 · 웹 공개 폴더 확인 · 설정. `devtrack config data <폴더>` 로 정하면 어느 터미널 · 프로그램에서 실행하든 같은 곳에 기록 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
-| `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`) |
+| `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`, 그리고 [claude-skills](https://github.com/alirezarezvani/claude-skills)(MIT)에서 고쳐 온 `/prove-fix`, `/surgical-check`, `/adversarial-review`, `/deep-read`) |
 
 ## 빠른 시작 (로컬에서 예시 화면 보기)
 

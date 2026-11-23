@@ -8,6 +8,20 @@ DevTrack 에 기록하도록 고친 Claude Code 스킬입니다. `devtrack` 명�
 | `review-pr` | 다른 사람의 PR 리뷰 → 쉬운 말 리포트 + 검토 항목 R1, R2… → 고른 항목만 코멘트 초안 → 승인 후 게시 | 코드 리뷰 화면: 리뷰 결과 한눈에 보기, 리포트(md/pdf), **코멘트할 항목 체크 → 진행**, 코멘트 초안 게시 승인 |
 | `review-doc` | 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 → 문서 요약 · 목적 대비 미비한 부분 · 논리 · 문장/맞춤법 (과학 논문은 형식 · 선행 연구와의 차이 · 결론의 근거까지) → 보완 · 수정 항목 R1, R2… 를 **PDF 리포트**로 | 문서 리뷰 화면: 리뷰 의견 · 문서 요약 · 영역별 평가 · 원문 → 수정 제안, 리뷰 리포트(PDF) · 원본 보기, 리포트 확인 요청 |
 
+### 외부 스킬을 DevTrack 에 맞게 고친 것 (MIT, [NOTICE](NOTICE.md))
+
+[alirezarezvani/claude-skills](https://github.com/alirezarezvani/claude-skills) 에서 코드 개발 · 코드 리뷰 · 논문 · 분석에 쓸 만한 것만 골라
+다시 썼습니다. 공통으로: **사용자 승인 없이는 커밋하지 않고** (`devtrack request --commit` → 승인 → `apply`), diff · 리뷰는 **바뀐 소스만**
+(빌드 결과물 제외), 리포트는 DevTrack 에 결과물로 (리포트는 **PDF** 도), 과학 계산 · HPC 코드에 맞춘 점검, 결과는 한국어.
+원본의 스크립트 · 훅 · 에이전트는 넣지 않았습니다 (지시문만).
+
+| 스킬 | 언제 | 하는 일 | DevTrack 에서 보이는 것 |
+|---|---|---|---|
+| `prove-fix` | 버그 · 틀린 값 · NaN · 충돌을 고칠 때 | 원인을 증거로 확인(확인됨 · 추정 · 모름) → 지금 코드에서 **실패하는** 검사(단위 테스트 · 작은 재현 실행) → 최소 수정 → **수정을 되돌려 다시 실패 확인** → 전체 검사. 되돌리기는 바꾼 파일만 (`git stash` · `reset` 안 씀), 계산 노드 실행은 먼저 허락 | 단계별 기록(실패 · 통과 출력), `버그 증명 기록`, `수정 diff`, 커밋 승인 요청 |
+| `surgical-check` | 개발을 마치고 커밋 승인을 요청하기 전 | 바뀐 줄이 모두 요청에서 나왔는지 hunk 마다 점검 → 내가 만든 잡음(서식 · 이름 바꾸기 · 디버그 출력 · 딸려 온 파일) 되돌림 → 가정 · 단순함 · 검증 정리 | `커밋 전 변경 점검` 이 붙은 커밋 승인 요청 (리뷰어가 정해진 작업은 `review-request`) |
+| `adversarial-review` | 거친 두 번째 의견이 필요할 때 · AI 끼리 리뷰의 리뷰어 | **바뀐 코드만** 세 관점으로: 파괴자(경계 · 초기화 · halo · MPI · GPU · 재시작) · 수치 감사관(단위 · 보존 · 정밀도 · 재현성 · 기본값) · 새 팀원(읽기 쉬움 · 테스트) → R1… | 코드 리뷰 화면: 검토 항목 · 리포트(md · **PDF**), 리뷰 반복이면 `review-done` 판정 |
+| `deep-read` | 논문을 꼼꼼히 읽을 때 · 내 원고 · 분석 리포트를 내기 전 (`check`) | 중심 주장 → 논증 구조 → **근거 대조표**(주장 ↔ 그림 · 표 · 수치 · 쪽, 근거 강도) → 가정 · 반론 · 한계. `check` 는 근거가 부족한 주장을 C1… 로 | `정독 리포트 (PDF)` · 원문 결과물, (check) 보완할 항목 고르기 |
+
 ## 설치
 
 `review-pr` 는 `pr-review-report` 스킬의 메일 스크립트(`../pr-review-report/scripts/send_report.py`)를 함께 씁니다.
@@ -22,19 +36,25 @@ cp integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKIL
 cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ```
 
-`review-doc` 은 다른 스킬 없이 혼자 동작합니다 (메일 기능 없음).
+`review-doc` 과 외부 스킬 네 개는 다른 스킬 없이 혼자 동작합니다 (메일 기능 없음). 필요한 것만 링크하세요.
 
 ```bash
 mkdir -p ~/.claude/skills/review-doc
 ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
+
+for s in prove-fix surgical-check adversarial-review deep-read; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf <DevTrack 저장소>/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
 ```
 
 **Codex 에서도** 같은 파일을 씁니다 (Codex 는 `allowed-tools` 를 무시하고, `${CLAUDE_SKILL_DIR}` 는 이 파일이 있는 폴더로 읽습니다).
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
-ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
-ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
+for s in review-pr review-doc prove-fix surgical-check adversarial-review deep-read; do
+  mkdir -p ~/.codex/skills/$s
+  ln -sf <DevTrack 저장소>/integrations/claude-skills/$s/SKILL.md ~/.codex/skills/$s/SKILL.md
+done
 ```
 
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`
@@ -80,3 +100,20 @@ ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.co
 ```
 
 웹에서 유형 **문서 리뷰** 로 지시해도 됩니다 (문서 경로 · 종류 · 목적 칸). 원고는 기밀일 수 있어, 스킬은 문서 내용을 검색이나 외부 서비스에 넣지 않습니다.
+
+## 사용 흐름 (외부 스킬)
+
+```
+(코드 개발 작업 중) /prove-fix 마스크가 정수라 부분 셀 플럭스가 잘림
+  → 원인 확인 → 실패하는 검사 → 수정 → 되돌려 실패 확인 → 전체 검사 → '버그 증명 기록' · '수정 diff'
+/surgical-check
+  → 잡음 되돌림 → '커밋 전 변경 점검' 을 붙여 커밋 승인 요청 (웹에서 승인해야 커밋 · 푸시)
+(리뷰 작업 · 리뷰어 AI) /adversarial-review T-0042
+  → 바뀐 코드만 세 관점 리뷰 → R1… · PDF 리포트 → review-done approve | changes
+(논문 · 분석 작업 중) /deep-read paper/main.tex check
+  → 근거 대조표 · 보완할 항목 C1… → '정독 리포트 (PDF)' → 고칠 항목 선택
+```
+
+웹의 새 작업 지시에 `/prove-fix …` 처럼 적어도 됩니다 — DevTrack 기록 규칙대로 AI 가 그 스킬을 불러 진행합니다.
+AI 끼리 리뷰에서 리뷰어가 이 스킬을 쓰게 하려면 개발 AI 가 `devtrack review-request <T> -m "/adversarial-review 로 리뷰"` 처럼
+메모로 남깁니다 — 메모는 리뷰 작업의 지시에 그대로 들어갑니다. 개발 작업 지시에 "리뷰는 /adversarial-review 로" 라고 적어 두면 개발 AI 가 그렇게 요청합니다.
