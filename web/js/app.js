@@ -146,6 +146,7 @@ async function render({ keepScroll = false, auto = false } = {}) {
   state.pendingRender = false;
   $('#update-pill').classList.remove('show');
   window.scrollTo(0, keepScroll ? y : 0);
+  syncScrollFab();
 }
 
 /** 같은 화면을 다시 그릴 때 입력 칸에 써 둔 글(보내기 전 메시지 · 코멘트)을 그대로 둔다 */
@@ -1615,7 +1616,7 @@ async function actNote(el, what) {
 
 function taskLog(t) {
   const items = [...t.log].reverse();
-  return html`<div class="detail-grid">
+  return html`<div class="detail-grid log-grid">
     <div><section class="card"><div class="card-body"><ul class="timeline">${items.map((e) => timelineItem(e, { tid: t.id }))}</ul></div></section></div>
     <div>${feedbackBox(t)}</div>
   </div>`;
@@ -2708,6 +2709,34 @@ function ghIssueBlock({ title, body, ai }) {
   </div>`;
 }
 
+// ====================================================================== 휴대폰 · 좁은 화면: 맨 위 · 메시지 칸 · 맨 아래 버튼
+// 한 단(1050px 이하 — .detail-grid 와 같은 폭)이 되면 오른쪽 단의 메시지 칸이 긴 기록 아래로 내려가므로, 떠 있는 버튼으로 바로 간다.
+const FAB_MQ = matchMedia('(max-width: 1050px)');
+let fabTick = false;
+function syncScrollFab() {
+  const box = document.getElementById('scroll-fab');
+  if (!box) return;
+  const rest = document.documentElement.scrollHeight - window.innerHeight; // 내려갈 수 있는 거리
+  const typing = document.activeElement?.matches?.('input, textarea, select, [contenteditable]'); // 쓰는 중에는 가리지 않게
+  box.hidden = !FAB_MQ.matches || rest < 240 || !!typing;
+  if (box.hidden) return;
+  const y = window.scrollY;
+  const fb = $('#main .feedback-card')?.getBoundingClientRect();
+  $('[data-fab="top"]', box).hidden = y < 160;
+  $('[data-fab="msg"]', box).hidden = !fb || (fb.top < window.innerHeight && fb.bottom > 0); // 메시지 칸이 있고 안 보일 때만
+  $('[data-fab="bottom"]', box).hidden = rest - y < 160;
+}
+function scheduleFab() {
+  if (fabTick) return;
+  fabTick = true;
+  requestAnimationFrame(() => { fabTick = false; syncScrollFab(); });
+}
+function fabScroll(where) {
+  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  if (where === 'msg') $('#main .feedback-card')?.scrollIntoView({ behavior, block: 'start' });
+  else window.scrollTo({ top: where === 'top' ? 0 : document.documentElement.scrollHeight, behavior });
+}
+
 // ====================================================================== 모달 / 복사
 function copyBlock(label, text) {
   return html`<div class="copy-block"><div class="lbl">${label}</div><pre>${text}</pre><button class="btn btn-sm" data-action="copy" data-copy="${text}">${icon('copy')} ${L('복사')}</button></div>`;
@@ -3002,6 +3031,7 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'fab': return fabScroll(el.dataset.fab);
     case 'note-edit': return actNote(el, 'edit');
     case 'note-cancel': return actNote(el, 'cancel');
     case 'note-save': return actNote(el, 'save');
@@ -3147,6 +3177,12 @@ function bindEvents() {
     tocTick = true;
     requestAnimationFrame(() => { tocTick = false; syncGuideToc(); });
   }, { passive: true });
+  window.addEventListener('scroll', scheduleFab, { passive: true });
+  window.addEventListener('resize', scheduleFab);
+  document.addEventListener('focusin', scheduleFab);
+  document.addEventListener('focusout', scheduleFab);
+  FAB_MQ.addEventListener?.('change', scheduleFab);
+  if ('ResizeObserver' in window) new ResizeObserver(scheduleFab).observe(document.body); // 그림이 늦게 뜨거나 접힌 칸을 펼 때
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeIcon);
   setInterval(() => {
     $$('time[data-ts]').forEach((t) => { if (t.dataset.ts) t.textContent = fmtRel(t.dataset.ts); });

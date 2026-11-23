@@ -369,6 +369,9 @@ The **AI journal review** box on the task page shows each round's verdict, the o
 - **Display language (English / 한국어)** — the page opens in English. Click **한** at the top right to switch the page frame — menus, headings, buttons, status labels — and this guide to Korean;
   click **EN** to switch back to English. The browser remembers your choice. Task titles, instructions, progress logs, artifacts and review reports stay in the language they were written in (usually Korean).
   Messages for the AI (the paste-in text in static mode) are also generated in Korean.
+- **Phones and narrow windows** — when the page drops to a single column (phones, tablets), floating buttons appear at the bottom right:
+  **To top** · **Go to the message box** (when the page has a **Message to Claude** box that is out of view) · **To bottom**. They hide while you type.
+  At this width a task's **Progress log** tab shows the message box above the log.
 
 ## 8. Approve · request changes · reject
 
