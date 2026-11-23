@@ -2660,7 +2660,7 @@ async function submitNewTask(ev) {
   ].filter((x) => x !== null).filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
   openModal({
     title: L('{ai}에게 보낼 작업 지시', { ai }),
-    body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: data.title, body: msg, labels: [ghAgentLabel(data.agent)], ai })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 등록'), cmd)}`,
+    body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: data.title, body: msg, ai })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 등록'), cmd)}`,
   });
 }
 
@@ -2697,12 +2697,13 @@ function ghIssueUrl(repo, title, body, labels) {
   return `https://github.com/${repo}/issues/new?${q}`;
 }
 /** 정적 모드 보내기 창의 'GitHub 이슈로 보내기' (우편함을 정해 두었을 때만) */
-function ghIssueBlock({ title, body, labels = [], ai }) {
+function ghIssueBlock({ title, body, ai }) {
   const repo = ghRepo();
   if (!repo) return '';
+  const label = ghAgentLabel(ai) || ''; // 담당 AI 라벨 (claude · codex — mailbox 설정 때 만든 라벨) — 담당 미정이면 없음
   const site = location.origin + location.pathname.replace(/index\.html$/, '');
   return html`<div class="gh-send">
-    <button class="btn btn-primary" data-action="gh-issue" data-title="${title}" data-body="${`${body}\n\n<!-- devtrack-site: ${site} -->`}" data-labels="${labels.filter(Boolean).join(',')}">${icon('github')} ${L('GitHub 이슈로 보내기')}</button>
+    <button class="btn btn-primary" data-action="gh-issue" data-title="${title}" data-body="${`${body}\n\n<!-- devtrack-site: ${site} -->`}" data-labels="${label}">${icon('github')} ${L('GitHub 이슈로 보내기')}</button>
     <p class="hint">${LH('<b>{repo}</b> 에 내용이 채워진 새 이슈가 열립니다. 확인하고 <b>Submit</b> 하면 devtrack 이 1분 안에 받아 {ai}에게 넘깁니다 (devtrack watch 나 대기 모드가 켜져 있어야 함).', { repo, ai })}</p>
   </div>`;
 }

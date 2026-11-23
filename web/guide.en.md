@@ -788,6 +788,7 @@ An interactive Claude told to "wait for web instructions" (`devtrack inbox --wai
 
 1. On the static web, press **New task** (or Message, Approve, Request changes, Mark as done, Cancel task, Model) as usual.
 2. Press **Send as a GitHub issue** at the top of the send window: a new GitHub issue page opens, filled in with the message below it.
+   The assigned AI's label (`claude` · `codex`) is already set, so you can filter the GitHub issue list by AI (no label when unassigned).
 3. Check it (you may edit it) and press **Submit new issue**.
 4. Within 30 seconds to a minute devtrack records it and the assigned AI starts. The issue gets a reply such as `✅ T-0045 로 등록했습니다` ("registered as T-0045" — replies are in Korean) with a link to the web.
 
