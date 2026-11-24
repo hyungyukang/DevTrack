@@ -23,7 +23,7 @@ The output differs. The original writes a prompt for an image-generation model. 
 - the result shows up directly in DevTrack.
 
 Language:
-- **The report is written in Korean**: headings, summary, captions, "읽는 법", glossary.
+- **The report is written in the task language**: headings, summary, captions, "읽는 법" (How to read), glossary. **Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.
 - **Labels inside diagrams use the document's own terms in the document's language.** An English paper gets English labels.
   - If the user asks for Korean labels, translate them and keep the key original term in parentheses.
 - Quote numbers exactly as written, with their units.

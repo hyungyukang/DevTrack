@@ -13,7 +13,7 @@ an author, and fluent text is never evidence.
 
 Language:
 - **The manuscript stays in its own language** (usually English).
-- **Notes to the user are in Korean**: evidence ledger, change summary, DevTrack logs and requests.
+- **Notes to the user are in the task language**: evidence ledger, change summary, DevTrack logs and requests. **Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.
 - Reply in the language of the user's latest message.
 
 Arguments: $ARGUMENTS
@@ -191,7 +191,7 @@ These sections come only from what the user stated. Otherwise leave `[[MISSING: 
 ## Step 8: Deliver
 
 1. **Upload** (DevTrack mode). Upload the changed `.tex` and `.bib` files and any new figures with `--replace` (new versions, same names); the manuscript folder rebuilds itself. Upload the ledger too.
-2. **Change summary.** Write `changes.md` (Korean): what changed where, the placeholders left with their count and locations, and the open questions for the user. Record it with `devtrack log`.
+2. **Change summary.** Write `changes.md` (in the task language): what changed where, the placeholders left with their count and locations, and the open questions for the user. Record it with `devtrack log`.
 3. **Ask for a check.** `devtrack request <TID> "원고를 확인해 주세요" -k result -a <PDF F-ID or .tex F-ID> -d "<바뀐 것 · 남은 [[MISSING]] n개 · 결정할 것>"`, then stop.
    - When the decision arrives: approved → continue with the plan, or `devtrack done`; changes requested → revise and request again.
 4. **Journal review loop.** If the task is set to get a journal review (`devtrack show` lists 심사), request it once the manuscript is complete: `devtrack review-request <TID>`, following DevTrack's paper rules.

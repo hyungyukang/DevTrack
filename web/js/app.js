@@ -360,7 +360,7 @@ const copyBtn = (text) => html`<button class="btn btn-sm" data-action="copy" dat
 function wakeHow(t) {
   const a = String(t.agent ?? '').trim();
   const any = isUnassigned(a);
-  const claude = html`<li>${any ? L('Claude: 채팅에서') : L('Claude 채팅에서')} <b>"웹 지시 기다려줘"</b> ${copyBtn('웹 지시 기다려줘')}
+  const claude = html`<li>${any ? L('Claude: 채팅에서') : L('Claude 채팅에서')} <b>"${L('웹 지시 기다려줘')}"</b> ${copyBtn(L('웹 지시 기다려줘'))}
     — ${LH('대기 모드를 켜면 앞으로 웹 지시를 바로 받습니다. 한 번만 하려면 <b>"devtrack inbox 확인하고 진행해줘"</b>')}</li>`;
   const watch = (name, cmd) => html`<li>${name ? `${name}: ` : ''}${L('터미널에서 실행기를 켜 두세요')} — <code>${cmd}</code> ${copyBtn(cmd)}
     (<a href="#/guide/s11">${L('사용 방법 11단계')}</a>)</li>`;
@@ -391,7 +391,7 @@ function waitingBox(t) {
         <b>${L('{who}가 웹 지시를 기다리고 있습니다', { who })}</b>
         <p>${listenersText(fresh)} — ${busy ? L('지금 다른 작업을 처리하고 있어, 끝나면 이 작업을 시작합니다.') : L('몇 초 안에 이 작업을 시작합니다.')}</p></div></div>`;
     }
-    const ask = `${t.id} 진행해줘`;
+    const ask = L('{id} 진행해줘', { id: t.id });
     return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
       <b>${L('{who}가 기다리고 있지만, 이 작업은 이미 확인하고 시작하지 않았습니다', { who })}</b>
       <p>${listenersText(ls)} — ${L('같은 지시로는 다시 깨어나지 않습니다.')}</p>
@@ -403,7 +403,7 @@ function waitingBox(t) {
   const other = listenersOtherModel(t);
   if (other.length) {
     const spec = specLabel(t.model, t.effort);
-    const ask = `${t.id} 진행해줘`;
+    const ask = L('{id} 진행해줘', { id: t.id });
     const cmds = [t.model ? `/model ${t.model}` : '', t.effort ? `/effort ${t.effort}` : ''].filter(Boolean);
     const watchCmd = sameAgent(t.agent, 'Codex') ? 'devtrack watch --codex' : 'devtrack watch --claude';
     return html`<div class="alert alert-amber">${icon('alert')}<div class="alert-body">
@@ -860,13 +860,17 @@ function artifactThread(t, art) {
 /** 작업의 담당 AI 에게 메시지 보내기. artifact 를 주면 결과물 화면의 '수정 요청 · 추가 지시' 칸 (그 결과물을 가리키는 메시지) */
 // 시각화 요청 버튼을 두는 작업 유형 — 보낸 메시지는 AI 의 inbox 에서 /visualize-doc 스킬로 안내된다 (cli.VISUAL_TYPES)
 const VISUAL_TYPES = ['paper', 'docreview', 'visualization', 'visual'];
-// AI 에게 가는 글이라 한국어 그대로
-const VISUAL_REQUEST = '이 문서를 시각화해 주세요 (/visualize-doc) — 짜임새 있는 요약과 핵심 모식도 · 문서 구조 도식.\n초점 (선택): ';
+// 사용자가 고쳐 보낼 메시지라 화면 언어로
+const VISUAL_REQUEST = {
+  ko: '이 문서를 시각화해 주세요 (/visualize-doc) — 짜임새 있는 요약과 핵심 모식도 · 문서 구조 도식.\n초점 (선택): ',
+  en: 'Please visualize this document (/visualize-doc): a structured summary with the main schematic and a diagram of the document structure.\nFocus (optional): ',
+};
 
 function fillVisualRequest(task) {
   const ta = document.getElementById(`fb-${task}`);
   if (!ta) return;
-  if (!ta.value.includes('/visualize-doc')) ta.value = ta.value.trim() ? `${ta.value.trim()}\n\n${VISUAL_REQUEST}` : VISUAL_REQUEST;
+  const req = VISUAL_REQUEST[getLang() === 'en' ? 'en' : 'ko'];
+  if (!ta.value.includes('/visualize-doc')) ta.value = ta.value.trim() ? `${ta.value.trim()}\n\n${req}` : req;
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
 }
@@ -2009,15 +2013,39 @@ function paperSize(p) {
   return name ? `${name} ${orient}` : `${p.w_mm} × ${p.h_mm} mm`;
 }
 
-// 메뉴에서 새로 만들 때: 새 작업 지시에 스킬 호출을 채워 둔다 (AI 에게 가는 글이라 한국어 그대로)
+// 메뉴에서 새로 만들 때 · 유형을 고를 때 채우는 제목 · 지시 틀 — 화면 언어로 (지시의 언어가 작업 언어가 되어 AI 의 기록 · 결과물도 그 언어로)
 const DECK_NEW = {
-  slides: { type: 'slides', title: '발표 자료: ', instruction: '/make-slides <발표할 논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 발표 종류 · 길이: (예: 학회 15분, 그룹 미팅 10분)\n- 청중:\n- 언어:' },
-  posters: { type: 'poster', title: '포스터: ', instruction: '/make-poster <논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 크기 · 방향: (예: A0 세로)\n- 학회 · 규정:' },
-  visuals: { type: 'visual', title: '문서 시각화: ', instruction: '/visualize-doc <문서의 작업 번호(T-…) 또는 경로>\n\n- 초점 (선택): (예: 방법 부분, 3장)' },
+  slides: {
+    type: 'slides',
+    title: { ko: '발표 자료: ', en: 'Slides: ' },
+    instruction: {
+      ko: '/make-slides <발표할 논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 발표 종류 · 길이: (예: 학회 15분, 그룹 미팅 10분)\n- 청중:\n- 언어:',
+      en: '/make-slides <task ID (T-…) or path of the paper or document to present>\n\n- Talk type and length: (e.g. conference 15 min, group meeting 10 min)\n- Audience:\n- Language:',
+    },
+  },
+  posters: {
+    type: 'poster',
+    title: { ko: '포스터: ', en: 'Poster: ' },
+    instruction: {
+      ko: '/make-poster <논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 크기 · 방향: (예: A0 세로)\n- 학회 · 규정:',
+      en: '/make-poster <task ID (T-…) or path of the paper or document>\n\n- Size and orientation: (e.g. A0 portrait)\n- Conference and its rules:',
+    },
+  },
+  visuals: {
+    type: 'visual',
+    title: { ko: '문서 시각화: ', en: 'Visualize: ' },
+    instruction: {
+      ko: '/visualize-doc <문서의 작업 번호(T-…) 또는 경로>\n\n- 초점 (선택): (예: 방법 부분, 3장)',
+      en: '/visualize-doc <task ID (T-…) or path of the document>\n\n- Focus (optional): (e.g. the methods, chapter 3)',
+    },
+  },
 };
-// 새 작업 지시에서 유형을 고르면 지시 내용이 비어 있을 때 채우는 틀 (발표 자료 · 포스터 · 문서 시각화)
-const TYPE_TEMPLATE = { slides: DECK_NEW.slides.instruction, poster: DECK_NEW.posters.instruction, visual: DECK_NEW.visuals.instruction };
-const newHref = (k) => `#/new?type=${DECK_NEW[k].type}&title=${encodeURIComponent(DECK_NEW[k].title)}&instruction=${encodeURIComponent(DECK_NEW[k].instruction)}`;
+const uiLang = () => (getLang() === 'en' ? 'en' : 'ko');
+const TYPE_DECK = { slides: 'slides', poster: 'posters', visual: 'visuals' };
+/** 유형을 고르면 지시 내용이 비어 있을 때 채우는 틀 (화면 언어) */
+const typeTemplate = (type) => (TYPE_DECK[type] ? DECK_NEW[TYPE_DECK[type]].instruction[uiLang()] : '');
+const ALL_TEMPLATES = Object.values(DECK_NEW).flatMap((d) => Object.values(d.instruction));
+const newHref = (k) => `#/new?type=${DECK_NEW[k].type}&title=${encodeURIComponent(DECK_NEW[k].title[uiLang()])}&instruction=${encodeURIComponent(DECK_NEW[k].instruction[uiLang()])}`;
 
 function deckListItem(a, sel, route) {
   const p = a.pptx || {};
@@ -2570,7 +2598,7 @@ function viewNewTask({ q = {} } = {}) {
         <div class="rel-chips" data-rel-chips ${rel.length ? '' : raw('hidden')}>${rel.map((id) => relChip(id))}</div>
         <small>${L('목록에서 여러 개를 차례로 고르거나 작업 번호를 직접 적으세요 (쉼표 · ; · 띄어쓰기로 구분, 3 = T-0003). 예: 논문에 쓸 데이터 분석이라면 그 논문 작업을 고르세요 — 논문 작성 화면에 연결되어 표시됩니다.')}</small>
       </div>
-      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}">${q.instruction || TYPE_TEMPLATE[type] || ''}</textarea></label>
+      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}">${q.instruction || typeTemplate(type)}</textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <a class="btn btn-ghost" href="#/tasks">${L('취소')}</a>
         <button class="btn btn-primary" type="submit">${icon('send')} ${state.mode === 'live' ? L('작업 지시 등록') : L('지시문 만들기')}</button>
@@ -2781,8 +2809,7 @@ function syncTypeFields(form) {
   if (note) { note.textContent = typeSkillNote(type); note.hidden = !TYPE_SKILL[type]; }
   // 지시 내용이 비었거나 다른 유형의 틀 그대로면 이 유형의 틀로 바꾼다 (직접 쓴 글은 건드리지 않음)
   const ta = form.elements.instruction;
-  const templates = Object.values(TYPE_TEMPLATE);
-  if (ta && (!ta.value.trim() || templates.includes(ta.value))) ta.value = TYPE_TEMPLATE[type] || '';
+  if (ta && (!ta.value.trim() || ALL_TEMPLATES.includes(ta.value))) ta.value = typeTemplate(type);
   $$('[data-type-only]', form).forEach((el) => { el.hidden = el.dataset.typeOnly !== type; });
   $$('[data-type-hide]', form).forEach((el) => { el.hidden = el.dataset.typeHide === type; });
   $$('[data-type-in]', form).forEach((el) => { el.hidden = !el.dataset.typeIn.split(' ').includes(type); });
@@ -2795,9 +2822,9 @@ function takeDocFields(data) {
   const { doc_path: path = '', doc_kind: kind = '', doc_purpose: purpose = '', ...rest } = data;
   if (rest.type !== 'docreview') return rest;
   const brief = [
-    path.trim() ? `- 검토할 문서: ${path.trim()}` : '',
-    kind ? `- 문서 종류: ${DOC_KIND[kind]?.labelKo || kind}` : '',
-    purpose.trim() ? `- 문서의 목적 · 제출처: ${purpose.trim()}` : '',
+    path.trim() ? `- ${L('검토할 문서')}: ${path.trim()}` : '',
+    kind ? `- ${L('문서 종류')}: ${DOC_KIND[kind]?.label || kind}` : '',
+    purpose.trim() ? `- ${L('문서의 목적 · 제출처')}: ${purpose.trim()}` : '',
   ].filter(Boolean).join('\n');
   return { ...rest, repo: '', branch: '', instruction: [brief, (rest.instruction || '').trim()].filter(Boolean).join('\n\n') };
 }

@@ -11,8 +11,8 @@ Produces a reviewer's report on a document: what it says, whether it does its jo
 each finding numbered (R1, R2…) with location, original text and a suggested revision. The deliverable is a **PDF report**.
 Afterwards the user can say "R1, R3 반영한 수정본 만들어 줘" / "Make a revision with R1 and R3", or answer on the DevTrack dashboard.
 
-Language:
-- **The report and the findings JSON are written in Korean** — headings, tables, finding titles, `plain`, `summary`, `synopsis`.
+Language (**Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.):
+- **The report and the findings JSON are written in the task language** — headings, tables, finding titles, `plain`, `summary`, `synopsis`.
 - Quote the document **verbatim** in its own language (`quote`). Write suggested revisions (`suggestion`) **in the document's language** — English for an English paper, Korean for a Korean proposal.
 - Reply in the language of the user's latest message.
 

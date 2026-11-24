@@ -24,6 +24,13 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   `~/.config/devtrack/config.json`, `devtrack config`) > `<저장소>/data`. 웹 공개 폴더도 같은 순서(`publish_location`, 설정 파일 값은
   설정한 기록 폴더를 쓸 때만). 환경 변수는 그 셸에서 켠 프로세스에만 있으므로(먼저 켠 serve, VS Code 의 AI · 훅) 설정 파일이 기본 수단.
   `_warn_other_data` 가 init · serve · watch · `inbox --wait` 에서 다른 곳의 기록을 알린다 (`--data` 일 때는 조용히)
+- 작업 언어: `devtrack/lang.py` — 작업의 `lang`(ko · en, 만들 때 제목 · 지시에서 `detect`, `new --lang`, 리뷰 · 심사 작업은 원래 작업을 따름,
+  예전 작업은 `task_lang` 이 알아냄). 영어 작업이면 `Store._log` 가 DevTrack 의 자동 기록 문구를 `EN_LOG` 로 바꾼다 (사용자 · AI 가 쓴 글은 그대로) —
+  store.py 의 기록 문구를 바꾸면 `EN_LOG` 도 함께 고칠 것. AI 에게는 inbox · `start` 의 `→ 작업 언어: 영어`, `show` 의 `언어` 로 알린다.
+  리뷰 반복의 글(리뷰어 지시 `_review_instruction` · `_doc_review_instruction_en`, 판정 [AI 메시지] `_review_result_message`, 요청 메시지 ·
+  결과물 제목, 심사 · 답변 기록 `RECORD_KO` · `RECORD_EN`, 빌드 결과물 이유 `gitops.excluded_text(en=)`)는 작업 언어로 직접 쓴다 — 한쪽을 고치면 다른 쪽도.
+  `devtrack withdraw <T> <A>` 는 결정 전인 승인 요청을 요청한 쪽이 거둔다 (상태 `withdrawn`, 변경을 더해 커밋을 다시 요청할 때)
+  웹의 화면 틀(새로 만들기 · 유형 틀 `DECK_NEW` · 시각화 요청 · 복사 문구)은 화면 언어를 따른다 — AI 에게 보내는 정해진 형식의 메시지만 한국어
 - `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화 —
   기록 폴더가 곧 공개 폴더의 `data/` 이면(`publish_is_root`, 심볼릭 링크 · 다른 경로 이름도 `same_dir` 로 판단) 복사 · 정리를 건너뜀)
 - `devtrack/cli.py` argparse CLI, `devtrack/server.py` 로컬 서버(정적 + POST API), `devtrack/gitops.py` diff/commit/push, `devtrack/demo.py` 예시 데이터

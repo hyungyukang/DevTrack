@@ -98,6 +98,8 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - Keep paper figures in `figures/` next to the manuscript, put `\graphicspath{{figures/}}` in the manuscript, and load them without an extension: `\includegraphics{fig_name}`.
   Upload each figure as an artifact under that same file name (DevTrack gathers the manuscript and figures in `tasks/<TID>/paper/`).
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
+- Write in the language the task instruction was written in: steps, logs, issues, artifacts, reports, approval requests and handoff notes
+  (`devtrack show` shows `언어`; English tasks get `→ 작업 언어: 영어` in the inbox and on `start`).
 - When asked to visualize a paper or document-review task (summary, diagrams, schematics), use the `/visualize-doc <TID>` skill
   (the inbox marks such a message `→ 문서 시각화 요청`).
 - When asked to write a paper, make slides or make a poster, use the `/write-paper`, `/make-slides` or `/make-poster` skill
@@ -1128,6 +1130,12 @@ An environment variable such as `DEVTRACK_DATA` only reaches programs started fr
 Set the folder in the settings file with `devtrack config data <records folder>`, and devtrack uses the same place wherever it runs. Then restart any `serve`, `watch` or waiting mode you left running.
 `devtrack config` shows where records go now and whether other folders also have tasks. To see the tasks there, run `devtrack --data <that folder> list`.
 
+**If I give the instruction in English, are the records and artifacts in English too?**
+Yes. When a task is created, the language of its title and instruction becomes the task language, and the AI writes steps, logs, issues, artifacts,
+reports and approval requests in it. The records DevTrack writes by itself ("Status: …", "Artifact added: …") are in English for an English task too.
+With the English UI (**EN** at the top), the templates that New task, New slides and so on fill in are English as well. In the terminal, set it with
+`devtrack new … --lang en`.
+
 **Where are the records, and how do I back them up?**
 Everything is in the records folder (see `devtrack config`; default `~/devtrack/data/`). Copying this folder is a backup.
 
@@ -1164,6 +1172,6 @@ Commands you use yourself:
 
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
 `link` link tasks · `latex` compile LaTeX (records the PDF as a build) ·
-`request` approval request · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
+`request` approval request · `withdraw` take back a request not yet decided · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
 `start --take` take over another AI's task · `note` handoff note · `show --brief` short view of another task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).

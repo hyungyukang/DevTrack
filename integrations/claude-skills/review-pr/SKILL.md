@@ -11,10 +11,10 @@ Produces a reviewer's report on another developer's pull request: what the PR do
 
 This is the reviewer-side counterpart of `pr-review-report` (which handles comments on the user's own PRs). It reuses that skill's email script and config.
 
-Language:
-- **The whole report is written in Korean** — every heading, table, finding title, and the developer sections too (변경 사항, 상세: 문제 · 왜 중요한가 · 제안 · 확신도, 테스트 · 검증 제안, 종합 의견). The developer parts are technical, but still Korean sentences.
-- The findings JSON is Korean as well: `title`, `plain`, `summary`, `verdict_reason`.
-- Keep in their original form only: code, identifiers, file paths, commands, config keys, numbers with units, and text you quote from code, docs or comments (a quoted English sentence stays English, followed by a short Korean explanation). Technical terms may be written as 한국어(원어) at first use, e.g. "부분 셀(partial cell)".
+Language (**Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.):
+- **The whole report is written in the task language** — every heading, table, finding title, and the developer sections too (변경 사항, 상세: 문제 · 왜 중요한가 · 제안 · 확신도, 테스트 · 검증 제안, 종합 의견 — or their English equivalents for an English task). The developer parts are technical, but still sentences in the task language.
+- The findings JSON is in the task language as well: `title`, `plain`, `summary`, `verdict_reason`.
+- Keep in their original form only: code, identifiers, file paths, commands, config keys, numbers with units, and text you quote from code, docs or comments (a quoted sentence stays as it is, followed by a short explanation in the task language). In a Korean task, technical terms may be written as 한국어(원어) at first use, e.g. "부분 셀(partial cell)".
 - Instructions may come in Korean or English. Reply in the language of the user's latest message.
 - Only the GitHub review comments (Phase 4–5) are drafted in English, unless the PR conversation is in another language.
 
@@ -59,7 +59,7 @@ DevTrack is the user's progress dashboard (web): it shows what you are doing, th
         --plan "PR 정보 · 변경사항 수집" "코드 검토" "리뷰 리포트 작성" "코멘트할 항목 선택 (사용자)" "코멘트 초안 작성 · 게시 승인" "PR 에 게시")
   ```
   Store the TID as `devtrack_task` in the state file.
-- **Progress.** At each phase: `devtrack step <TID> "<지금 하는 일, 쉬운 한국어>" -p <0-100>`; when plan step k is done: `devtrack check <TID> <k>`. Something that limits the review (no access to a file, parts of a huge PR skipped, CI logs unavailable) → `devtrack issue <TID> "<무엇이 문제인지>" -s medium`.
+- **Progress.** At each phase: `devtrack step <TID> "<지금 하는 일 — 작업 언어로, 쉬운 말>" -p <0-100>`; when plan step k is done: `devtrack check <TID> <k>`. Something that limits the review (no access to a file, parts of a huge PR skipped, CI logs unavailable) → `devtrack issue <TID> "<무엇이 문제인지>" -s medium`.
 - `devtrack` commands that create something print only the new ID on stdout. Do not pass `--data`; the user's DevTrack setting (`devtrack config` or `$DEVTRACK_DATA`) decides where records go.
 
 ## Phase 1: Collect
@@ -110,7 +110,7 @@ State / findings JSON:
   "verdict": "request_changes",
   "summary": "<한 줄 결론 + 꼭 고칠 것을 쉬운 말 2~3문장으로>",
   "findings": [
-    {"id": "R1", "severity": "blocker", "title": "<한국어 한 줄 요약 (기술적이어도 한국어로)>",
+    {"id": "R1", "severity": "blocker", "title": "<한 줄 요약 — 작업 언어로 (기술적이어도)>",
      "plain": "<쉽게 말하면: 비전문가용 1~2문장>", "file": "src/boundary.cpp", "line": 88,
      "category": "정확성", "confidence": "high", "status": "open", "head_sha": "<sha>"}
   ]
@@ -128,10 +128,10 @@ The report is read by the PR's developers **and by people who do not read this c
 - Lead with the conclusion. Short sentences, one idea per sentence.
 - In the plain parts, describe **consequences, not mechanisms**: in which situation what goes wrong and how badly ("가로·세로 칸 크기가 다른 격자에서 벽 근처 값이 틀립니다"), not "uses dx instead of dy".
 - No unexplained jargon or abbreviations in the plain parts. If a technical term is unavoidable, add a short gloss in parentheses at first use, and list it in 용어 풀이.
-- Severity is always shown in Korean with the English term: 🔴 반드시 수정 (Blocker), 🟠 수정 권장 (Major), 🟡 개선 제안 (Minor), ⚪ 사소함 (Nit), 🔵 질문 (Question). Confidence: 높음 / 중간 / 낮음.
+- Severity: in a Korean task 🔴 반드시 수정 (Blocker), 🟠 수정 권장 (Major), 🟡 개선 제안 (Minor), ⚪ 사소함 (Nit), 🔵 질문 (Question), confidence 높음 / 중간 / 낮음; in an English task 🔴 Blocker, 🟠 Major, 🟡 Minor, ⚪ Nit, 🔵 Question, confidence high / medium / low.
 - Do not overstate: medium/low-confidence findings say "~일 수 있습니다", and questions are written as questions.
 - Keep the developer part precise: code, file:line, exact conditions, evidence. Plain language is added on top, never instead of it.
-- Precise does not mean English: write the developer part in Korean too (see "Language"), keeping identifiers and quoted text as they are.
+- Precise does not mean English: write the developer part in the task language too (see "Language"), keeping identifiers and quoted text as they are.
 
 ## Phase 3: Report
 
@@ -146,7 +146,7 @@ Title: `PR #<n> 코드 리뷰 – <owner>/<repo> – <date>`.
    - The severity legend table `중요도 | 뜻` (the five levels above, each with a one-line meaning).
 2. **검토 결과 요약**: table `# | 중요도 | 쉬운 설명 | 위치 | 분류 | 확신도` (쉬운 설명 = the `plain` idea in one short line).
 3. **변경 사항** (개발자용): 3–6 sentences on what the PR does and why (from the description, commits and code) and whether the implementation matches the stated intent; then changes grouped by component or purpose, not file by file — a table `영역 | 파일 | +/− | 변경 내용` — and a few sentences on the key design decisions.
-4. **상세 (개발자용)**: one section per finding, headed `### R1. <한국어 제목> — 🔴 반드시 수정`, with bullets (all in Korean):
+4. **상세 (개발자용)**: one section per finding, headed `### R1. <제목> — 🔴 반드시 수정` (English task: `— 🔴 Blocker`), with bullets (all in the task language):
    - **쉽게 말하면:** 1–2 plain sentences (the `plain` text).
    - **위치:** file:line on the head side, with a link.
    - **문제:** what is wrong, with the code evidence.
@@ -174,7 +174,7 @@ Write the report Markdown the way GitHub renders it (CommonMark + tables): pipe 
 - **Cloud**: publish as a document artifact; no email.
 - **DevTrack** (in addition to the above, local or remote):
   1. Always write `~/.pr-review/<owner>-<repo>/review-PR-<n>.md` (also locally) and the findings JSON.
-  2. Before registering, check the language: every heading and finding title in the report and the JSON must be Korean (see "Language"); fix anything that is not.
+  2. Before registering, check the language: every heading and finding title in the report and the JSON must be in the task language (see "Language"); fix anything that is not.
   3. Register the report, its PDF and the findings in one command:
      `devtrack review <TID> ~/.pr-review/<owner>-<repo>/review-PR-<n>.md --pdf -n "PR #<n> 리뷰 리포트" --findings ~/.pr-review/<owner>-<repo>/review-PR-<n>.json`
      `--pdf` renders `review-PR-<n>.pdf` next to the Markdown (A4, Korean fonts, same look as the web) with a headless Chrome/Chromium and attaches both. It prints the artifact IDs, first one = the Markdown report. If it warns that no browser was found, the Markdown is still registered; tell the user the PDF was skipped and why. Then `devtrack check <TID> 3`.

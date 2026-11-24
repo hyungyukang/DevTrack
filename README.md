@@ -11,14 +11,14 @@ pushes it to the target repository.
 ![The DevTrack dashboard showing the demo data in the English UI](docs/images/dashboard.png)
 
 1. **New task** — give an AI agent a task from the web (you can also just ask it in the chat).
-2. **Work areas** — tasks grouped by kind: code development, code review, paper writing, document review, data analysis, brainstorming.
+2. **Work areas** — tasks grouped by kind: code development, code review, paper writing, slides, posters, document review, visualizer, data analysis, brainstorming.
 3. **At a glance** — how many tasks are in progress, waiting for your approval, have open issues, or are done.
 4. **Needs attention** — what the agents are asking you: commit and push, check a result, choose which review comments to post, pick an idea.
    **Review** opens the diff or report so you can approve, request changes or reject.
 5. **Recent activity** — what the agents recorded, newest first.
 6. **Top bar** — `Live · local server` means your clicks on the web are saved directly. Next to it: refresh, **한** (switch to Korean), dark mode, and the bell with the number of pending approvals.
 
-<sub>The demo data from [Quick start](#quick-start-see-the-example-locally). Task titles and records are written by the agents — in Korean here, as the agent rules ask.</sub>
+<sub>The demo data from [Quick start](#quick-start-see-the-example-locally). Task titles and records are written by the agents — in Korean here, because the demo tasks were given in Korean; an English instruction gets English records.</sub>
 
 ```text
  User ── instruction ──▶ AI agent (Claude, Codex)
@@ -220,6 +220,7 @@ devtrack inbox                              # new instructions · messages · de
 | `latex` | Compile LaTeX. On success, record the PDF as a build (page count, undefined citations/references, overfull warnings); on failure, record where the error is and the log. `--pdf` records a PDF built elsewhere |
 | `paper` | Rebuild a paper task's manuscript folder (`tasks/<T-ID>/paper`: the latest `.tex` · `.bib` and the figures the manuscript loads) and list figures LaTeX would not find (wrong extension, no figure artifact). It is also rebuilt whenever a manuscript or figure artifact changes |
 | `request` / `wait` / `apply` | Approval request (`--commit` attaches the diff automatically, `--choices` lets the user tick items on the web) / wait for the decision / run an approved commit |
+| `withdraw` | Take back an approval request that is not decided yet (e.g. to add more changes and request the commit again) |
 | `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (`--artifact F-ID` for a message about one artifact; in static mode the agent records them for the user) |
 | `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task; `--any-model` also for tasks set to another model) |
 | `hook` | PreToolUse hook for Claude Code · Codex: if the user marked the session's task as done, cancelled or deleted it, the next tool call is blocked so the agent stops. Always hook up `bin/devtrack-hook`, which always exits 0 (setup: Guide 5-4 and step 11 ⑤) |

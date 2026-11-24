@@ -16,7 +16,7 @@ The skill makes three files:
 
 Language:
 - **Slide text and speaker notes** are in the talk's language. Use what the user says; otherwise use the source document's language, so an English paper gives English slides.
-- **Your summary to the user** is in Korean.
+- **Your summary to the user and the DevTrack records** (steps, logs, requests, artifact titles) are in the task language. **Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.
 - Reply in the language of the user's latest message.
 
 Arguments: $ARGUMENTS

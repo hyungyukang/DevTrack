@@ -16,7 +16,7 @@ The skill makes three files:
 
 Language:
 - **Poster text** is in the poster's language: the user's choice, otherwise the source document's.
-- **Your summary to the user** is in Korean.
+- **Your summary to the user and the DevTrack records** (steps, logs, requests, artifact titles) are in the task language. **Task language** = the language the user wrote the task instruction in. With DevTrack, `devtrack show <TID>` shows it (`언어 한국어 · 영어`), and `devtrack start` and the inbox print `→ 작업 언어: 영어` for English tasks; without DevTrack, it is the language of the user's request.
 
 Arguments: $ARGUMENTS
 - **A DevTrack task** (a paper, document review or analysis) or a document path.

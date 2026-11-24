@@ -223,12 +223,24 @@ def capture_diff(repo, files=None):
     return capture_changes(repo, files)["diff"]
 
 
-def excluded_text(excluded, limit=6):
-    """'build/ (CMake 빌드 폴더) 1,234개 · *.o (컴파일 결과물) 12개' 처럼."""
-    parts = ["{} ({}){}".format(e["path"], e["reason"], " {:,}개".format(e["count"]) if e["count"] > 1 else "")
+_REASON_EN = {"CMake 빌드 폴더": "CMake build folder", "CMake 가 만든 파일": "made by CMake", "빌드 폴더": "build folder",
+              "빌드가 만든 파일": "made by the build", "컴파일 결과물": "compiled output",
+              "실행 파일 · 라이브러리": "executable · library"}
+
+
+def _reason_en(reason):
+    if reason in _REASON_EN:
+        return _REASON_EN[reason]
+    return reason[:-3] + " folder" if reason.endswith(" 폴더") else reason
+
+
+def excluded_text(excluded, limit=6, en=False):
+    """'build/ (CMake 빌드 폴더) 1,234개 · *.o (컴파일 결과물) 12개' 처럼 (en: 영어 작업이면 영어로)."""
+    parts = ["{} ({}){}".format(e["path"], _reason_en(e["reason"]) if en else e["reason"],
+                                ((" {:,} files" if en else " {:,}개").format(e["count"]) if e["count"] > 1 else ""))
              for e in excluded[:limit]]
     if len(excluded) > limit:
-        parts.append("외 {}곳".format(len(excluded) - limit))
+        parts.append(("and {} more" if en else "외 {}곳").format(len(excluded) - limit))
     return " · ".join(parts)
 
 

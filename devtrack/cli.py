@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-from . import DevTrackError, __version__, access, gitops, mailbox, models
+from . import DevTrackError, __version__, access, gitops, lang as _lang, mailbox, models
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, TYPE_SKILLS, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
@@ -266,7 +266,7 @@ def cmd_new(store, args):
         type=args.type, agent=args.agent or args.author, repo=args.repo, branch=args.branch,
         repo_url=args.url, tags=args.tag, priority=args.priority,
         status="queued" if queued else "in_progress", created_by=USER if queued else None, plan=args.plan,
-        related=args.related, model=args.model, effort=args.effort,
+        related=args.related, model=args.model, effort=args.effort, lang=args.lang,
         review={"reviewer": args.review_by, "rounds": args.review_rounds, "model": args.review_model,
                 "effort": args.review_effort, "doc": args.review_doc, "venue": args.review_venue}
         if args.review_by else None,
@@ -296,6 +296,13 @@ def _check_model(store, tid, args):
               "지정과 다르면 진행하지 마세요".format(t["id"], want))
 
 
+def _lang_line(t):
+    """영어 작업이면 AI 에게: 기록 · 결과물을 영어로 (작업 지시의 언어)."""
+    if _lang.task_lang(t) == "en":
+        return "→ 작업 언어: 영어 — 단계 · 기록 · 문제 · 결과물 · 리포트 · 승인 요청 · 인계 메모를 영어로 씁니다 (작업 지시의 언어)"
+    return None
+
+
 def cmd_start(store, args):
     _check_model(store, args.task, args)
     t = store.update_task(args.task, status="in_progress", step=args.step, author=args.author,
@@ -303,6 +310,8 @@ def cmd_start(store, args):
     _out(args, t, "{} 진행 중".format(t["id"]))
     sys.stdout.flush()
     if not args.json:
+        if _lang_line(t):
+            _info(_lang_line(t))
         for line in _related_note_lines(store, t):
             _info(line)
 
@@ -583,6 +592,11 @@ def cmd_pptx(store, args):
         if result.get(k):
             print("  미리보기 못 만듦: " + result[k])
     return 0
+
+
+def cmd_withdraw(store, args):
+    ap = store.withdraw_approval(args.task, args.approval, reason=args.message or "", author=args.author)
+    _out(args, ap, "{} {} 철회: {}".format(normalize_task_id(args.task), ap["id"], ap["title"]))
 
 
 def cmd_doc(store, args):
@@ -902,6 +916,8 @@ def _format_inbox(items):
                 out.append(_indent(it["instruction"]))
             out.extend(_sent_lines(it))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
+            if it.get("lang") == "en":
+                out.append(_indent(_lang_line({"lang": "en"})))
             out.extend(_skill_hints(it))
             if it.get("related"):
                 out.append(_indent("→ 관련 작업 {}: 먼저 devtrack show <작업> --brief (인계 메모) 를 읽고, 리포트 · 파일은 필요한 것만"
@@ -2017,8 +2033,9 @@ def _related_note_lines(store, t):
 def _show_brief(store, t):
     """다른 작업 · 다음 대화가 이 작업을 참고할 때 먼저 읽는 짧은 보기: 상태 · 주요 결과물 · 인계 메모."""
     print("{}  {}".format(t["id"], t["title"]))
-    print("  {} · {} · {}% · 에이전트 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
-                                             t.get("progress", 0), t.get("agent")))
+    print("  {} · {} · {}% · 에이전트 {} · 언어 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
+                                                     t.get("progress", 0), t.get("agent"),
+                                                     _lang.LANGS[_lang.task_lang(t)]))
     repo = t.get("repo") or {}
     if repo:
         print("  저장소: {}{}".format(repo.get("path") or repo.get("url"),
@@ -2100,8 +2117,9 @@ def cmd_show(store, args):
         return _show_brief(store, t)
     repo = t.get("repo") or {}
     print("{}  {}".format(t["id"], t["title"]))
-    print("  {} · {} · {}% · 에이전트 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
-                                             t.get("progress", 0), t.get("agent")))
+    print("  {} · {} · {}% · 에이전트 {} · 언어 {}".format(TASK_TYPES.get(t["type"]), STATUSES.get(t["status"]),
+                                                     t.get("progress", 0), t.get("agent"),
+                                                     _lang.LANGS[_lang.task_lang(t)]))
     spec = models.spec_label(*models.task_spec(t))
     if spec:
         print("  모델: {} (이 모델의 세션 · devtrack watch 만 처리)".format(spec))
@@ -2463,6 +2481,7 @@ def build_parser():
     sp.add_argument("title", help="작업 제목")
     sp.add_argument("-t", "--type", default="code", choices=list(TASK_TYPES), help="작업 유형")
     sp.add_argument("-i", "--instruction", help="사용자 지시 내용 (markdown)")
+    sp.add_argument("--lang", choices=sorted(_lang.LANGS), help="작업 언어 — 기록 · 결과물을 쓸 언어 (기본: 제목 · 지시의 언어)")
     sp.add_argument("--instruction-file", metavar="FILE", help="지시 내용을 파일에서 읽기 (- 는 stdin)")
     sp.add_argument("--repo", help="대상 저장소 경로 (git 이면 브랜치/원격 자동 감지)")
     sp.add_argument("--branch")
@@ -2586,6 +2605,11 @@ def build_parser():
     sp.add_argument("file", help=".docx · .pdf · .tex · .md 등")
     sp.add_argument("-o", "--output", help="저장할 파일 (없으면 표준출력)")
     sp.add_argument("--timeout", type=int, default=120, help="pdftotext 제한 시간 (초)")
+
+    sp = add("withdraw", cmd_withdraw, "결정 전인 내 승인 요청 거두기 (예: 변경을 더해 커밋 요청을 다시 올릴 때)")
+    sp.add_argument("task")
+    sp.add_argument("approval", metavar="A-ID")
+    sp.add_argument("-m", "--message", help="사유")
 
     sp = add("doc", cmd_doc, "작업이 다루는 문서 파일 경로 — 심사 원고 · 논문 원고 폴더의 본문 · 검토할 문서 · 문서 결과물 순")
     sp.add_argument("task")

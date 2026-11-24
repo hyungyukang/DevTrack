@@ -97,7 +97,10 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
   심사가 끝나 사용자에게 알릴 때는 심사 · 답변 기록(판정 메시지의 F-ID)을 `-a` 로 첨부한다.
 - 논문 그림은 원고 옆 `figures/` 에 두고 원고에 `\graphicspath{{figures/}}`, 부를 때는 확장자 없이 `\includegraphics{fig_name}`.
   그림은 그 파일 이름 그대로 결과물로 올린다 (DevTrack 이 `tasks/<TID>/paper/` 에 원고 · 그림을 모은다).
-- 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
+- 사용자가 "웹 지시 기다려줘" (영어 화면: "Wait for web instructions") 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고,
+  끝나면(새 입력) 처리한 뒤 다시 실행한다.
+- 작업 지시에 쓴 언어로 기록한다: 단계 · 기록 · 문제 · 결과물 · 리포트 · 승인 요청 · 인계 메모 (`devtrack show` 의 `언어`, 영어 작업은
+  inbox · `start` 에 `→ 작업 언어: 영어`).
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
 - 논문 · 문서 리뷰 작업에서 시각화(요약 · 도식 · 모식도)를 부탁받으면 `/visualize-doc <TID>` 스킬로 진행한다
@@ -1121,6 +1124,11 @@ PDF 는 컴퓨터에 설치된 Chrome(또는 Chromium · Edge)으로 만듭니�
 `devtrack config data <기록 폴더>` 로 설정 파일에 정해 두면 어디서 실행하든 같은 곳을 씁니다. 그 뒤 켜 둔 `serve` · `watch` · 대기 모드를 다시 켜세요.
 `devtrack config` 는 지금 쓰는 곳과, 다른 폴더에도 작업이 있는지 보여 줍니다. 그쪽 작업은 `devtrack --data <그 폴더> list` 로 볼 수 있습니다.
 
+**영어로 지시하면 기록 · 결과물도 영어로 남나요?**
+네. 작업을 만들 때 제목 · 지시의 언어를 작업 언어로 정하고, AI 는 단계 · 기록 · 문제 · 결과물 · 리포트 · 승인 요청을 그 언어로 씁니다.
+DevTrack 이 자동으로 남기는 기록("상태 변경" · "결과물 추가" 등)도 영어 작업이면 영어로 남습니다. 화면 위의 **EN** 으로 영어 화면을 쓰면
+새 작업 지시 · 새 발표 자료 등에 채워지는 틀도 영어입니다. 터미널에서는 `devtrack new … --lang en` 으로 정할 수 있습니다.
+
 **기록은 어디에 있고, 백업은 어떻게 하나요?**
 기록 폴더(`devtrack config` 로 확인, 기본 `~/devtrack/data/`)가 전부입니다. 이 폴더를 복사하면 백업이 됩니다.
 
@@ -1157,6 +1165,6 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 
 Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 일 · `issue` 문제 · `artifact` 결과물 · `review` 리뷰 리포트 · `text` Word · PDF 의 글자 뽑기 ·
 `link` 작업 연결 · `latex` LaTeX 컴파일 (PDF 를 빌드로 기록) ·
-`request` 승인 요청 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
+`request` 승인 요청 · `withdraw` 결정 전인 요청 거두기 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
 `start --take` 다른 AI 의 작업 가져오기 · `note` 인계 메모 · `show --brief` 다른 작업의 요약 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
 전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.
