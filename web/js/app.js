@@ -2661,7 +2661,7 @@ async function submitNewTask(ev) {
   ].filter((x) => x !== null).filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
   openModal({
     title: L('{ai}에게 보낼 작업 지시', { ai }),
-    body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: data.title, body: msg, ai })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 등록'), cmd)}`,
+    body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 지시문을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: data.title, body: msg, ai, files: true })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 등록'), cmd)}`,
   });
 }
 
@@ -2697,15 +2697,31 @@ function ghIssueUrl(repo, title, body, labels) {
   if (labels) q.set('labels', labels);
   return `https://github.com/${repo}/issues/new?${q}`;
 }
-/** 정적 모드 보내기 창의 'GitHub 이슈로 보내기' (우편함을 정해 두었을 때만) */
-function ghIssueBlock({ title, body, ai }) {
+/** 파일 올리기 폴더 — 지시마다 따로 (inbox/<날짜>-<무작위>, mailbox.FOLDER_RE 와 같은 모양) */
+function ghFolderId() {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+  return `inbox/${ymd}-${Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => abc[b % abc.length]).join('')}`;
+}
+/** 정적 모드 보내기 창의 'GitHub 이슈로 보내기' (우편함을 정해 두었을 때만).
+ *  files: 새 작업 · 메시지 창 — GitHub 업로드 화면을 이 지시 전용 폴더로 여는 '파일 올리기' 를 함께 두고, 이슈 본문에 그 폴더를 적는다 */
+function ghIssueBlock({ title, body, ai, files = false }) {
   const repo = ghRepo();
   if (!repo) return '';
   const label = ghAgentLabel(ai) || ''; // 담당 AI 라벨 (claude · codex — mailbox 설정 때 만든 라벨) — 담당 미정이면 없음
   const site = location.origin + location.pathname.replace(/index\.html$/, '');
+  const mb = state.index?.mailbox || {};
+  const folder = files && mb.files !== false ? ghFolderId() : '';
+  const upload = folder ? `https://github.com/${repo}/upload/${encodeURIComponent(mb.branch || 'main')}/${folder}` : '';
+  const marks = `\n\n<!-- devtrack-site: ${site} -->${folder ? `\n<!-- devtrack-files: ${folder} -->` : ''}`;
   return html`<div class="gh-send">
-    <button class="btn btn-primary" data-action="gh-issue" data-title="${title}" data-body="${`${body}\n\n<!-- devtrack-site: ${site} -->`}" data-labels="${label}">${icon('github')} ${L('GitHub 이슈로 보내기')}</button>
+    <div class="gh-send-btns">
+      ${folder ? html`<button class="btn" data-action="gh-upload" data-url="${upload}">${icon('upload')} ${L('파일 올리기')}</button>` : ''}
+      <button class="btn btn-primary" data-action="gh-issue" data-title="${title}" data-body="${body}" data-marks="${marks}" data-labels="${label}">${icon('github')} ${L('GitHub 이슈로 보내기')}</button>
+    </div>
     <p class="hint">${LH('<b>{repo}</b> 에 내용이 채워진 새 이슈가 열립니다. 확인하고 <b>Submit</b> 하면 devtrack 이 1분 안에 받아 {ai}에게 넘깁니다 (devtrack watch 나 대기 모드가 켜져 있어야 함).', { repo, ai })}</p>
+    ${folder ? html`<p class="hint">${LH('파일도 보내려면 먼저 <b>파일 올리기</b> 로 연 GitHub 화면에 파일을 끌어다 놓고 <b>Commit changes</b> 를 누른 뒤 이슈를 보내세요. 이 지시 전용 폴더(<code>{folder}</code>)에 올라가고, DevTrack 이 받아 작업의 보낸 파일로 올립니다.', { folder })}</p>` : ''}
   </div>`;
 }
 
@@ -2995,7 +3011,7 @@ async function actComment(btn) {
     const ai = aiName(state.tasks.get(task));
     openModal({
       title: L('{ai}에게 메시지 전달', { ai }),
-      body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 내용을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: `${task} 메시지${fid ? ` (${fid})` : ''}`, body: msg, ai })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 기록'), cmd)}`,
+      body: html`<p>${L('정적 모드에서는 웹에서 직접 저장할 수 없습니다. 아래 내용을 {ai} 세션에 붙여넣으세요.', { ai })}</p>${ghIssueBlock({ title: `${task} 메시지${fid ? ` (${fid})` : ''}`, body: msg, ai, files: true })}${copyBlock(L('{ai}에게 보낼 메시지', { ai }), msg)}${copyBlock(L('또는 터미널에서 직접 기록'), cmd)}`,
     });
     return;
   }
@@ -3051,14 +3067,15 @@ async function onAction(el, ev) {
       return;
     }
     case 'rel-remove': return removeRelated(el);
+    case 'gh-upload': return void window.open(el.dataset.url, '_blank', 'noopener');
     case 'gh-issue': {
-      const { title, body, labels } = el.dataset;
+      const { title, body, labels, marks = '' } = el.dataset;
       const repo = ghRepo();
       if (!repo) return;
-      let url = ghIssueUrl(repo, title, body, labels);
-      if (url.length > GH_URL_MAX) { // 긴 지시: 본문은 클립보드로, 이슈에는 붙여 넣을 자리만
+      let url = ghIssueUrl(repo, title, body + marks, labels);
+      if (url.length > GH_URL_MAX) { // 긴 지시: 본문은 클립보드로, 이슈에는 붙여 넣을 자리와 표시(웹 주소 · 파일 폴더)만
         const ok = await copyText(body);
-        url = ghIssueUrl(repo, title, '<!-- devtrack-paste-here: 본문이 길어 클립보드에 복사했습니다. 이 줄 아래에 붙여 넣으세요 (Ctrl+V / ⌘V). Body copied to the clipboard — paste it below. -->\n', labels);
+        url = ghIssueUrl(repo, title, `<!-- devtrack-paste-here: 본문이 길어 클립보드에 복사했습니다. 이 줄 아래에 붙여 넣으세요 (Ctrl+V / ⌘V). Body copied to the clipboard — paste it below. -->\n${marks}`, labels);
         toast(ok ? { title: L('본문이 길어 클립보드에 복사했습니다'), meta: L('열린 이슈의 본문에 붙여 넣고 Submit 하세요'), tone: 'blue', sticky: true }
           : { title: L('본문을 복사하지 못했습니다'), meta: L('보내기 창의 메시지를 직접 복사해 이슈 본문에 붙여 넣으세요'), tone: 'orange', sticky: true });
       }

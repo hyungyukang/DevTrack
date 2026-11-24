@@ -10,9 +10,11 @@
 - 이슈 하나가 새 작업이면 그 작업의 '대화 이슈'로 남겨, 댓글 = 그 작업에 보내는 메시지, 승인 요청은 댓글로 알리고,
   작업이 끝나면 닫는다. 작업 번호(T-0041)로 시작하는 이슈는 한 번 처리하고 닫는다.
 - 작업 삭제는 이슈로 하지 않는다 (되돌릴 수 없음).
-- 파일: 우편함 저장소에 올린 파일의 링크(…/blob/<브랜치>/<경로>)가 새 작업 · 메시지에 있으면 내려받아 그 작업의 '보낸 파일'
-  결과물로 올리고 링크를 결과물 번호로 바꾼다 (토큰에 Contents: Read 필요). GitHub 의 끌어다 놓기 첨부(user-attachments)는
-  비공개 저장소에서 토큰으로 내려받을 수 없어 받지 않고 답글로 알린다.
+- 파일: GitHub 의 끌어다 놓기 첨부(user-attachments)는 비공개 저장소에서 토큰으로 내려받을 수 없다 (API · body_html 모두 확인).
+  그래서 파일은 우편함 저장소에 올린다 — 정적 웹의 '파일 올리기' 가 GitHub 업로드 화면을 지시 전용 폴더(inbox/<날짜>-<무작위>)로 열고,
+  이슈 본문의 <!-- devtrack-files: 폴더 --> 로 그 폴더를 알린다. 새 작업 이슈는 그 폴더(없으면 inbox/issue-<번호>)를 작업이 끝날 때까지,
+  메시지 이슈는 FOLDER_WAIT 동안 지켜보며 새로 올라온 파일을 그 작업의 '보낸 파일' 결과물로 올린다 (브랜치 머리가 바뀔 때만 폴더를 본다).
+  글 속 저장소 파일 링크(…/blob/<브랜치>/<경로>)도 받는다. 토큰에 Contents: Read 필요.
 """
 
 import json
@@ -44,6 +46,9 @@ ATTACH_MAX = 25 * 1024 * 1024            # 보낸 파일 하나의 최대 크기
 ATTACH_COUNT = 10                        # 이슈 · 댓글 하나에서 받는 파일 수
 MD_LINK_RE = re.compile(r"!?\[([^\]\n]*)\]\(\s*<?(https?://[^\s)>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 URL_RE = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
+FOLDER_RE = re.compile(r"<!--\s*devtrack-files:\s*(inbox/[A-Za-z0-9._-]+)\s*-->")
+FOLDER_WAIT = 2 * 3600                   # 메시지 이슈의 파일 폴더를 더 지켜보는 시간 (초) — 이슈를 먼저 보내고 파일을 나중에 올려도 받게
+FOLDER_MAX = 20                          # 폴더 하나에서 한 번에 받는 파일 수
 GH_ATTACH_RE = re.compile(r"^https://github\.com/(?:user-attachments/(?:files|assets)/|[^/]+/[^/]+/(?:files|assets)/\d+/)",
                           re.I)
 
@@ -131,6 +136,7 @@ def load_state(root):
     st.setdefault("comments", [])     # 처리했거나 건너뛴 댓글 ID
     st.setdefault("posted", [])       # devtrack 이 단 댓글 ID
     st.setdefault("ignored", [])      # 다른 사람이 쓴 이슈 번호 (한 번만 알린다)
+    st.setdefault("folders", {})      # "inbox/…": {task, issue, seen: {경로: sha}, until(메시지 이슈) · error}
     return st
 
 
@@ -234,19 +240,41 @@ class GitHub(object):
             raise GitHubError("파일이 너무 큽니다", 413)
         return data
 
+    def download_path(self, path, ref, limit=None):
+        return self._raw("/repos/{}/contents/{}".format(self.repo, urllib.parse.quote(path)), {"ref": ref}, limit or ATTACH_MAX)
+
     def download(self, rest, limit=None):
         """저장소 파일 → (경로, bytes). rest: 링크에서 뗀 [브랜치 …, 경로 …] — 브랜치 이름에 / 가 있을 수 있어 짧은 것부터 해 본다."""
-        limit = limit or ATTACH_MAX
         last = None
         for i in range(1, min(4, len(rest))):
             ref, path = "/".join(rest[:i]), "/".join(rest[i:])
             try:
-                return path, self._raw("/repos/{}/contents/{}".format(self.repo, urllib.parse.quote(path)), {"ref": ref}, limit)
+                return path, self.download_path(path, ref, limit)
             except GitHubError as e:
                 if e.status != 404:
                     raise
                 last = e
         raise last or GitHubError("파일을 찾지 못했습니다", 404)
+
+    def list_dir(self, path, ref, depth=2):
+        """저장소 폴더의 파일 [{path, name, sha, size}] — 하위 폴더는 depth 단계까지. 폴더가 아직 없으면 []."""
+        try:
+            items = self._req("GET", "/repos/{}/contents/{}".format(self.repo, urllib.parse.quote(path)), {"ref": ref})[0]
+        except GitHubError as e:
+            if e.status == 404:
+                return []
+            raise
+        out = []
+        for it in items if isinstance(items, list) else [items]:
+            if it.get("type") == "file":
+                out.append({"path": it["path"], "name": it["name"], "sha": it.get("sha"), "size": it.get("size") or 0})
+            elif it.get("type") == "dir" and depth > 1:
+                out.extend(self.list_dir(it["path"], ref, depth - 1))
+        return out
+
+    def branch_head(self, branch):
+        b = self._req("GET", "/repos/{}/branches/{}".format(self.repo, urllib.parse.quote(branch, safe="")))[0] or {}
+        return (b.get("commit") or {}).get("sha")
 
     def can_read_files(self):
         """토큰에 저장소 파일 읽기(Contents: Read) 권한이 있는지 — 모르면 None (빈 저장소 등)."""
@@ -671,7 +699,8 @@ def fetch_files(gh, text, out_dir):
         name = os.path.basename(rest[-1]) if rest else (label or urllib.parse.unquote(url.rstrip("/").rsplit("/", 1)[-1]))
         if not rest:
             failed.append(dict(match=match, url=url, name=name, reason="GitHub 첨부(끌어다 놓기)는 비공개 저장소라 내려받을 수 없습니다 — "
-                                                                       "우편함 저장소에 올리고 그 파일 링크를 주세요"))
+                                                                       "웹 보내기 창의 '파일 올리기' 나 작업 이슈 첫 답글의 "
+                                                                       "파일 올리기 링크로 보내 주세요"))
             continue
         if len(got) >= ATTACH_COUNT:
             failed.append(dict(match=match, url=url, name=name, reason="한 번에 {}개까지 받습니다".format(ATTACH_COUNT)))
@@ -691,18 +720,59 @@ def fetch_files(gh, text, out_dir):
     return got, failed
 
 
+def upload_url(repo, branch, folder):
+    """GitHub 의 '파일 올리기' 화면 — 아직 없는 폴더면 올릴 때 그 이름으로 만들어진다."""
+    return "https://github.com/{}/upload/{}/{}".format(repo, urllib.parse.quote(branch, safe=""), urllib.parse.quote(folder))
+
+
+def thread_folder(number):
+    """웹을 거치지 않고 쓴 새 작업 이슈의 파일 폴더."""
+    return "inbox/issue-{}".format(number)
+
+
+def fetch_folder(gh, folder, ref, out_dir, known=None):
+    """폴더에 새로 올라온 파일(처음 보거나 바뀐 것)을 내려받는다 → (받은 것, 못 받은 것, 본 파일 {경로: sha})."""
+    known = dict(known or {})
+    got, failed = [], []
+    for f in sorted(gh.list_dir(folder, ref), key=lambda x: x["path"]):
+        if known.get(f["path"]) == f["sha"]:
+            continue
+        known[f["path"]] = f["sha"]
+        name = f["name"]
+        if name.startswith("."):  # .gitkeep 같은 숨은 파일
+            continue
+        if len(got) >= FOLDER_MAX:
+            failed.append(dict(match=None, url=f["path"], name=name, reason="한 번에 {}개까지 받습니다".format(FOLDER_MAX)))
+            continue
+        if f["size"] > ATTACH_MAX:
+            failed.append(dict(match=None, url=f["path"], name=name, reason=_file_error(GitHubError("", 413))))
+            continue
+        try:
+            data = gh.download_path(f["path"], ref)
+        except GitHubError as e:
+            failed.append(dict(match=None, url=f["path"], name=name, reason=_file_error(e)))
+            continue
+        d = os.path.join(out_dir, "d{}".format(len(got) + 1))
+        os.makedirs(d)
+        dest = os.path.join(d, name)
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        got.append(dict(match=None, url=f["path"], filename=name, path=dest, size=len(data)))
+    return got, failed, known
+
+
 def link_files(text, tid, got, arts, failed):
     """글 속 링크를 결과물 링크(📎 F-1 이름)로 바꾼다. 글에 없던 링크(머리말 등에 있던 것)는 끝에 모아 붙인다."""
     out, extra = text or "", []
     for g, a in zip(got, arts):
         ref = "[📎 {} {}](#/artifact/{}/{})".format(a["id"], a.get("filename") or g["filename"], tid, a["id"])
-        if g["match"] in out:
+        if g.get("match") and g["match"] in out:
             out = out.replace(g["match"], ref)
         else:
             extra.append(ref)
     for f in failed:
         note = "📎 {} (받지 못함)".format(f["name"] or f["url"])
-        if f["match"] in out:
+        if f.get("match") and f["match"] in out:
             out = out.replace(f["match"], note)
         else:
             extra.append(note)
@@ -716,7 +786,8 @@ def files_summary(arts, failed):
     lines = []
     if arts:
         lines.append("📎 보낸 파일 {}개를 결과물로 올렸습니다: {}".format(
-            len(arts), " · ".join("{} {}".format(a["id"], a.get("filename")) for a in arts)))
+            len(arts), " · ".join("{} {}{}".format(a["id"], a.get("filename"), " (v{})".format(a["version"])
+                                                   if a.get("version", 1) > 1 else "") for a in arts)))
     for f in failed:
         lines.append("⚠️ 받지 못한 파일 **{}** — {}".format(f["name"] or f["url"], f["reason"]))
     return "\n".join(lines)
@@ -902,8 +973,9 @@ def _poll(store, cfg, st, gh, user, done):
         key = str(it["number"])
         st["since_issues"] = max(st.get("since_issues") or "", it.get("updated_at") or "")
         if key in st["issues"]:
-            if it.get("state") == "closed":  # 사용자가 GitHub 에서 닫았으면 더 알리지 않는다
+            if it.get("state") == "closed" and st["issues"][key].get("kind") == "thread":  # 사용자가 GitHub 에서 닫았으면 더 알리지 않는다
                 st["issues"][key]["closed"] = True
+                _drop_folders(st, key)
             continue
         if it["number"] in ignored:
             continue
@@ -919,8 +991,11 @@ def _poll(store, cfg, st, gh, user, done):
             st["site"] = m.group(1)
         labels = [(x.get("name") if isinstance(x, dict) else x) for x in it.get("labels") or []]
         act = parse_issue(it.get("title"), it.get("body"), labels, TASK_TYPES, cfg.get("default_agent") or "Claude")
+        fm = FOLDER_RE.search(it.get("body") or "")
+        folder = fm.group(1) if fm else None
         try:
-            tid, msg = _apply_with_files(store, gh, act, it["number"], user, it.get("body"))
+            tid, msg, seen = _apply_with_files(store, gh, act, it["number"], user, it.get("body"),
+                                               branch=_branch(cfg, st, gh) if folder else None, folder=folder)
         except DevTrackError as e:
             st["issues"][key] = {"task": act.get("task"), "kind": "error", "closed": True}
             _say(gh, st, it["number"], "⚠️ 처리하지 못했습니다: {}".format(e))
@@ -929,9 +1004,15 @@ def _poll(store, cfg, st, gh, user, done):
             continue
         if act["kind"] == "new_task":
             st["issues"][key] = {"task": tid, "kind": "thread", "closed": False, "notified": []}
-            _say(gh, st, it["number"], "{}\n\n{}".format(_linked(msg, _link(cfg, st, tid)), HELP))
+            tf = folder or thread_folder(it["number"])
+            if cfg.get("files") is not False:
+                st["folders"][tf] = {"task": tid, "issue": it["number"], "seen": seen or {}}
+            _say(gh, st, it["number"], "{}\n\n{}".format(_linked(msg, _link(cfg, st, tid)), _help(cfg, st, gh, tf)))
         else:
             st["issues"][key] = {"task": tid, "kind": "oneoff", "closed": True}
+            if folder and act["kind"] == "comment" and cfg.get("files") is not False:
+                st["folders"][folder] = {"task": tid, "issue": it["number"], "seen": seen or {},
+                                         "until": time.time() + FOLDER_WAIT}
             thread = next((n for n, v in st["issues"].items() if v.get("task") == tid and v.get("kind") == "thread"
                            and not v.get("closed")), None)
             more = "\n\n이어서 보낼 내용은 이 작업의 이슈 #{} 에 댓글로 달아도 됩니다.".format(thread) if thread else ""
@@ -955,7 +1036,7 @@ def _poll(store, cfg, st, gh, user, done):
             continue
         act = parse_comment(c.get("body"), info["task"], TASK_TYPES)
         try:
-            tid, msg = _apply_with_files(store, gh, act, num, user, c.get("body"))
+            tid, msg, _ = _apply_with_files(store, gh, act, num, user, c.get("body"))
         except DevTrackError as e:
             _say(gh, st, num, "⚠️ 처리하지 못했습니다: {}".format(e))
             done.append("#{} 댓글 처리 실패: {}".format(num, e))
@@ -967,25 +1048,104 @@ def _poll(store, cfg, st, gh, user, done):
         except GitHubError:
             _say(gh, st, num, msg)
         done.append("#{} 댓글 → {}".format(num, msg.replace("✅ ", "").replace("**", "")))
+    _watch_folders(store, cfg, st, gh, done)
     _follow_up(store, cfg, st, gh, done)
 
 
-def _apply_with_files(store, gh, act, number, user, body):
-    """apply + 보낸 파일: 새 작업 · 메시지면 글 속 파일 링크를 내려받아 함께 넘기고, 다른 할 일이면 파일은 받지 않는다고 덧붙인다."""
+def _apply_with_files(store, gh, act, number, user, body, branch=None, folder=None):
+    """apply + 보낸 파일 → (작업 ID, 답글, 폴더에서 본 파일 {경로: sha} 또는 None).
+    새 작업 · 메시지면 글 속 저장소 파일 링크와 폴더(파일 올리기)의 파일을 내려받아 함께 넘기고, 다른 할 일이면 파일은 받지 않는다고 덧붙인다."""
     text = HTML_COMMENT_RE.sub("", body or "")
+    links = file_links(text, gh.repo)
     if act.get("kind") not in ("new_task", "comment"):
         tid, msg = apply(store, act, number, user)
-        if any(rest for _, _, _, rest in file_links(text, gh.repo)):
-            msg += "\n📎 파일은 새 작업 · 메시지에서만 받습니다 — 파일 링크는 메시지로 다시 보내 주세요"
-        return tid, msg
-    if not file_links(text, gh.repo):
-        return apply(store, act, number, user)
+        if folder or any(rest for _, _, _, rest in links):
+            msg += "\n📎 파일은 새 작업 · 메시지에서만 받습니다 — 파일은 메시지로 다시 보내 주세요"
+        return tid, msg, None
+    if not links and not folder:
+        tid, msg = apply(store, act, number, user)
+        return tid, msg, None
     tmp = tempfile.mkdtemp(prefix="devtrack-mail-")
     try:
-        got, failed = fetch_files(gh, text, tmp)
-        return apply(store, act, number, user, got=got, failed=failed)
+        got, failed = fetch_files(gh, text, tmp) if links else ([], [])
+        seen = None
+        if folder:
+            try:
+                more, bad, seen = fetch_folder(gh, folder, branch or "main", tmp)
+                got, failed = got + more, failed + bad
+            except GitHubError as e:
+                failed.append(dict(match=None, url=folder, name=folder + "/", reason=_file_error(e)))
+        tid, msg = apply(store, act, number, user, got=got, failed=failed)
+        return tid, msg, seen
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _branch(cfg, st, gh):
+    """우편함 저장소의 기본 브랜치 (설정 → 지난번에 알아 둔 것 → GitHub 에 물어봄)."""
+    b = cfg.get("branch") or st.get("branch")
+    if not b:
+        try:
+            b = (gh.repo_info() or {}).get("default_branch") or "main"
+        except GitHubError:
+            return "main"
+        st["branch"] = b
+    return b
+
+
+def _help(cfg, st, gh, folder):
+    """새 작업 이슈의 첫 답글 — 댓글로 할 수 있는 일과, 이 작업에 파일을 보내는 '파일 올리기' 주소."""
+    if cfg.get("files") is False:
+        return HELP
+    return HELP + ("\n\n📎 이 작업에 파일을 보내려면 [파일 올리기]({}) 로 파일을 끌어다 놓고 **Commit changes** 를 누르세요 — "
+                   "올라온 파일은 이 작업에 메시지로 들어갑니다.".format(upload_url(gh.repo, _branch(cfg, st, gh), folder)))
+
+
+def _drop_folders(st, number):
+    for k in [k for k, v in st["folders"].items() if str(v.get("issue")) == str(number)]:
+        del st["folders"][k]
+
+
+def _watch_folders(store, cfg, st, gh, done):
+    """지켜보는 폴더(파일 올리기)에 새로 올라온 파일을 그 작업에 메시지로 보낸다. 저장소의 브랜치 머리가 바뀌었을 때만 폴더를 본다."""
+    folders = st["folders"]
+    for k in [k for k, v in folders.items() if v.get("until") and v["until"] < time.time()]:
+        del folders[k]
+    active = [(k, v) for k, v in folders.items() if not v.get("error")]
+    if not active:
+        return
+    branch = _branch(cfg, st, gh)
+    head = gh.branch_head(branch)
+    if head and head == st.get("head"):
+        return
+    for folder, info in active:
+        tmp = tempfile.mkdtemp(prefix="devtrack-mail-")
+        try:
+            try:
+                got, failed, seen = fetch_folder(gh, folder, branch, tmp, info.get("seen"))
+            except GitHubError as e:
+                if e.status not in (401, 403):
+                    raise
+                info["error"] = _file_error(e)
+                _say(gh, st, info["issue"], "⚠️ 올린 파일을 받지 못했습니다 ({}) — {}".format(folder, info["error"]))
+                continue
+            info["seen"] = seen
+            if not got and not failed:
+                continue
+            tid = info["task"]
+            try:
+                arts = store.add_sent_files(tid, got, issue=info["issue"]) if got else []
+                store.add_user_comment(tid, link_files("", tid, got, arts, failed),
+                                       attachments=[a["id"] for a in arts])
+            except DevTrackError as e:  # 작업이 지워진 경우 등
+                info["error"] = str(e)
+                continue
+            summary = files_summary(arts, failed)
+            _say(gh, st, info["issue"], "**{}** 에 파일이 왔습니다{}\n{}".format(tid, _link(cfg, st, tid), summary))
+            done.append("#{} 폴더 {} → {}: {}".format(info["issue"], folder, tid, summary.replace("**", "")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    st["head"] = head
 
 
 def _say(gh, st, number, text):
@@ -1016,6 +1176,7 @@ def _follow_up(store, cfg, st, gh, done):
             _say(gh, st, num, "🗑 **{}** 이(가) 삭제되어 이 이슈를 닫습니다.".format(tid))
             _close(gh, num, "not_planned")
             info["closed"] = True
+            _drop_folders(st, num)
             continue
         notified = info.setdefault("notified", [])
         for a in t.get("approvals", []):
@@ -1036,4 +1197,5 @@ def _follow_up(store, cfg, st, gh, done):
             _say(gh, st, num, "**{}** 이(가) {}{}".format(tid, word, _link(cfg, st, tid)))
             _close(gh, num, "completed" if t["status"] == "done" else "not_planned")
             info["closed"] = True
+            _drop_folders(st, num)
             done.append("#{} 닫음 ({} {})".format(num, tid, t["status"]))

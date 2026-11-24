@@ -1004,10 +1004,19 @@ class Store:
         with self.edit(tid) as t:
             arts = []
             for f in files:
-                a = self._add_artifact(t, path=f["path"], filename=f["filename"], category="source", author=author,
-                                       extra={"sent": {"via": "github", "issue": issue}}, log=False)
-                self._log(t, "보낸 파일: {}".format(a["title"]), kind="artifact", author=author, ref=a["id"],
-                          meta={"category": "source", "kind": a["kind"], "sent": True})
+                old = next((a for a in reversed(t.get("artifacts", []))
+                            if a.get("sent") and a.get("filename") == f["filename"] and a.get("path")), None)
+                if old:  # 같은 이름을 다시 보내면 그 보낸 파일의 새 버전 (고친 원고를 다시 올린 경우)
+                    a = self._new_version(t, old, f["path"], author=author, log=False)
+                    if a.get("unchanged"):
+                        continue
+                    self._log(t, "보낸 파일 새 버전 (v{}): {}".format(a["version"], a["title"]), kind="artifact", author=author,
+                              ref=a["id"], meta={"category": "source", "kind": a["kind"], "sent": True, "version": a["version"]})
+                else:
+                    a = self._add_artifact(t, path=f["path"], filename=f["filename"], category="source", author=author,
+                                           extra={"sent": {"via": "github", "issue": issue}}, log=False)
+                    self._log(t, "보낸 파일: {}".format(a["title"]), kind="artifact", author=author, ref=a["id"],
+                              meta={"category": "source", "kind": a["kind"], "sent": True})
                 arts.append(a)
             if rewrite:
                 t["instruction"] = rewrite(arts)
@@ -2673,7 +2682,10 @@ class Store:
     def mailbox_info(self):
         """웹이 알아야 할 우편함 설정 — 저장소 이름만 (토큰은 기록 폴더에 두지 않는다)."""
         cfg = mailbox.load_config(self.root)
-        return {"github": cfg["github"]} if cfg else None
+        if not cfg:
+            return None
+        return {"github": cfg["github"], "files": cfg.get("files"),
+                "branch": cfg.get("branch") or mailbox.load_state(self.root).get("branch") or "main"}
 
     def auth(self):
         """비밀번호 설정 (없으면 None, 망가졌으면 DevTrackError)."""

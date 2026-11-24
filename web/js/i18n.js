@@ -299,6 +299,9 @@ const EN = {
   '지시 내용이 기록되지 않았습니다': 'No instruction was recorded',
   '최근 진행 기록': 'Recent progress',
   '보낸 파일': 'Sent file',
+  '파일 올리기': 'Upload files',
+  '파일도 보내려면 먼저 <b>파일 올리기</b> 로 연 GitHub 화면에 파일을 끌어다 놓고 <b>Commit changes</b> 를 누른 뒤 이슈를 보내세요. 이 지시 전용 폴더(<code>{folder}</code>)에 올라가고, DevTrack 이 받아 작업의 보낸 파일로 올립니다.':
+    'To send files too, first press <b>Upload files</b>, drop the files on the GitHub page that opens and press <b>Commit changes</b>, then send the issue. They go into a folder just for this instruction (<code>{folder}</code>), and DevTrack adds them to the task as sent files.',
   '맨 위로': 'To top',
   '맨 아래로': 'To bottom',
   '메시지 칸으로': 'Go to the message box',

@@ -1017,6 +1017,7 @@ table.tex-tabular { border-collapse: collapse; border-top: 1.6px solid #222; bor
 .note-card .note-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--text-2); }
 .gh-send { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 12px 0 16px; }
 .gh-send .hint { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.55; }
+.gh-send-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .copy-block { position: relative; margin-bottom: 14px; }
 .copy-block pre { margin: 0; padding: 12px 14px; padding-right: 76px; background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }

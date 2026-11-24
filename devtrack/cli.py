@@ -2202,7 +2202,7 @@ def cmd_mailbox(store, args):
     old = mailbox.load_config(store.root) or {}
     if src in ("typed", "stdin"):
         mailbox.save_token(token)
-    cfg = {"version": 1, "github": repo, "login": login, "since": mailbox.iso_now(),
+    cfg = {"version": 1, "github": repo, "login": login, "since": mailbox.iso_now(), "branch": info.get("default_branch") or "main",
            "interval": args.interval or old.get("interval") or mailbox.DEFAULT_INTERVAL,
            "default_agent": args.agent or old.get("default_agent") or "Claude"}
     site = args.site or old.get("site")

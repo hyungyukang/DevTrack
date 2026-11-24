@@ -837,24 +837,37 @@ The default AI for issues that name none can be changed with `devtrack mailbox <
 
 **⑦ Sending files (Word, text, PDF …)**
 
-Files dragged into a GitHub issue open only in a signed-in browser when the repository is private, so DevTrack cannot download them.
-Instead, **upload the file to the mailbox repository and paste the file's link into the issue.**
+Files dragged into a GitHub issue open only in a signed-in browser when the repository is private, so DevTrack cannot download them
+(GitHub offers no way for programs to fetch them). So files are **uploaded to the mailbox repository**, and DevTrack fetches them from there.
 
-1. (Once) Add **Contents: Read-only** to the token — in ②'s token list, that token → **Edit** → Repository permissions →
-   **Contents** → **Read-only** → **Update**. The token value does not change. Run `devtrack mailbox <repository>` again and press Enter (keeps the saved token):
-   it checks the permission, and the `devtrack mailbox` status shows **파일 보내기: 됨** (sending files: works).
-2. On the mailbox repository's front page → **Add file** → **Upload files** → drop the file → **Commit changes**.
-3. Open the uploaded file and copy the page address (`https://github.com/<repository>/blob/main/file-name.docx`) into the issue body or a comment.
-   For an issue opened with the static web's **Send as a GitHub issue**, paste it at the end of the body.
-4. DevTrack downloads the file, adds it to that task as a **Sent file** artifact (a number such as `F-3`), and replaces the link in the instruction or message with `📎 F-3 file-name`.
-   The AI opens the file directly and reads Word or PDF text with `devtrack text`. On the web you can preview it as an artifact.
+**Once — give the token file-read permission:** in ②'s token list, that token → **Edit** → Repository permissions → **Contents** → **Read-only** → **Update**.
+The token value does not change. Run `devtrack mailbox <repository>` again and press Enter (keeps the saved token): it checks the permission, and the
+`devtrack mailbox` status shows **파일 보내기: 됨** (sending files: works). Then run `devtrack publish` once and the web shows an **Upload files** button.
+
+**From the static web (New task and Message windows)**
+
+1. Press **Upload files** in the send window. GitHub's upload page opens on **a folder just for this instruction** (named like `inbox/20261124-ab3x9k`).
+2. Drop the files there (several at once is fine) and press **Commit changes** at the bottom.
+3. Back in the send window, submit the issue with **Send as a GitHub issue**. The issue body names that folder (hidden).
+4. DevTrack fetches every file in the folder, adds them to the task as **Sent file** artifacts (numbers such as `F-3`), and appends `보낸 파일: 📎 F-3 file-name` ("sent files") to the instruction.
+   The AI opens the files directly and reads Word or PDF text with `devtrack text`. On the web you can preview them as artifacts.
+
+- **Order does not matter.** If you send the issue first and upload later, DevTrack keeps watching the folder — until the task ends for a new task, for 2 hours for a message —
+  and sends newly uploaded files to the task as a message (the issue gets a `T-0045 에 파일이 왔습니다` reply, "files arrived for T-0045").
+- **Uploading the same file name again** makes a new version of the same artifact (handy for a revised manuscript).
+
+**Sending more files to a running task** — the first reply on a task's issue has an **Upload files** link for that task.
+Files uploaded there reach the task as a message. A new-task issue written directly on GitHub uses the folder `inbox/issue-<issue number>`.
+
+**Links work too** — for a file already in the mailbox repository, paste its page address (`https://github.com/<repository>/blob/main/…/file.docx`)
+into the issue body or a comment; the link becomes `📎 F-3 file-name` and the file comes along.
 
 - Files are taken from new-task instructions and messages (comments on the task's issue, or `T-0041 메시지` issues). Files attached to commands such as approve or done are not taken; the reply says so.
-- Up to 25 MB per file and 10 files at a time. Only file links to the mailbox repository are taken; links to other sites are left as they are.
+- Up to 25 MB per file; up to 20 files per folder at a time and 10 links. Only files in the mailbox repository are taken; links to other sites are left as they are.
 - The reply reports what was taken (`📎 보낸 파일 2개를 결과물로 올렸습니다 …` — "2 sent files added as artifacts"). When a file cannot be taken, it says why:
   no permission, file not found, too large, or a GitHub drag-and-drop attachment.
 - DevTrack does not delete the files you uploaded to the repository — delete them on GitHub when no longer needed. Downloaded files stay in the records folder as artifacts (they use its space).
-- The GitHub phone app may not be able to upload files to a repository. If so, open github.com in the phone's browser and upload there.
+- The GitHub phone app may not upload files to a repository. **Upload files** opens in the phone's browser, so upload there.
 
 **Safety**
 - Only issues and comments **written by your own GitHub account** are taken. Others' posts are skipped even if you invited them to the repository.
