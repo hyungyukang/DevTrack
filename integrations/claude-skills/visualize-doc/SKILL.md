@@ -59,6 +59,10 @@ Work files go in `~/.doc-visual/<slug>/`, where the slug comes from the file nam
 DevTrack mode is on when `devtrack --version` succeeds and `no-devtrack` was not passed. Otherwise skip the DevTrack steps; the visualization itself is the same.
 
 - **Which task.**
+  - **A `visual` task** — the web's New task with type 문서 시각화, or the Visualizer menu's New visualization. This is the skill's own task.
+    - `devtrack start <TID>`.
+    - The document is named in the instruction, or comes from a related task (`devtrack doc <R> --all`).
+    - Set the plan below if it has none, and record progress with `-p`.
   - **An existing task** — a task ID was given, or the request came in through `devtrack inbox` (a `[메시지]` on a paper or document-review task, or a new task whose instruction asks for this). Work in **that task**; do not create a new one.
     - `devtrack doc <TID>` prints the document to read. Use `--all` to see the candidates: the manuscript under journal review, the paper folder's main `.tex`, the original of a document review, and document artifacts.
     - For a paper task with no document yet, run `devtrack paper <TID>` first, or ask for the path.
@@ -68,12 +72,12 @@ DevTrack mode is on when `devtrack --version` succeeds and `no-devtrack` was not
     - Else, if `devtrack inbox` shows a queued task about this document, `devtrack start <TID>`.
     - Else create a task:
       ```
-      TID=$(devtrack new "문서 시각화: <문서 제목>" -t visualization -i "<the user's request, verbatim>" \
+      TID=$(devtrack new "문서 시각화: <문서 제목>" -t visual -i "<the user's request, verbatim>" \
             --plan "문서 읽기 · 구조 파악" "짜임새 있는 요약" "도식 설계" "SVG 그리기 · 점검" "시각화 요약(PDF) 작성" "결과 확인 (사용자)")
       ```
       Save `devtrack_task` in `state.json`.
 - **Progress.**
-  - On a task this skill created: `devtrack step <TID> "..." -p <N>` and `devtrack check <TID> <n>` after each step.
+  - On a `visual` task (yours): `devtrack step <TID> "..." -p <N>` and `devtrack check <TID> <n>` after each step.
   - On an existing paper or document-review task: record progress with `devtrack step <TID> "시각화: ..."` **without `-p`**, so the paper's own progress number is kept, and do not change its plan or status.
   - A problem that blocks the work (unreadable file, missing pages) → `devtrack issue <TID> "..."`.
 
@@ -260,7 +264,7 @@ Write `~/.doc-visual/<slug>/visual-<slug>.md`. Refer to the SVGs by bare file na
    - Record `devtrack log <TID> "시각화: 요약 + 도식 <n>개 (F-…)"`.
 2. **DevTrack mode — close out.**
    - If the request came from an inbox message, also run `devtrack inbox --task <TID> --ack`.
-   - On a task this skill created, run `devtrack request <TID> "시각화 결과를 확인해 주세요" -k result -a <PDF or Markdown F-ID> -d "<한 줄 요약>"`, check the plan step, and stop.
+   - On a `visual` task, run `devtrack request <TID> "시각화 결과를 확인해 주세요" -k result -a <PDF or Markdown F-ID> -d "<한 줄 요약>"`, check the plan step, and stop.
      - When the decision arrives: approved → `devtrack done <TID> -m "시각화 전달"`; changes requested → revise, upload with the same names, and request again.
    - On an existing paper or document-review task, **do not** open an approval request, which would block that task's own flow. The log and the artifacts are enough.
 3. **In chat:**

@@ -42,13 +42,20 @@ TASK_TYPES = {
     "code": "코드 개발",
     "review": "코드 리뷰",
     "paper": "논문 작성",
+    "slides": "발표 자료",
+    "poster": "포스터",
     "docreview": "문서 리뷰",
+    "visual": "문서 시각화",
     "analysis": "데이터 분석",
     "visualization": "시각화",
     "model": "AI 모델 개발",
     "brainstorm": "브레인스토밍",
     "other": "기타",
 }
+
+# 유형마다 쓰는 스킬 (integrations/claude-skills/<스킬>) — inbox 안내 · 웹의 새 작업 지시가 가리킨다 (app.js TYPE_SKILL 과 같게)
+TYPE_SKILLS = {"paper": "write-paper", "slides": "make-slides", "poster": "make-poster", "visual": "visualize-doc",
+               "docreview": "review-doc", "review": "review-pr"}
 
 STATUSES = {
     "queued": "대기",

@@ -19,10 +19,12 @@ const DECISION = translated({
   reject: { label: '거절', tone: 'red' },
 });
 // 작업 유형 → 분야 섹션 (사이드바 메뉴)
-const SECTION_OF_TYPE = { code: 'code', paper: 'papers', analysis: 'analysis', visualization: 'analysis', review: 'reviews', docreview: 'docreview', brainstorm: 'brainstorm' };
-const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', analysis: '데이터 분석', reviews: '코드 리뷰', docreview: '문서 리뷰', brainstorm: '브레인스토밍', tasks: '작업' });
+const SECTION_OF_TYPE = { code: 'code', paper: 'papers', slides: 'slides', poster: 'posters', analysis: 'analysis', visualization: 'analysis', review: 'reviews', docreview: 'docreview', visual: 'visuals', brainstorm: 'brainstorm' };
+const SECTION_LABEL = translatedStrings({ code: '코드 개발', papers: '논문 작성', slides: '발표 자료', posters: '포스터', analysis: '데이터 분석', reviews: '코드 리뷰', docreview: '문서 리뷰', visuals: '문서 시각화', brainstorm: '브레인스토밍', tasks: '작업' });
 // 작업을 고른 채로 여는 분야 화면 (#/brainstorm/T-0009)
-const PER_TASK_SECTIONS = ['brainstorm', 'docreview'];
+const PER_TASK_SECTIONS = ['brainstorm', 'docreview', 'slides', 'posters', 'visuals'];
+// 유형마다 쓰는 스킬 (store.TYPE_SKILLS 와 같게) — 새 작업 지시 폼 안내 · 정적 모드 지시문
+const TYPE_SKILL = { paper: 'write-paper', slides: 'make-slides', poster: 'make-poster', visual: 'visualize-doc', docreview: 'review-doc', review: 'review-pr' };
 const ANALYSIS_TYPES = ['analysis', 'visualization'];
 const FIGURE_KINDS = ['image', 'html'];
 
@@ -548,6 +550,9 @@ function updateChrome(route = parseRoute()) {
   setCount('#nav-analysis-count', pendIn('analysis'));
   setCount('#nav-brainstorm-count', pendIn('brainstorm'));
   setCount('#nav-docreview-count', pendIn('docreview'));
+  setCount('#nav-slides-count', pendIn('slides'));
+  setCount('#nav-posters-count', pendIn('posters'));
+  setCount('#nav-visuals-count', pendIn('visuals'));
   const seen = LS.get('seenTs', 0);
   const unseen = idx ? idx.events.filter((e) => e.kind !== 'approval' && tsNum(e.ts) > seen).length : 0;
   $('#bell-count').textContent = pending;
@@ -854,7 +859,7 @@ function artifactThread(t, art) {
 
 /** 작업의 담당 AI 에게 메시지 보내기. artifact 를 주면 결과물 화면의 '수정 요청 · 추가 지시' 칸 (그 결과물을 가리키는 메시지) */
 // 시각화 요청 버튼을 두는 작업 유형 — 보낸 메시지는 AI 의 inbox 에서 /visualize-doc 스킬로 안내된다 (cli.VISUAL_TYPES)
-const VISUAL_TYPES = ['paper', 'docreview', 'visualization'];
+const VISUAL_TYPES = ['paper', 'docreview', 'visualization', 'visual'];
 // AI 에게 가는 글이라 한국어 그대로
 const VISUAL_REQUEST = '이 문서를 시각화해 주세요 (/visualize-doc) — 짜임새 있는 요약과 핵심 모식도 · 문서 구조 도식.\n초점 (선택): ';
 
@@ -2006,10 +2011,12 @@ function paperSize(p) {
 
 // 메뉴에서 새로 만들 때: 새 작업 지시에 스킬 호출을 채워 둔다 (AI 에게 가는 글이라 한국어 그대로)
 const DECK_NEW = {
-  slides: { type: 'other', title: '발표 자료: ', instruction: '/make-slides <발표할 논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 발표 종류 · 길이: (예: 학회 15분, 그룹 미팅 10분)\n- 청중:\n- 언어:' },
-  posters: { type: 'other', title: '포스터: ', instruction: '/make-poster <논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 크기 · 방향: (예: A0 세로)\n- 학회 · 규정:' },
-  visuals: { type: 'visualization', title: '문서 시각화: ', instruction: '/visualize-doc <문서의 작업 번호(T-…) 또는 경로>\n\n- 초점 (선택): (예: 방법 부분, 3장)' },
+  slides: { type: 'slides', title: '발표 자료: ', instruction: '/make-slides <발표할 논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 발표 종류 · 길이: (예: 학회 15분, 그룹 미팅 10분)\n- 청중:\n- 언어:' },
+  posters: { type: 'poster', title: '포스터: ', instruction: '/make-poster <논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 크기 · 방향: (예: A0 세로)\n- 학회 · 규정:' },
+  visuals: { type: 'visual', title: '문서 시각화: ', instruction: '/visualize-doc <문서의 작업 번호(T-…) 또는 경로>\n\n- 초점 (선택): (예: 방법 부분, 3장)' },
 };
+// 새 작업 지시에서 유형을 고르면 지시 내용이 비어 있을 때 채우는 틀 (발표 자료 · 포스터 · 문서 시각화)
+const TYPE_TEMPLATE = { slides: DECK_NEW.slides.instruction, poster: DECK_NEW.posters.instruction, visual: DECK_NEW.visuals.instruction };
 const newHref = (k) => `#/new?type=${DECK_NEW[k].type}&title=${encodeURIComponent(DECK_NEW[k].title)}&instruction=${encodeURIComponent(DECK_NEW[k].instruction)}`;
 
 function deckListItem(a, sel, route) {
@@ -2045,6 +2052,32 @@ function deckDetail(a, poster) {
   </section>`;
 }
 
+/** 아직 결과물이 없는 발표 자료 · 포스터 · 문서 시각화 작업 — 목록 항목과 상세 */
+function pendingItem(t, active, route) {
+  const now = taskNow(t);
+  return html`<a class="review-item ${active ? 'active' : ''}" href="#/${route}/${t.id}">
+    <div class="title">${t.title}</div>
+    <div class="meta">${statusBadge(t.status)}<span>${t.id}</span>${ago(t.updated_at)}</div>
+    ${now.text ? html`<div class="meta bs-now">${now.text}</div>` : ''}
+  </a>`;
+}
+
+function pendingDetail(t) {
+  const now = taskNow(t);
+  return html`<article class="card work-card" style="margin-bottom:0">
+    <div class="wc-head">
+      <div class="wc-title">
+        <div class="th-badges">${statusBadge(t.status)}${typeBadge(t.type)}</div>
+        <h3><a href="#/task/${t.id}"><span class="th-id">${t.id}</span>${t.title}</a></h3>
+        ${now.text ? html`<div class="wc-now"><span class="lbl">${now.label}</span>${now.text}</div>` : ''}
+        <div class="wc-meta">${agentLabel(t)} · ${L('업데이트')} ${ago(t.updated_at)}</div>
+      </div>
+      <div class="wc-prog"><div class="row"><span>${L('진행률')}</span><b>${t.progress || 0}%</b></div>${progressBar(t, true)}</div>
+    </div>
+    <div class="card-body muted">${icon('info')} ${L('아직 결과물이 없습니다 — AI 가 만들어 올리면 여기에 미리보기가 나옵니다.')} <a href="#/task/${t.id}">${L('작업 화면')}</a></div>
+  </article>`;
+}
+
 function viewDecks({ rest }, poster) {
   const route = poster ? 'posters' : 'slides';
   const title = poster ? L('포스터') : L('발표 자료');
@@ -2053,24 +2086,36 @@ function viewDecks({ rest }, poster) {
   const head = html`<div class="page-head"><div><h1>${title}</h1><p class="sub">${sub}</p></div>
     <a class="btn btn-primary" href="${newHref(route)}">${icon('plus')} ${poster ? L('새 포스터') : L('새 발표 자료')}</a></div>`;
   const items = state.index.artifacts.filter((a) => a.kind === 'pptx' && a.path && !!a.pptx?.poster === poster).sort(newestFirst);
-  if (!items.length) {
+  const pend = state.index.tasks.filter((t) => t.type === (poster ? 'poster' : 'slides') && !items.some((a) => a.task_id === t.id))
+    .sort((a, b) => tsNum(b.updated_at) - tsNum(a.updated_at));
+  if (!items.length && !pend.length) {
     return html`${head}<div class="card empty">${icon(poster ? 'poster' : 'slides')}<p>${poster ? L('아직 포스터가 없습니다') : L('아직 발표 자료가 없습니다')}</p>
       <p class="muted">${poster ? L('논문 작업의 메시지 칸에 "A0 포스터 만들어 주세요" 라고 보내거나, 새 포스터로 지시하세요.')
         : L('논문 작업의 메시지 칸에 "학회 15분 발표 자료 만들어 주세요" 라고 보내거나, 새 발표 자료로 지시하세요.')}</p>
       <p><a href="${newHref(route)}">${poster ? L('새 포스터') : L('새 발표 자료')}</a> · <a href="#/guide/s9">${L('사용 방법')}</a></p></div>`;
   }
   const [tid, fid] = rest;
-  const sel = items.find((a) => a.task_id === tid && a.id === fid) || items[0];
+  const selPend = !fid && pend.find((t) => t.id === tid);
+  const sel = selPend ? null : items.find((a) => a.task_id === tid && (!fid || a.id === fid)) || items[0] || null;
+  const shownPend = selPend || (!sel && pend[0]);
   return html`${head}
     <div class="review-layout">
-      <aside class="card review-list">${items.map((a) => deckListItem(a, sel, route))}</aside>
-      <div style="min-width:0">${deckDetail(sel, poster)}</div>
+      <aside class="card review-list">${pend.map((t) => pendingItem(t, t === shownPend, route))}${items.map((a) => deckListItem(a, sel, route))}</aside>
+      <div style="min-width:0">${shownPend ? pendingDetail(shownPend) : deckDetail(sel, poster)}</div>
     </div>`;
+}
+
+function visualListItem(x, g) {
+  const nf = x.arts.filter((a) => a.kind === 'image' && a.path).length;
+  return html`<a class="review-item ${x === g ? 'active' : ''}" href="#/visuals/${x.tid}">
+    <div class="title">${x.title}</div>
+    <div class="meta"><span>${x.tid}</span><span>${L('요약 {d}개 · 도식 {f}개', { d: x.arts.length - nf, f: nf })}</span>${ago(x.arts[0].updated_at || x.arts[0].created_at)}</div>
+  </a>`;
 }
 
 async function viewVisuals({ rest }) {
   const idx = state.index;
-  const head = html`<div class="page-head"><div><h1>${L('시각화§메뉴')}</h1><p class="sub">${L('긴 논문 · 문서를 짜임새 있는 요약과 도식(모식도)으로 — /visualize-doc 스킬이 만든 결과물을 작업별로 봅니다')}</p></div>
+  const head = html`<div class="page-head"><div><h1>${L('문서 시각화')}</h1><p class="sub">${L('긴 논문 · 문서를 짜임새 있는 요약과 도식(모식도)으로 — /visualize-doc 스킬이 만든 결과물을 작업별로 봅니다')}</p></div>
     <a class="btn btn-primary" href="${newHref('visuals')}">${icon('plus')} ${L('새 시각화')}</a></div>`;
   const byTask = new Map();
   idx.artifacts.filter((a) => a.category === 'visual').forEach((a) => {
@@ -2079,6 +2124,13 @@ async function viewVisuals({ rest }) {
   });
   const groups = [...byTask.entries()].map(([tid, arts]) => ({ tid, arts: arts.sort(newestFirst), title: arts[0].task_title }))
     .sort((a, b) => newestFirst(a.arts[0], b.arts[0]));
+  const pend = idx.tasks.filter((t) => t.type === 'visual' && !byTask.has(t.id)).sort((a, b) => tsNum(b.updated_at) - tsNum(a.updated_at));
+  const selPend = pend.find((t) => t.id === rest[0]) || (!groups.length && pend[0]);
+  if (selPend) {
+    return html`${head}<div class="review-layout">
+      <aside class="card review-list">${pend.map((t) => pendingItem(t, t === selPend, 'visuals'))}${groups.map((x) => visualListItem(x, null))}</aside>
+      <div style="min-width:0">${pendingDetail(selPend)}</div></div>`;
+  }
   if (!groups.length) {
     return html`${head}<div class="card empty">${icon('visual')}<p>${L('아직 시각화가 없습니다')}</p>
       <p class="muted">${L('논문 · 문서 리뷰 작업의 메시지 칸에서 시각화 요청을 보내면, AI 가 요약과 도식을 만들어 여기에 모읍니다.')}</p>
@@ -2091,10 +2143,7 @@ async function viewVisuals({ rest }) {
   const report = docs.find((a) => a.kind === 'markdown') || docs.find((a) => a.kind === 'pdf');
   return html`${head}
     <div class="review-layout">
-      <aside class="card review-list">${groups.map((x) => html`<a class="review-item ${x === g ? 'active' : ''}" href="#/visuals/${x.tid}">
-        <div class="title">${x.title}</div>
-        <div class="meta"><span>${x.tid}</span><span>${L('요약 {d}개 · 도식 {f}개', { d: x.arts.filter((a) => !(a.kind === 'image' && a.path)).length, f: x.arts.filter((a) => a.kind === 'image' && a.path).length })}</span>${ago(x.arts[0].updated_at || x.arts[0].created_at)}</div>
-      </a>`)}</aside>
+      <aside class="card review-list">${pend.map((t) => pendingItem(t, false, 'visuals'))}${groups.map((x) => visualListItem(x, g))}</aside>
       <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
         <section class="card visual-panel">
           <div class="card-head"><h2>${icon('visual')} <a href="#/task/${g.tid}">${g.tid} · ${g.title}</a></h2></div>
@@ -2497,7 +2546,7 @@ function viewNewTask({ q = {} } = {}) {
     <form id="new-task-form" class="card card-pad" style="max-width:820px" autocomplete="off">
       <label class="field"><span>${L('작업 제목')} *</span><input type="text" name="title" required maxlength="200" value="${q.title || ''}" placeholder="${L('예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성')}"></label>
       <div class="field-row">
-        <label class="field"><span>${L('작업 유형')}</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${v.label}</option>`)}</select></label>
+        <label class="field"><span>${L('작업 유형')}</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${v.label}</option>`)}</select><small data-type-skill ${TYPE_SKILL[type] ? '' : raw('hidden')}>${typeSkillNote(type)}</small></label>
         <label class="field"><span>${L('담당 AI')}</span><select name="agent">${agentOptions()}</select><small>${L('이 AI 만 이 작업을 가져갑니다')}</small></label>
         <label class="field"><span>${L('우선순위')}</span><select name="priority"><option value="normal">${L('보통')}</option><option value="high">${L('높음')}</option><option value="low">${L('낮음')}</option></select></label>
       </div>
@@ -2521,7 +2570,7 @@ function viewNewTask({ q = {} } = {}) {
         <div class="rel-chips" data-rel-chips ${rel.length ? '' : raw('hidden')}>${rel.map((id) => relChip(id))}</div>
         <small>${L('목록에서 여러 개를 차례로 고르거나 작업 번호를 직접 적으세요 (쉼표 · ; · 띄어쓰기로 구분, 3 = T-0003). 예: 논문에 쓸 데이터 분석이라면 그 논문 작업을 고르세요 — 논문 작성 화면에 연결되어 표시됩니다.')}</small>
       </div>
-      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}">${q.instruction || ''}</textarea></label>
+      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}">${q.instruction || TYPE_TEMPLATE[type] || ''}</textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <a class="btn btn-ghost" href="#/tasks">${L('취소')}</a>
         <button class="btn btn-primary" type="submit">${icon('send')} ${state.mode === 'live' ? L('작업 지시 등록') : L('지시문 만들기')}</button>
@@ -2722,8 +2771,18 @@ function removeRelated(btn) {
 }
 
 /** 작업 유형에 따라 보이는 칸: 문서 리뷰는 문서 경로 · 종류 · 목적, 그 밖에는 저장소 */
+function typeSkillNote(type) {
+  return TYPE_SKILL[type] ? L('/{skill} 스킬로 진행합니다', { skill: TYPE_SKILL[type] }) : '';
+}
+
 function syncTypeFields(form) {
   const type = form.elements.type.value;
+  const note = form.querySelector('[data-type-skill]');
+  if (note) { note.textContent = typeSkillNote(type); note.hidden = !TYPE_SKILL[type]; }
+  // 지시 내용이 비었거나 다른 유형의 틀 그대로면 이 유형의 틀로 바꾼다 (직접 쓴 글은 건드리지 않음)
+  const ta = form.elements.instruction;
+  const templates = Object.values(TYPE_TEMPLATE);
+  if (ta && (!ta.value.trim() || templates.includes(ta.value))) ta.value = TYPE_TEMPLATE[type] || '';
   $$('[data-type-only]', form).forEach((el) => { el.hidden = el.dataset.typeOnly !== type; });
   $$('[data-type-hide]', form).forEach((el) => { el.hidden = el.dataset.typeHide === type; });
   $$('[data-type-in]', form).forEach((el) => { el.hidden = !el.dataset.typeIn.split(' ').includes(type); });
@@ -2821,7 +2880,8 @@ async function submitNewTask(ev) {
     '',
     data.instruction ? `지시 내용:\n${data.instruction}` : '',
     '',
-    'devtrack 으로 작업을 등록하고, 진행 단계·문제점·결과물을 기록하면서 진행해 주세요. 커밋/푸시 전에는 반드시 승인 요청을 올려 주세요.',
+    'devtrack 으로 작업을 등록하고, 진행 단계·문제점·결과물을 기록하면서 진행해 주세요. 커밋/푸시 전에는 반드시 승인 요청을 올려 주세요.'
+      + (TYPE_SKILL[data.type] ? ` 이 유형은 /${TYPE_SKILL[data.type]} 스킬로 진행합니다.` : ''),
   ].filter((x) => x !== null).filter((x, i, arr) => x !== '' || (arr[i - 1] !== '' && i > 0)).join('\n');
   openModal({
     title: L('{ai}에게 보낼 작업 지시', { ai }),

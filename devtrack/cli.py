@@ -20,7 +20,7 @@ import uuid
 
 from . import DevTrackError, __version__, access, gitops, mailbox, models
 from .store import (
-    APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, USER,
+    APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, TYPE_SKILLS, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
     NOTE_SOFT, NOTE_STALE,
     pid_alive,
@@ -956,7 +956,9 @@ def _format_inbox(items):
 # 논문 · 문서 작업에서 시각화(요약 + 도식)를 부탁하는 말 — inbox 가 /visualize-doc 스킬을 가리킨다
 VISUAL_RE = re.compile(r"시각화|도식|모식도|도해|개념도|구조도|흐름도|다이어그램|마인드\s*맵|그림으로\s*(정리|보여|설명|요약)|"
                        r"visuali[sz]|diagram|schematic|infographic|mind\s*map", re.I)
-VISUAL_TYPES = ("paper", "docreview", "visualization")
+VISUAL_TYPES = ("paper", "docreview", "visualization", "visual")
+# 결과물을 만드는 유형: 메시지가 오면 그 스킬의 후속 요청 절차로 (같은 이름으로 새 버전)
+FOLLOWUP_TYPES = ("slides", "poster", "visual")
 _DOC_FILE_RE = re.compile(r"\.(pdf|docx|tex|md)\b", re.I)
 SKILLS_DIR = os.path.join(REPO_ROOT, "integrations", "claude-skills")
 VISUAL_SKILL = os.path.join(SKILLS_DIR, "visualize-doc", "SKILL.md")
@@ -982,11 +984,22 @@ def _skill_hints(it):
     keys = ("message",) if it.get("type") == "comment" else ("title", "instruction")
     text = " ".join(str(it.get(k) or "") for k in keys)
     kind = it.get("task_type")
-    out = []
-    if kind in VISUAL_TYPES and VISUAL_RE.search(text) and (kind != "visualization" or _DOC_FILE_RE.search(text)):
+    out, used = [], set()
+    own = TYPE_SKILLS.get(kind)
+    # 유형에 맞는 스킬: 새 작업은 늘, 결과물을 만드는 유형의 메시지는 그 스킬의 후속 요청으로
+    if own and (it.get("type") == "new_task" or (it.get("type") == "comment" and kind in FOLLOWUP_TYPES)):
+        used.add(own)
+        out.append(_indent("→ 유형 {}: /{} {} 스킬로 진행{}. 스킬이 설치되지 않았으면 {} 를 읽고 따름".format(
+            TASK_TYPES.get(kind, kind), own, it["task_id"], " (후속 요청 — 같은 파일 이름으로 새 버전)" if it.get("type") == "comment"
+            else "", os.path.join(SKILLS_DIR, own, "SKILL.md"))))
+    if ("visualize-doc" not in used and kind in VISUAL_TYPES and VISUAL_RE.search(text)
+            and (kind != "visualization" or _DOC_FILE_RE.search(text))):
+        used.add("visualize-doc")
         out.append(_indent("→ 문서 시각화 요청: /visualize-doc {} 스킬로 진행 (요약 + 도식 → devtrack artifact --visual). 스킬이 "
                            "설치되지 않았으면 {} 를 읽고 따름".format(it["task_id"], VISUAL_SKILL)))
     for name, rx, types, label in SKILL_HINTS:
+        if name in used:
+            continue
         if (types is None or kind in types) and rx.search(text) and _ASK_RE.search(text):
             out.append(_indent("→ {}. 스킬이 설치되지 않았으면 {} 를 읽고 따름".format(
                 label.format(tid=it["task_id"]), os.path.join(SKILLS_DIR, name, "SKILL.md"))))

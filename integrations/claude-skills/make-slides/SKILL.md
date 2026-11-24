@@ -46,10 +46,17 @@ Work files go in `~/.slides-work/<slug>/`, where the slug comes from the task ID
 DevTrack mode is on when `devtrack --version` succeeds.
 
 - **Task.**
-  - **The talk is about an existing task** (a paper or document-review task given, or the request came through `devtrack inbox`). Work in that task. Record progress with `devtrack step <TID> "발표 자료: …"` **without `-p`**, so the task's own progress is kept, and do not change its plan or status.
-  - **Otherwise**, create a task and link the source task if there is one:
+  - **A `slides` task** — the web's New task with type 발표 자료, or the Slides menu's New slides. This is the skill's own task.
+    - `devtrack start <TID>`.
+    - Set the plan, if it has none, with `devtrack plan <TID> "내용 · 그림 모으기" "이야기 구성 · 시간 배분" "슬라이드 설명 작성" "만들기 · 점검" "확인 (사용자)"`.
+    - Record progress with `-p`.
+    - The source paper or document is a related task (`devtrack show <TID>` lists it) or named in the instruction.
+  - **The talk is about another existing task**: a paper or document-review task given, or a message on it through `devtrack inbox`.
+    - Work in that task.
+    - Record progress with `devtrack step <TID> "발표 자료: …"` **without `-p`**, so the task's own progress is kept, and do not change its plan or status.
+  - **Otherwise**, create a `slides` task and link the source task if there is one:
     ```
-    TID=$(devtrack new "발표 자료: <제목>" -t other -i "<the user's request, verbatim>" --related <source task> \
+    TID=$(devtrack new "발표 자료: <제목>" -t slides -i "<the user's request, verbatim>" --related <source task> \
           --plan "내용 · 그림 모으기" "이야기 구성 · 시간 배분" "슬라이드 설명 작성" "만들기 · 점검" "확인 (사용자)")
     ```
 - **Sources.**
@@ -170,8 +177,8 @@ devtrack pptx ~/.slides-work/<slug>/deck.json --pdf          # add --png <dir> f
 2. **Close out.**
    - Record `devtrack log <TID> "발표 자료: 슬라이드 n장 · 약 m분 · 남은 [[MISSING]] k개"`.
    - If the request came from an inbox message, also run `devtrack inbox --task <TID> --ack`.
-   - On a task this skill created, run `devtrack request <TID> "발표 자료를 확인해 주세요" -k result -a <pptx F-ID> -d "<구성 · 남은 것>"` and stop.
-   - On an existing paper or review task, do not open a request.
+   - On a `slides` task, run `devtrack request <TID> "발표 자료를 확인해 주세요" -k result -a <pptx F-ID> -d "<구성 · 남은 것>"` and stop.
+   - On another type of task (paper, review), do not open a request.
 3. **In chat:**
    - the slide count and minutes;
    - the arc, one line per part;
@@ -180,7 +187,7 @@ devtrack pptx ~/.slides-work/<slug>/deck.json --pdf          # add --png <dir> f
 
 ## Follow-ups
 
-- **Changes.** Edit `deck.json`, rebuild, and upload with the same names (`--replace` keeps the old version).
+- **Changes.** Edit `deck.json`, rebuild, and upload with the same names (`--replace` keeps the old version). A message on a `slides` task is such a follow-up; the inbox marks it `→ 유형 발표 자료`.
 - **Manual edits are not merged back.** Changes the user made in PowerPoint do not flow back into `deck.json`. If the user has edited the .pptx by hand, ask before rebuilding, because a rebuild replaces those edits; the old version stays in DevTrack.
 
 ## Credits

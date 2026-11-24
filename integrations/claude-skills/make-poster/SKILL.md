@@ -43,10 +43,17 @@ Work files go in `~/.poster-work/<slug>/`: `poster.json`, `poster.pptx`, `poster
 DevTrack mode is on when `devtrack --version` succeeds.
 
 - **Task.**
-  - **The poster is about an existing task.** Work in that task. Use `devtrack step <TID> "포스터: …"` **without `-p`**, and do not change its plan or status.
-  - **Otherwise**, create a task:
+  - **A `poster` task** — the web's New task with type 포스터, or the Posters menu's New poster. This is the skill's own task.
+    - `devtrack start <TID>`.
+    - Set the plan, if it has none, with `devtrack plan <TID> "요구 사항 · 핵심 메시지" "내용 · 그림 고르기" "배치 설명 작성" "만들기 · 점검" "확인 (사용자)"`.
+    - Record progress with `-p`.
+    - The source is a related task or named in the instruction.
+  - **The poster is about another existing task** (paper, document review). Work in that task.
+    - Use `devtrack step <TID> "포스터: …"` **without `-p`**.
+    - Do not change its plan or status.
+  - **Otherwise**, create a `poster` task:
     ```
-    TID=$(devtrack new "포스터: <제목>" -t other -i "<the user's request, verbatim>" --related <source task> \
+    TID=$(devtrack new "포스터: <제목>" -t poster -i "<the user's request, verbatim>" --related <source task> \
           --plan "요구 사항 · 핵심 메시지" "내용 · 그림 고르기" "배치 설명 작성" "만들기 · 점검" "확인 (사용자)")
     ```
 - **Sources.**
@@ -140,7 +147,7 @@ devtrack pptx ~/.poster-work/<slug>/poster.json --pdf --png
 2. **Close out.**
    - Record `devtrack log <TID> "포스터: <크기> · 단 n개 · 약 w단어 · 그림 k개 · 남은 [[MISSING]] m개"`.
    - If the request came from the inbox, run `devtrack inbox --task <TID> --ack`.
-   - On a task this skill created, run `devtrack request <TID> "포스터를 확인해 주세요" -k result -a <pptx F-ID>` and stop.
+   - On a `poster` task, run `devtrack request <TID> "포스터를 확인해 주세요" -k result -a <pptx F-ID>` and stop.
 3. **In chat:**
    - the size;
    - the main messages;
@@ -150,7 +157,7 @@ devtrack pptx ~/.poster-work/<slug>/poster.json --pdf --png
 
 ## Follow-ups
 
-- **Changes.** Edit `poster.json`, rebuild, and upload with the same names.
+- **Changes.** Edit `poster.json`, rebuild, and upload with the same names. A message on a `poster` task is such a follow-up; the inbox marks it `→ 유형 포스터`.
 - **Manual edits are not merged back.** Edits made in PowerPoint do not flow back into the spec. Ask before rebuilding over them; the old version stays in DevTrack.
 
 ## Credits

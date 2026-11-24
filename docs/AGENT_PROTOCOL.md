@@ -280,6 +280,18 @@ devtrack artifact <TID> visual-<slug>.md --visual --replace -n "시각화 요약
 
 ## 논문 작성 · 발표 자료 · 포스터
 
+| 작업 유형 | 스킬 | 결과물 |
+|---|---|---|
+| `paper` 논문 작성 | `/write-paper` | 원고 (.tex · .bib) · 근거 장부 · PDF |
+| `slides` 발표 자료 | `/make-slides` | pptx + 같은 이름의 미리보기 PDF |
+| `poster` 포스터 | `/make-poster` | 한 장짜리 pptx + 미리보기 PDF |
+| `visual` 문서 시각화 | `/visualize-doc` | 요약 · 도식 (`--visual`) |
+| `docreview` 문서 리뷰 | `/review-doc` | 리뷰 리포트 PDF · 검토 항목 |
+| `review` 코드 리뷰 | `/review-pr` | 리뷰 리포트 · 코멘트 초안 |
+
+`slides` · `poster` · `visual` 작업은 그 스킬의 작업이다 — 진행률 · 계획을 쓰고 끝나면 확인 요청을 올린다. 그 작업에 온 메시지는 같은 스킬의
+후속 요청(같은 파일 이름으로 새 버전)이다. 다른 유형의 작업(논문 등)에서 발표 자료 · 포스터 · 시각화를 부탁받으면 그 작업에 결과물만 더한다.
+
 `/write-paper` · `/make-slides` · `/make-poster` 스킬 ([integrations/claude-skills](../integrations/claude-skills/README.md)) 이 이 흐름을 따른다.
 스킬 도구가 없으면 inbox 안내에 적힌 SKILL.md 를 읽고 따른다.
 
@@ -533,6 +545,8 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
   (inbox 에 `→ 문서 시각화 요청` 으로 표시된다).
 - 논문 작성 · 발표 자료 · 포스터를 부탁받으면 `/write-paper` · `/make-slides` · `/make-poster` 스킬로 진행한다
   (inbox 에 `→ 논문 작성 요청` · `→ 발표 자료 요청` · `→ 포스터 요청` 으로 표시된다). 외부 서비스(이미지 생성 · 검색)는 쓰지 않는다.
+- 작업 유형마다 스킬이 정해져 있다 (inbox 의 `→ 유형 …: /스킬`): 논문 작성 `/write-paper` · 발표 자료(slides) `/make-slides` ·
+  포스터(poster) `/make-poster` · 문서 리뷰 `/review-doc` · 문서 시각화(visual) `/visualize-doc` · 코드 리뷰 `/review-pr`.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고

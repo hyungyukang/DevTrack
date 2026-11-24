@@ -115,7 +115,11 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   데모 T-0005 의 발표 자료 · 포스터는 `write_pptx(svg_fallback=False)` 로 Chrome 없이 만든다.
   메뉴 **발표 자료** · **포스터** (`#/slides` · `#/posters`, app.js `viewDecks`) 는 pptx 결과물을 `pptx.poster`(`Store._pptx_meta` · `pptx_info` —
   한 장이고 긴 변 `POSTER_MIN_MM` 이상)로 나누고 같은 이름 PDF 를 미리보기로, **시각화** (`#/visuals`, `viewVisuals`) 는 분류 visual 을 작업별로.
-  새로 만들기는 `newHref` 가 새 작업 지시에 `?title=` · `?instruction=` (스킬 호출)을 채운다
+  새로 만들기는 `newHref` 가 새 작업 지시에 `?title=` · `?instruction=` (스킬 호출)을 채운다.
+  작업 유형 `slides` · `poster` · `visual` (분야 `SECTION_OF_TYPE` — 결과물이 아직 없는 그 유형의 작업도 목록에). 유형별 스킬은
+  `store.TYPE_SKILLS` 와 app.js `TYPE_SKILL` (두 쪽을 함께 고칠 것): inbox 의 새 작업과 `FOLLOWUP_TYPES` 메시지에 `→ 유형 …: /스킬`,
+  새 작업 지시 폼의 유형 아래 안내 · 지시 틀(`TYPE_TEMPLATE`), 정적 모드 지시문의 마지막 안내 문단(우편함 `strip_trailer` 가 뗌).
+  유형 이름은 우편함이 이름으로도 찾으므로 겹치지 않게 (데이터 가시화 `visualization` = 시각화, 문서 시각화 `visual`)
 - 코드 리뷰: `Store.set_review`(검토 항목 R1… 은 같은 ID 끼리 합침) · 승인 요청의 `choices`/`selected`(웹 체크박스 선택). `integrations/claude-skills/` 는 이를 쓰는 `/review-pr` · `/review-doc` 스킬 (사용자가 `~/.claude/skills` 로 복사해 설치)
 - 자동 갱신: `poll`(10초 · 탭으로 돌아올 때)이 바뀐 화면을 `render({auto})` 로 다시 그린다. 입력 중(`isBusy` — 입력 칸 포커스 · 누르는 중 ·
   `api` 쓰기 중 · 승인 선택지 · 새 작업 폼)이면 `deferRender` 로 미루고 입력 칸에서 나오면 `applyPending`. 써 두기만 한 글은 같은 화면이면

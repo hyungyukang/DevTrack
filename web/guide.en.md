@@ -102,6 +102,8 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
   (the inbox marks such a message `→ 문서 시각화 요청`).
 - When asked to write a paper, make slides or make a poster, use the `/write-paper`, `/make-slides` or `/make-poster` skill
   (the inbox marks these `→ 논문 작성 요청`, `→ 발표 자료 요청`, `→ 포스터 요청`). Use no external service (image generation, search).
+- Each task type has its skill (the inbox shows `→ 유형 …: /skill`): paper `/write-paper`, slides `/make-slides`, poster `/make-poster`,
+  docreview `/review-doc`, visual `/visualize-doc`, review `/review-pr`.
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
@@ -485,10 +487,14 @@ Use the buttons at the top right of the task detail page.
      PowerPoint). For a print PDF, open the .pptx in PowerPoint and export it.
    - In the chat, say `/make-slides T-0005 conference 15 min` or `/make-poster T-0005 A0 portrait` (install the skills in [step 5-2](#/guide/s5-2)).
    - The **Slides** and **Posters** menus on the left gather them from all tasks: pick one in the list to see its preview PDF and **Download PowerPoint**.
-     A one-slide large page (long side 500 mm or more) counts as a poster, everything else as slides. **New slides** and **New poster** at the top open
-     New task with the skill call (`/make-slides …`) filled in; pick the paper task as a related task and send it.
+     A one-slide large page (long side 500 mm or more) counts as a poster, everything else as slides. Tasks of that type without artifacts yet show with their status.
+   - To ask for a new one, pick the type **Slides** or **Poster** in New task, or click **New slides** / **New poster** above the list.
+     The instruction gets a template (`/make-slides …`): pick the paper task as a related task, write the length or size, and send it.
    - The **Visualizer** menu gathers the `/visualize-doc` results (summaries and diagrams) by task and shows the diagrams with the summary report
-     ([Document review](#/guide/s9), item 5).
+     ([Document review](#/guide/s9), item 5). To ask for a new one, use the type **Visualizer**.
+   - Each task type has the skill the AI uses: Paper writing → `/write-paper`, Slides → `/make-slides`, Poster → `/make-poster`,
+     Document review → `/review-doc`, Visualizer → `/visualize-doc`, Code review → `/review-pr`. New task shows it under the type, and the AI's
+     inbox points to it with `→ 유형 …: /skill`. A message to a task of that type (e.g. "fix the title on slide 3") is handled with the same skill as a new version.
 
 ### Document review
 
