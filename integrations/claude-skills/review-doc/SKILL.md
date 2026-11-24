@@ -58,6 +58,9 @@ Decide the **kind** (`paper` · `report` · `proposal` · `thesis` · `other`) a
 
 ## Step 3: Review passes
 
+0. **Neutral map first** (before judging, for your own use): the research question, the system or population studied, the design
+   (experiment, simulation, survey…), the comparator or reference, the outcomes or quantities, and the principal claims.
+   Note the material that is missing for an assessment (supplement, data or code statement) — write "not reported" instead of guessing.
 1. **Summary** — 3–6 sentences: what was done and why, the main claims, the evidence. No evaluation here.
 2. **Gaps for the purpose** — what this reader looks for and cannot find. Proposal: need, goals ↔ methods, schedule, resource estimate and its basis, risks, expected impact, evaluation criteria of the call. Report: conclusion and its basis, limitations, next steps, decisions asked for. Paper: the new contribution, stated early.
 3. **Overall logic** — does each claim follow from the evidence shown? Missing steps, claims larger than the evidence, contradictions between sections, numbers or terms that do not match (abstract vs results, text vs tables).
@@ -66,9 +69,21 @@ Decide the **kind** (`paper` · `report` · `proposal` · `thesis` · `other`) a
    - **Format** — structure (abstract, introduction, methods, results, discussion, conclusions), the venue's rules if known (length, sections, reference style), abstract with quantitative results, figures and tables referenced and readable, references complete.
    - **Difference from prior work** — does the introduction say what is new compared with the cited work, or only list it? Is a "first" / "novel" claim true? Missing key references.
    - **Reasoning to the conclusions** — statistics and uncertainty, controls and comparisons, range of validity vs how far the conclusions generalize, alternative explanations, enough detail to reproduce.
+   - **Claims against evidence** — for each central claim (causal, mechanistic, "universal", generalizing), find the result, figure, table or citation behind it and check that direction, magnitude, conditions and uncertainty actually match the wording.
+   - **Methods and statistics, in this order** — the question and the quantity sought → design and comparators → sample size, number of runs or precision → exclusions and missing data → whether the analysis fits the design → multiple comparisons → estimates with uncertainty → interpretation and generalization.
+     A claim of "no difference" or "equivalent" needs an interval that rules out a meaningful difference; non-significance alone is not equivalence.
+     For computational work, look separately at **verification** (grid · time-step convergence, observed order, discretization error) and **validation** (experiment, benchmark, theory).
+   - **Reproducibility** — software and versions, parameters, inputs, seeds, hardware where it matters; data and code availability or a reason for restriction. Never write that a result was reproduced unless it was actually run.
+   - **Ethics and integrity** — approvals, consent, conflicts, funding role, where applicable. Describe only what is observable; do not accuse.
 6. **Strengths** — 2–4 things done well; the author should keep them when revising.
 
 ## Step 4: Findings
+
+Each finding answers five things: **where** (`location`), **what you observed** (`title`, and the problem in the report),
+**the evidence or criterion** it rests on (a result, a rule of the venue, a reporting standard), **why it matters** (`plain`, in plain words)
+and **what to do** (`suggestion`). A request for new experiments, runs or analyses must be needed for a central claim and proportionate;
+when narrowing the claim, clarifying, a sensitivity check or a stated limitation is enough, suggest that instead.
+Keep the tone professional and constructive.
 
 Number substantive findings first, by importance: **R1, R2…** (stable across re-reviews: keep a finding's number; new ones get the next number). Severity:
 `blocker` (the document would fail its purpose — rejection, refusal) · `major` (seriously weakens it) · `minor` (worth improving) · `nit` (wording, spelling, formatting) · `question` (ask the author).

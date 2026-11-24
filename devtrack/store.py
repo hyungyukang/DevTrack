@@ -284,6 +284,7 @@ _KIND_EXT = {
     "notebook": ("ipynb",),
     "csv": ("csv", "tsv"),
     "html": ("html", "htm"),
+    "pptx": ("pptx",),
     "text": ("txt", "log", "out", "err"),
 }
 CODE_LANG = {
@@ -1774,6 +1775,27 @@ class Store:
                 add(self._artifact_file(tid, a), label, a)
         return out
 
+    def task_figures(self, tid):
+        """슬라이드 · 포스터에 쓸 그림 파일: 이 작업의 그림 결과물(분류 무관, 새 버전) > 연결된 작업의 그림 결과물.
+        → [{"path", "task", "id", "title", "version"}] (같은 파일은 한 번만)"""
+        t = self.load(normalize_task_id(tid))
+        out, seen = [], set()
+        for task in [t] + [x for x in (self._try_load(r) for r in t.get("related") or []) if x]:
+            for a in reversed(task.get("artifacts", [])):
+                f = self._artifact_file(task["id"], a)
+                if a.get("kind") != "image" or not f or not os.path.isfile(f) or os.path.realpath(f) in seen:
+                    continue
+                seen.add(os.path.realpath(f))
+                out.append({"path": os.path.abspath(f), "task": task["id"], "id": a["id"], "title": a.get("title"),
+                            "version": a.get("version", 1)})
+        return out
+
+    def _try_load(self, tid):
+        try:
+            return self.load(normalize_task_id(tid))
+        except (DevTrackError, OSError, ValueError):
+            return None
+
     # ------------------------------------------------------------------ 논문 원고 폴더
     def _artifact_file(self, tid, a):
         if a.get("path"):
@@ -2937,12 +2959,21 @@ def _doc_review_instruction(t, plan, n, note, path, rtid=None, figures=0, art_di
         "- 저자의 작업 지시와 기록: devtrack show {}".format(t["id"]),
         "- 실제 저널 심사처럼 봅니다: 연구의 새로움과 선행 연구 대비 기여, 방법의 타당성 · 재현성, 결과가 결론을 뒷받침하는지, "
         "그림 · 표, 구성 · 문장, 투고처 규정. 근거 없는 칭찬이나 막연한 지적 대신 위치와 고칠 방법을 적습니다.",
+        "- 판단하기 전에 연구 질문 · 대상 · 방법 · 비교 대상 · 주요 주장을 정리하고, 핵심 주장마다 뒷받침하는 결과 · 그림 · 표 · 인용이 "
+        "방향 · 크기 · 조건 · 불확도까지 맞는지 봅니다. 원고에 없는 것은 짐작하지 말고 '원고에 없음' 으로 적습니다.",
+        "- 방법 · 통계는 질문과 구하려는 양 → 설계 · 비교 대상 → 표본 · 실행 수와 정밀도 → 분석이 설계에 맞는지 → 불확도 → 해석 · 일반화 "
+        "순으로 봅니다. 계산 연구는 수치 검증(격자 · 시간 간격 수렴, 관측 차수)과 검증(실험 · 기준 해)을 나눠 봅니다. "
+        "'차이 없음 · 동등' 주장은 불확도 구간이 의미 있는 차이를 배제하는지 봅니다.",
+        "- 재현성: 소프트웨어 · 버전 · 매개변수 · 입력 · 데이터와 코드 공개 여부. 직접 돌려 보지 않았으면 재현했다고 쓰지 않습니다.",
+        "- 지적마다 위치 · 관찰 · 근거나 기준 · 왜 중요한지(plain) · 요청(suggestion)을 적습니다. 새 실험 · 계산 요구는 핵심 주장에 꼭 "
+        "필요할 때만 하고, 주장 범위를 좁히거나 한계를 밝히는 것으로 충분하면 그것을 제안합니다. 정중하게 쓰고 저자를 비난하지 않습니다.",
         "- 원고는 고치지 않고 심사만 합니다.",
         "- 심사 항목은 devtrack review {} --findings <JSON> 으로 R1, R2… 를 남깁니다 (severity: blocker = 반드시 고칠 주요 지적 · major · "
         "minor · nit · question, location = 절 · 쪽 · 그림 · 표, quote = 원고 원문 그대로, title, plain = 비전문가도 알 수 있는 설명, "
         "suggestion = 고칠 방법 — 원고의 언어로).".format(rt),
         "- 심사평(referee report)을 원고의 언어로 써서 함께 올립니다: 편집자에게 보내는 요약 · 주요 지적 · 세부 지적 "
-        "(devtrack review {} report.md --pdf --findings f.json — PDF 를 만들지 못하면 --pdf 없이).".format(rt),
+        "(devtrack review {} report.md --pdf --findings f.json — PDF 를 만들지 못하면 --pdf 없이). 저자에게 보내는 부분과 "
+        "편집자에게만 보내는 부분(이해 충돌 · 전문 분야 밖이라 판단하지 못한 점 · 연구 윤리 의심)은 나눠 씁니다.".format(rt),
         "- 다음 차례에는 저자의 답변서(response to reviewers)와 \"지난 심사 이후 바뀐 부분\" 을 보고, 같은 ID 의 status 를 "
         "fixed · open 으로 갱신하고 새로 찾은 문제는 새 ID 로 더합니다.",
         "- 끝나면 devtrack review-done {} --verdict accept (게재 가능) · minor (소폭 수정) · major (대폭 수정) · reject (게재 불가) "

@@ -534,8 +534,70 @@ def cmd_svgcheck(store, args):
     return 1 if bad else 0
 
 
+def cmd_pptx(store, args):
+    """슬라이드 · 포스터 설명(JSON) → PowerPoint(.pptx) (+ 미리보기 PDF · PNG). 표준 라이브러리만."""
+    from . import pptx
+    if args.example:
+        print(json.dumps(pptx.EXAMPLE_POSTER if args.example == "poster" else pptx.EXAMPLE_SLIDES, ensure_ascii=False,
+                         indent=2))
+        return 0
+    if not args.spec:
+        raise DevTrackError("슬라이드 설명 JSON 을 주세요 (형식: devtrack pptx --example slides · --example poster)")
+    spec_path = os.path.abspath(os.path.expanduser(args.spec))
+    spec = pptx.load_spec(spec_path)
+    base = os.path.dirname(spec_path)
+    stem = os.path.splitext(spec_path)[0]
+    if args.check:
+        deck, slides = pptx.layout(spec, base)
+        out = None
+    else:
+        out = os.path.abspath(os.path.expanduser(args.output)) if args.output else stem + ".pptx"
+        deck, slides = pptx.write_pptx(spec, out, base)
+    result = {"pptx": out, "slides": len(slides), "warnings": deck.warnings}
+    if args.pdf is not None:
+        pdf = os.path.abspath(os.path.expanduser(args.pdf)) if args.pdf else (os.path.splitext(out or spec_path)[0] + ".pdf")
+        try:
+            result["pdf"] = pptx.preview_pdf(deck, slides, pdf)
+        except DevTrackError as e:
+            result["pdf_error"] = str(e)
+    if args.png is not None:
+        d = os.path.abspath(os.path.expanduser(args.png)) if args.png else stem + "-preview"
+        try:
+            result["png"] = pptx.preview_png(deck, slides, d)
+        except DevTrackError as e:
+            result["png_error"] = str(e)
+    if args.json:
+        _out(args, result)
+        return 0
+    print("{} — 슬라이드 {}장{}".format(os.path.basename(out) if out else "점검", len(slides),
+                                    " · 경고 {}".format(len(deck.warnings)) if deck.warnings else " · 문제 없음"))
+    for w in deck.warnings:
+        print("  ⚠ " + w)
+    if out:
+        print("  pptx: " + out)
+    if result.get("pdf"):
+        print("  미리보기 PDF: {} (PowerPoint 와 줄바꿈이 조금 다를 수 있음)".format(result["pdf"]))
+    if result.get("png"):
+        print("  미리보기 PNG: {} … ({}장)".format(result["png"][0], len(result["png"])))
+    for k in ("pdf_error", "png_error"):
+        if result.get(k):
+            print("  미리보기 못 만듦: " + result[k])
+    return 0
+
+
 def cmd_doc(store, args):
-    """작업이 다루는 문서 파일 경로 (시각화 · 요약할 때 읽을 것)."""
+    """작업이 다루는 문서 파일 경로 (시각화 · 요약할 때 읽을 것). --figures 는 그림 파일 (슬라이드 · 포스터용)."""
+    if args.figures:
+        figs = store.task_figures(args.task)
+        if args.json:
+            _out(args, figs)
+            return 0
+        if not figs:
+            _info("그림 결과물이 없습니다 — {} 와 연결된 작업".format(normalize_task_id(args.task)))
+        for f in figs:
+            print("{}\n    {} {} {}{}".format(f["path"], f["task"], f["id"], f.get("title") or "",
+                                            " (v{})".format(f["version"]) if f["version"] > 1 else ""))
+        return 0
     docs = store.task_documents(args.task)
     if not docs:
         raise DevTrackError("{} 에서 문서를 찾지 못했습니다 — 문서 경로를 직접 주세요 (논문 작업이면 devtrack paper {} 로 "
@@ -840,8 +902,7 @@ def _format_inbox(items):
                 out.append(_indent(it["instruction"]))
             out.extend(_sent_lines(it))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
-            if _visual_hint(it):
-                out.append(_visual_hint(it))
+            out.extend(_skill_hints(it))
             if it.get("related"):
                 out.append(_indent("→ 관련 작업 {}: 먼저 devtrack show <작업> --brief (인계 메모) 를 읽고, 리포트 · 파일은 필요한 것만"
                                    .format(", ".join(it["related"]))))
@@ -860,13 +921,11 @@ def _format_inbox(items):
                 " (v{})".format(ver) if ver and ver > 1 else "", it["message"]))
             out.extend(_comment_artifact_lines(it))
             out.extend(_sent_lines(it))
-            if _visual_hint(it):
-                out.append(_visual_hint(it))
+            out.extend(_skill_hints(it))
         elif it["type"] == "comment":
             out.append("[메시지] {task_id} {id}: {message}".format(**it))
             out.extend(_sent_lines(it))
-            if _visual_hint(it):
-                out.append(_visual_hint(it))
+            out.extend(_skill_hints(it))
         elif it["type"] == "agent_message":
             lines = it["message"].splitlines() or [""]
             out.append("[AI 메시지] {} {} ({} 이(가) 보냄): {}".format(it["task_id"], it["id"], it.get("sender") or "AI",
@@ -899,19 +958,39 @@ VISUAL_RE = re.compile(r"시각화|도식|모식도|도해|개념도|구조도|�
                        r"visuali[sz]|diagram|schematic|infographic|mind\s*map", re.I)
 VISUAL_TYPES = ("paper", "docreview", "visualization")
 _DOC_FILE_RE = re.compile(r"\.(pdf|docx|tex|md)\b", re.I)
-VISUAL_SKILL = os.path.join(REPO_ROOT, "integrations", "claude-skills", "visualize-doc", "SKILL.md")
+SKILLS_DIR = os.path.join(REPO_ROOT, "integrations", "claude-skills")
+VISUAL_SKILL = os.path.join(SKILLS_DIR, "visualize-doc", "SKILL.md")
+# 그 밖의 과학 글쓰기 스킬: (스킬, 알아볼 말, 작업 유형 — None 이면 모두, 안내)
+SKILL_HINTS = (
+    ("make-slides", re.compile(r"발표\s*자료|슬라이드|\bppt|pptx|presentation|\bslides?\b|\btalk\b", re.I), None,
+     "발표 자료 요청: /make-slides {tid} 스킬로 진행 (devtrack pptx)"),
+    ("make-poster", re.compile(r"포스터|\bposter", re.I), None, "포스터 요청: /make-poster {tid} 스킬로 진행 (devtrack pptx)"),
+    ("write-paper", re.compile(r"(초안|원고|본문|초록|[0-9]+\s*장|절|답변서|수정본).{0,12}(써|쓰|작성|고쳐|다듬|보강)|"
+                               r"response to (the )?reviewers|\bdraft|\bwrite\b|\brevise\b", re.I), ("paper",),
+     "논문 작성 요청: /write-paper {tid} 스킬로 진행 (근거 장부 · [[MISSING]] · devtrack latex)"),
+)
 
 
-def _visual_hint(it):
-    """시각화 요청이면 스킬 안내 한 줄. 시각화 작업은 문서 파일을 말했을 때만 (데이터 가시화와 구분)."""
-    text = " ".join(str(it.get(k) or "") for k in ("title", "instruction", "message"))
+_ASK_RE = re.compile(r"만들|작성|준비|써\s*주|써줘|해\s*주|해줘|부탁|그려|정리해|고쳐|\bmake\b|\bcreate\b|\bprepare\b|"
+                     r"\bbuild\b|\bdraft\b|\bwrite\b|\brevise\b|please", re.I)
+
+
+def _skill_hints(it):
+    """시각화 · 발표 자료 · 포스터 · 논문 작성 요청이면 스킬 안내 (스킬 도구가 없는 AI 는 SKILL.md 를 읽음).
+    메시지는 메시지 글만, 새 작업은 제목 · 지시를 본다. 발표 자료 · 포스터 · 논문 작성은 요청하는 말(만들어 · 작성 …)이 있을 때만.
+    시각화 작업 유형은 문서 파일을 말했을 때만 시각화 스킬로 (데이터 가시화와 구분)."""
+    keys = ("message",) if it.get("type") == "comment" else ("title", "instruction")
+    text = " ".join(str(it.get(k) or "") for k in keys)
     kind = it.get("task_type")
-    if kind not in VISUAL_TYPES or not VISUAL_RE.search(text):
-        return None
-    if kind == "visualization" and not _DOC_FILE_RE.search(text):
-        return None
-    return _indent("→ 문서 시각화 요청: /visualize-doc {} 스킬로 진행 (요약 + 도식 → devtrack artifact --visual). 스킬이 "
-                   "설치되지 않았으면 {} 를 읽고 따름".format(it["task_id"], VISUAL_SKILL))
+    out = []
+    if kind in VISUAL_TYPES and VISUAL_RE.search(text) and (kind != "visualization" or _DOC_FILE_RE.search(text)):
+        out.append(_indent("→ 문서 시각화 요청: /visualize-doc {} 스킬로 진행 (요약 + 도식 → devtrack artifact --visual). 스킬이 "
+                           "설치되지 않았으면 {} 를 읽고 따름".format(it["task_id"], VISUAL_SKILL)))
+    for name, rx, types, label in SKILL_HINTS:
+        if (types is None or kind in types) and rx.search(text) and _ASK_RE.search(text):
+            out.append(_indent("→ {}. 스킬이 설치되지 않았으면 {} 를 읽고 따름".format(
+                label.format(tid=it["task_id"]), os.path.join(SKILLS_DIR, name, "SKILL.md"))))
+    return out
 
 
 def _print_inbox(items, hint=True):
@@ -2498,6 +2577,16 @@ def build_parser():
     sp = add("doc", cmd_doc, "작업이 다루는 문서 파일 경로 — 심사 원고 · 논문 원고 폴더의 본문 · 검토할 문서 · 문서 결과물 순")
     sp.add_argument("task")
     sp.add_argument("--all", action="store_true", help="후보를 모두 (먼저 쓸 것부터)")
+    sp.add_argument("--figures", action="store_true", help="문서 대신 그림 파일 — 이 작업과 연결된 작업의 그림 결과물 (슬라이드 · 포스터용)")
+
+    sp = add("pptx", cmd_pptx, "슬라이드 · 포스터 PowerPoint(.pptx) 만들기 — 설명 JSON 에서, 표준 라이브러리만 "
+                               "(글자 넘침 점검 + --pdf · --png 미리보기)")
+    sp.add_argument("spec", nargs="?", help="슬라이드 설명 JSON (형식: --example)")
+    sp.add_argument("-o", "--output", help=".pptx 경로 (기본: JSON 과 같은 이름)")
+    sp.add_argument("--pdf", nargs="?", const="", metavar="FILE", help="미리보기 PDF (헤드리스 Chrome, 기본: 같은 이름 .pdf)")
+    sp.add_argument("--png", nargs="?", const="", metavar="DIR", help="슬라이드마다 PNG 미리보기 (기본: <이름>-preview/)")
+    sp.add_argument("--check", action="store_true", help="점검만 (pptx 를 만들지 않음)")
+    sp.add_argument("--example", choices=["slides", "poster"], help="설명 JSON 예시 출력")
 
     sp = add("svgcheck", cmd_svgcheck, "SVG 도식 점검 — 실행 코드 · 외부 주소, 상자를 넘거나 겹친 글자, 캔버스 밖 · 너무 작은 "
                                        "글자 (+ --png 미리보기)")

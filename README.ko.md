@@ -100,10 +100,11 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `devtrack password` | 웹에 비밀번호 걸기. 비밀번호를 넣은 브라우저만 기록을 읽음 (Apache `.htaccess` 와 `devtrack serve` 가 막음) |
 | `devtrack mailbox` | GitHub 비공개 저장소의 이슈를 우편함으로: 정적 웹에서 이슈로 보낸 지시 · 메시지 · 승인을 기다리던 `watch` · 대기 모드가 받아 기록. 그 저장소에 올린 파일의 링크는 작업의 보낸 파일로 함께 받음 |
 | `devtrack config` | 기록 폴더 · 웹 공개 폴더 확인 · 설정. `devtrack config data <폴더>` 로 정하면 어느 터미널 · 프로그램에서 실행하든 같은 곳에 기록 |
+| `devtrack pptx` | 설명 JSON 으로 편집 가능한 PowerPoint(발표 자료 · 포스터)를 표준 라이브러리만으로 만들고 글자 넘침 점검 · 미리보기 PDF/PNG — `/make-slides` · `/make-poster` 가 씀 |
 | `devtrack doc` · `devtrack svgcheck` | 작업이 다루는 문서 파일 경로 · SVG 도식 점검(실행 코드, 넘치거나 겹친 글자) + PNG 미리보기 — `/visualize-doc` 이 씀 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
-| `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`, `/visualize-doc`) |
+| `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`, `/visualize-doc`, `/write-paper`, `/make-slides`, `/make-poster`) |
 
 ## 빠른 시작 (로컬에서 예시 화면 보기)
 
@@ -136,7 +137,8 @@ bin/devtrack --data demo-data apply T-0006 A-1  # 커밋 (데모 저장소는 �
 - **코드 리뷰** — **리뷰 결과 한눈에 보기**(PR 정보, 리뷰 의견, 쉬운 요약, 중요도별 남은 항목, 검토 항목 R1, R2… 와 쉬운 설명 · GitHub 위치 링크),
   리뷰 리포트(Markdown · PDF) 뷰어, **PR 코멘트를 작성할 항목을 체크해서 진행**, 코멘트 초안 게시 승인, 의견 보내기.
   Claude Code `/review-pr` 스킬 연동은 [integrations/claude-skills](integrations/claude-skills/README.md)
-- **논문 작성** — 논문(유형 `paper`)별 카드: 원고 구성(작성 계획), **컴파일된 PDF**(최신 빌드 · 경고 · 실패 알림), 원고 파일, 그림, 연결된 데이터 분석, 열린 문제. 논문 결과물(PDF · 원고 · 그림 · 표/데이터) 모아보기
+- **논문 작성** — 논문(유형 `paper`)별 카드: 원고 구성(작성 계획), **컴파일된 PDF**(최신 빌드 · 경고 · 실패 알림), 원고 파일, 그림, 연결된 데이터 분석, 열린 문제. 논문 결과물(PDF · 원고 · 그림 · 표/데이터) 모아보기.
+  스킬: `/write-paper` 는 근거 장부에 맞춰 원고를 쓰고 고치며(근거 없는 것은 `[[MISSING]]`), `/make-slides` · `/make-poster` 는 논문의 그림 · 숫자로 편집 가능한 PowerPoint 발표 자료 · 포스터(A0 …)를 `devtrack pptx` 로 만듦 — 외부 서비스 · 이미지 생성 AI 없음
 - **LaTeX 문서 보기** — `.tex` 결과물을 코드 대신 읽기 쉬운 문서로 표시: 절 제목 · 수식(KaTeX) · 표 · 목록 · 각주, `\cite`/`\ref`/`\eqref` 번호 연결, `\includegraphics` 는 같은 이름으로 올라온 그림(같은 작업 또는 연결된 분석 작업)을 찾아 표시. `원본 코드` 로 전환 가능. 번호·레이아웃은 실제 PDF 와 다를 수 있는 미리보기
 - **문서 리뷰** — 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 작업(유형 `docreview`) 목록과, 고른 작업의 **리뷰 결과 한눈에 보기**(리뷰 의견 · 한 줄 결론, 문서 요약, 영역별 평가, 잘된 점, 보완 · 수정할 부분 R1… 의 위치와 **원문 → 수정 제안**), 리뷰 리포트(PDF) · 원본 문서 보기. Word 원본은 글자 · 표를 뽑아 미리보기(표준 라이브러리만). 새 작업 지시에서 문서 경로 · 종류 · 목적 입력.
   논문 · 문서 리뷰 작업의 메시지 칸에서 **시각화 요청** 을 보내면 `/visualize-doc` 스킬이 짜임새 있는 요약과 Claude 가 SVG 로 직접 그린 도식 1–3개를 올림 (문서가 외부 이미지 서비스로 나가지 않음) — 작업 화면의 **시각화** 칸에 표시

@@ -100,6 +100,8 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
 - When asked to visualize a paper or document-review task (summary, diagrams, schematics), use the `/visualize-doc <TID>` skill
   (the inbox marks such a message `→ 문서 시각화 요청`).
+- When asked to write a paper, make slides or make a poster, use the `/write-paper`, `/make-slides` or `/make-poster` skill
+  (the inbox marks these `→ 논문 작성 요청`, `→ 발표 자료 요청`, `→ 포스터 요청`). Use no external service (image generation, search).
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
@@ -121,17 +123,19 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 >
 > The bracketed tags (`[DevTrack 결정]`, `[완료 처리]` and so on) stay in Korean: they are exactly what DevTrack prints, and Claude understands them either way.
 
-### 5-2. Install the review and visualization skills (if you will ask for code or document reviews, or document visualizations)
+### 5-2. Install the review and paper skills (for code or document reviews, paper writing, visualization, slides or posters)
 
 The `/review-pr` skill posts code review results to DevTrack and lets you pick on the web which items to comment on.
 The `/review-doc` skill reviews a paper, report or proposal (PDF, Word, LaTeX) and posts the summary and what to fix as a PDF report ([Document review](#/guide/s9)).
 The `/visualize-doc` skill turns a long paper or document into a structured summary and diagrams (schematics) ([Document review](#/guide/s9), item 5).
+`/write-paper` writes and revises a manuscript tied to its evidence, and `/make-slides` and `/make-poster` make PowerPoint slides and posters
+([Paper writing](#/guide/s9), items 5 and 6). These three are K-Dense's public skills (MIT) adapted to DevTrack; they use no external service.
 
 ```bash
-mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
-ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
+for s in review-pr review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
 ```
 
 Linking instead of copying means `git pull` keeps the skill up to date too.
@@ -464,6 +468,22 @@ Use the buttons at the top right of the task detail page.
    - The folder is rebuilt whenever the artifacts change, so do not edit files in it.
      `devtrack paper <task ID>` shows its state and any missing figures (an extension that does not match, or no figure artifact).
    - Moving just the records folder to another computer brings the manuscript along. For example, a paper started on a Mac can be continued on an HPC system.
+5. **Writing and revising the manuscript** (`/write-paper`): before writing, Claude builds an **evidence ledger** (a source for every number and claim)
+   from the artifacts of this task and its linked analysis tasks, and writes the outline and then the draft from that evidence only. Numbers are reconciled
+   between abstract, text, tables and captions, and citations come only from your `.bib`.
+   - Nothing without evidence is invented: it stays in the manuscript as `[[MISSING: …]]`, `[[CHECK: …]]` or `[[CITE: …]]`. Authors, affiliations,
+     funding, data availability and AI-use statements are written only from what you provided.
+   - Claude builds the PDF with `devtrack latex` and posts "please check the manuscript". For a paper set to get a journal review, it also writes the
+     response letter answering each referee item.
+   - The manuscript and the evidence stay on this computer (no search, translation or grammar services).
+6. **Slides and posters** (`/make-slides`, `/make-poster`): send a message such as "make a 10-minute group-meeting talk" or "make an A0 poster", and Claude
+   makes a **PowerPoint (.pptx)** from the figures, tables and numbers of the manuscript and its linked analyses.
+   - Slides carry one message each (title = the claim, body = the figure behind it) with speaker notes; a poster has a title band and 2–4 columns of blocks.
+   - DevTrack writes the .pptx with the standard library only (`devtrack pptx`), so it works on HPC too. No image-generation AI is used:
+     pictures are your files and, where needed, diagrams Claude draws itself as SVG.
+   - A **preview PDF** with the same name is posted too and shows on the web (when headless Chrome is available; line breaks can differ slightly from
+     PowerPoint). For a print PDF, open the .pptx in PowerPoint and export it.
+   - In the chat, say `/make-slides T-0005 conference 15 min` or `/make-poster T-0005 A0 portrait` (install the skills in [step 5-2](#/guide/s5-2)).
 
 ### Document review
 
@@ -476,6 +496,10 @@ Have Claude read a paper, report or proposal and give you a **summary** and **wh
    - In the chat you can also say `/review-doc ~/papers/draft.pdf check before journal submission` (install the skill in [step 5-2](#/guide/s5-2))
 2. Claude goes in this order: summary of the document → what is missing for its purpose → overall logic → awkward sentences and spelling.
    For a **scientific paper** it looks more closely at the format, how the work differs from prior studies, and the reasoning that leads to the conclusions.
+   Before judging, it maps the question, methods and main claims; it checks that each central claim's evidence (results, figures, tables) matches in size,
+   conditions and uncertainty, goes through methods and statistics in a set order, and checks reproducibility (versions, parameters, data availability).
+   Each item gives location, observation, evidence, why it matters and how to fix it; new experiments are asked for only when needed. The referee in the
+   journal review loop (6-3) uses the same criteria.
 3. See the results in the **Document review** menu.
    - **Review at a glance**: the verdict (ready to submit, minor revision, major revision, rewrite) with a one-line conclusion, the **document summary**,
      a rating per area (good, needs work, poor) and the strengths
@@ -939,6 +963,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
 - For a request to visualize a paper or document task (summary, diagrams), read `~/.codex/skills/visualize-doc/SKILL.md` and follow it.
+- For a request to write a paper, make slides or make a poster, read the `write-paper`, `make-slides` or `make-poster` SKILL.md in `~/.codex/skills/` and follow it.
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
 - Keep a handoff note per task (`devtrack note <TID>`) up to date when a step ends, before an approval request and before done — only
   conclusions, numbers, file locations, commands, decisions and pitfalls, kept short (template: `--template`, save: `devtrack note <TID> -`).
@@ -972,13 +997,13 @@ writable_roots = ["/Users/me/devtrack/data"]    # allow writing to the DevTrack 
 - For network access (`gh` · `git push`), Codex asks for permission in its chat window when needed. `devtrack watch`, which handles web instructions, has no chat window
   to ask in, so it allows network access when it runs Codex (to block it: `devtrack watch --codex --no-network`).
 
-**③ Review and visualization skills** (if you will ask for code or document reviews, or document visualizations) — link the same files as for Claude.
+**③ Review and paper skills** (for code or document reviews, paper writing, visualization, slides or posters) — link the same files as for Claude.
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
-ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
+for s in review-pr review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.codex/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.codex/skills/$s/SKILL.md
+done
 ```
 
 **④ The `codex` command** — `devtrack watch`, which receives web instructions, uses the Codex CLI. If there is no `codex` in the terminal, it automatically finds
@@ -1114,6 +1139,8 @@ Commands you use yourself:
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
 | `devtrack doc T-0010` | Path of the document a task is about (manuscript under review, manuscript folder, original under review, in that order; `--all` lists every candidate) |
+| `devtrack pptx deck.json --pdf` | Make a PowerPoint from a slide or poster spec (JSON) with the standard library, check for text overflow and render a preview PDF (`--example slides` or `poster` shows the format; 9. Paper writing, item 6) |
+| `devtrack doc T-0005 --figures` | Paths of the figure files of a task and its linked tasks (for slides and posters) |
 | `devtrack svgcheck fig.svg --png` | Check an SVG diagram (executable code, text that overflows or overlaps, text off the canvas) and render a PNG preview (9. Document review, item 5) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |

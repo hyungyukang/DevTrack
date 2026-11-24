@@ -99,10 +99,20 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   새 버전으로 올리는 명령(`artifact --replace` · `review`)을 붙인다. 사용자 메시지의 `ack` 는 웹에 'AI 확인함 / 확인 전' 으로 표시
 - 문서 시각화: `integrations/claude-skills/visualize-doc/SKILL.md` (WilsonWukz/visual-architect 를 고친 것, MIT — `LICENSE-visual-architect.txt`).
   결과물 분류 `visual` (`artifact --visual`) → 웹 `visualPanel`(작업 개요의 **시각화** 칸) · `catBadge`, 메시지 칸의 **시각화 요청**
-  (`VISUAL_TYPES` 작업만, `fillVisualRequest`). inbox 는 그 작업들의 시각화 요청 문구(`cli.VISUAL_RE`)에 `_visual_hint` 로 스킬을 가리킨다 —
+  (`VISUAL_TYPES` 작업만, `fillVisualRequest`). inbox 는 그 작업들의 시각화 요청 문구(`cli.VISUAL_RE`)에 `_skill_hints` 로 스킬을 가리킨다 —
   작업 유형 목록은 두 쪽(`cli.VISUAL_TYPES` · app.js `VISUAL_TYPES`)을 함께 고칠 것. `Store.task_documents` (`devtrack doc`) 가 읽을 문서를 찾고,
   `devtrack/svgcheck.py` (`devtrack svgcheck`) 가 SVG 안전(실행 코드 · 외부 주소) · 모양(넘치거나 겹친 글자 · 캔버스 밖)을 보고 `--png` 로 그린다.
   `Store.add_artifact` 는 안전하지 않은 SVG 를 거절한다 (웹에서 새 탭으로 직접 열릴 수 있음). 데모 T-0010 의 시각화는 `devtrack/demo_assets/visualize/`
+- 과학 글쓰기 스킬: `integrations/claude-skills/` 의 `write-paper` · `make-slides` · `make-poster` (K-Dense scientific-agent-skills, MIT —
+  각 폴더 `LICENSE-k-dense.txt`). 외부 연결(이미지 생성 API · 문헌 검색 · arXiv) · 원작자 논문 인용 지시 · pip 의존은 뺐다 — 다시 가져올 때도 넣지 말 것.
+  `review-doc` 과 저널 심사위원 지시(`store._doc_review_instruction`)에는 K-Dense peer-review 의 심사 기준을 더했다.
+  inbox 의 스킬 안내는 `cli._skill_hints` (시각화 `VISUAL_RE` + `SKILL_HINTS`, 메시지는 메시지 글만, 요청하는 말 `_ASK_RE` 가 있을 때만)
+- PowerPoint: `devtrack/pptx.py` (`devtrack pptx`) — 설명 JSON(`EXAMPLE_SLIDES` · `EXAMPLE_POSTER`)의 레이아웃(title · section · bullets · figure ·
+  figure-bullets · two-figures · table · statement · free · poster)을 EMU 로 계산해 zipfile + XML 문자열로 pptx 를 쓰고(제목 자리표시자 · 발표자 노트 ·
+  SVG 는 svgBlip + PNG 대체 — 같은 이름 .png > Chrome > 투명 그림), 같은 계산으로 HTML 미리보기 → Chrome 으로 PDF · PNG.
+  글자 넘침 · 작은 글자 · 그림 해상도 · 포스터 단 채움은 `_check` 가 어림한다 (`svgcheck.text_width`). 결과물 종류 `pptx` → 웹 `viewers.js` 가 같은 이름의
+  PDF 결과물을 미리보기로 붙인다 (app.js `mountArtifact` 의 `previewPdf`). `Store.task_figures` (`devtrack doc --figures`) 는 작업 · 연결된 작업의 그림.
+  데모 T-0005 의 발표 자료 · 포스터는 `write_pptx(svg_fallback=False)` 로 Chrome 없이 만든다
 - 코드 리뷰: `Store.set_review`(검토 항목 R1… 은 같은 ID 끼리 합침) · 승인 요청의 `choices`/`selected`(웹 체크박스 선택). `integrations/claude-skills/` 는 이를 쓰는 `/review-pr` · `/review-doc` 스킬 (사용자가 `~/.claude/skills` 로 복사해 설치)
 - 자동 갱신: `poll`(10초 · 탭으로 돌아올 때)이 바뀐 화면을 `render({auto})` 로 다시 그린다. 입력 중(`isBusy` — 입력 칸 포커스 · 누르는 중 ·
   `api` 쓰기 중 · 승인 선택지 · 새 작업 폼)이면 `deferRender` 로 미루고 입력 칸에서 나오면 `applyPending`. 써 두기만 한 글은 같은 화면이면
@@ -166,5 +176,10 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   일부러 글자가 넘치고 겹친 SVG · `<script>` 가 든 SVG 로 `svgcheck --png` (경고 · 오류 · 미리보기) → `artifact --visual` 거절 확인 →
   실제 도식 2개 · 요약 md 를 올려 `#/task/T-0010` 의 **시각화** 칸, `#/artifact/T-0010/<md>` 의 그림, 390px · 다크, 정적 모드(`publish --to`)를 본다.
   논문 · 문서 리뷰 작업에만 **시각화 요청** 버튼이 있는지(코드 작업은 없음)도.
+- PowerPoint(`pptx.py`) 변경 후: `devtrack pptx --example slides` · `poster` 를 임시 폴더에 저장하고 그림(PNG · SVG)을 두어 `--pdf --png` →
+  경고(넘침 · 해상도 · 단 채움)와 PNG 를 보고, 패키지 점검(모든 XML 파트 파싱 · 관계 대상 존재 · Content_Types 등록)과 `qlmanage -t` 렌더를 확인.
+  `DEVTRACK_CHROME=/없음` 으로 SVG 대체 그림 경고, 데모 T-0005 의 pptx 두 개, 웹 `#/artifact/T-0005/<pptx>` 의 미리보기 PDF. 실제 PowerPoint 로도 한 번 열어 본다.
+- 과학 글쓰기 스킬 · inbox 안내 변경 후: 임시 데이터에 "발표 자료 만들어 주세요" · "A0 포스터" · "4장 초안 다시 써 주세요" · "슬라이드 잘 봤어요"(안내 없음)
+  메시지와 그런 지시의 새 작업을 넣어 `inbox --all-agents` 의 `→ … 요청` 줄을 본다. 스킬 파일에 외부 주소 · 원작자 인용 지시가 다시 들어오지 않았는지 grep.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

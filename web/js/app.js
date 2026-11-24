@@ -215,7 +215,12 @@ function mountArtifact(el) {
   const art = task?.artifacts?.find((a) => a.id === fid);
   if (!art) { el.innerHTML = `<div class="av-error">${L('결과물을 찾을 수 없습니다')}</div>`; return; }
   const ok = buildInfo(task)?.ok;
+  // PowerPoint 는 같은 이름의 미리보기 PDF(devtrack pptx --pdf)가 있으면 함께 보여 준다
+  const stem = (n) => (n || '').replace(/\.[^.]+$/, '');
+  const previewPdf = art.kind === 'pptx'
+    ? [...(task.artifacts || [])].reverse().find((a) => a.kind === 'pdf' && a.path && stem(a.filename) === stem(art.filename)) : null;
   renderArtifactInto(el, tid, art, {
+    previewPdf,
     resolveImage: (p) => resolveFigure(tid, p),
     resolveFile: (p, o) => resolveFile(tid, p, o),
     pdfHref: ok ? `#/artifact/${tid}/${ok.pdf}` : null,
@@ -2283,7 +2288,7 @@ function viewCode({ q }) {
 // ====================================================================== 화면: 결과물
 const ART_GROUPS = translated({
   all: { label: '전체', test: () => true },
-  doc: { label: '문서', test: (a) => ['markdown', 'pdf', 'text', 'latex', 'docx'].includes(a.kind) },
+  doc: { label: '문서', test: (a) => ['markdown', 'pdf', 'text', 'latex', 'docx', 'pptx'].includes(a.kind) },
   code: { label: '코드 · 변경사항', test: (a) => ['code', 'diff'].includes(a.kind) },
   figure: { label: '그림 · 시각화', test: (a) => ['image', 'html'].includes(a.kind) },
   data: { label: '데이터 · 노트북', test: (a) => ['csv', 'notebook'].includes(a.kind) },

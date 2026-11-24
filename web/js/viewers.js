@@ -179,6 +179,11 @@ export async function renderArtifactInto(el, taskId, art, opts = {}) {
       case 'html':
         el.innerHTML = html`<iframe class="html-frame" sandbox="allow-scripts allow-popups" src="${url}" title="${art.title || 'HTML'}"></iframe>`.s;
         break;
+      case 'pptx': {
+        const pv = opts.previewPdf;
+        el.innerHTML = html`<div class="link-card">${icon('file')}<div>${L('PowerPoint 파일입니다 — 내려받아 여세요.')} <a href="${url}" download>${L('다운로드')}</a>${art.size ? ` (${fmtBytes(art.size)})` : ''}${pv ? html`<br><small>${L('아래는 같은 이름의 미리보기 PDF 입니다 (PowerPoint 와 줄바꿈이 조금 다를 수 있음).')}</small>` : ''}</div></div>${pv ? html`<iframe class="pdf-frame" src="${artifactUrl(taskId, pv)}#view=FitH" title="${pv.title || 'PDF'}"></iframe>` : ''}`.s;
+        break;
+      }
       case 'docx':
         if (art.preview) {
           const { text, truncated } = await fetchText(artifactUrl(taskId, { path: art.preview }));

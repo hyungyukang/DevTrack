@@ -7,6 +7,9 @@ DevTrack 에 기록하도록 고친 Claude Code 스킬입니다. `devtrack` 명�
 |---|---|---|
 | `review-pr` | 다른 사람의 PR 리뷰 → 쉬운 말 리포트 + 검토 항목 R1, R2… → 고른 항목만 코멘트 초안 → 승인 후 게시 | 코드 리뷰 화면: 리뷰 결과 한눈에 보기, 리포트(md/pdf), **코멘트할 항목 체크 → 진행**, 코멘트 초안 게시 승인 |
 | `visualize-doc` | 긴 논문 · 문서(PDF · Word · LaTeX · Markdown)를 **짜임새 있는 요약 + 도식 1–3개**로 — 내용에 맞는 배치(흐름 · 순환 · 계층 · 두 갈래 · 중심 · 표)를 골라 Claude 가 SVG 로 직접 그리고 `devtrack svgcheck` 로 점검. [visual-architect](https://github.com/WilsonWukz/paper-visualizer-skill) (MIT) 를 고친 것 | 작업 화면의 **시각화** 칸 (도식 · 시각화 요약 md/PDF), 메시지 칸의 **시각화 요청** 버튼 |
+| `write-paper` | DevTrack 논문 작업의 원고 쓰기 · 고치기 — 연결된 분석 작업의 결과물로 **근거 장부**를 만들고 그 근거로만 개요 → 초안, 숫자 · 방법-결과 대조, 내 `.bib` 로만 인용, 근거 없는 것은 `[[MISSING]]`, `devtrack latex` 빌드, 심사 답변서. [K-Dense scientific-writing](https://github.com/K-Dense-AI/scientific-agent-skills) (MIT) 을 고친 것 | 논문 작업의 원고 · 근거 장부 · PDF, "원고를 확인해 주세요" 요청 |
+| `make-slides` | 논문 · 문서 · 작업으로 **PowerPoint 발표 자료** — 이야기 구성 · 시간 배분, 작업 · 연결된 작업의 그림, 발표자 노트, `devtrack pptx` (표준 라이브러리) + 미리보기 PDF 로 넘침 점검. K-Dense scientific-slides (MIT) 를 고친 것 (이미지 생성 API · 문헌 검색 없음) | 작업의 결과물: pptx + 같은 이름의 미리보기 PDF (웹에서 함께 보임) |
+| `make-poster` | 학회 **포스터** (A0 · A1 · 48x36in …) — 핵심 메시지 1–3개 · 300–800단어, 제목 띠 + 2–4단 블록, 단 채움 · 그림 해상도 점검, LaTeX 포스터도 선택. K-Dense latex-posters · pptx-posters (MIT) 를 고친 것 | 작업의 결과물: pptx + 미리보기 PDF |
 | `review-doc` | 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 → 문서 요약 · 목적 대비 미비한 부분 · 논리 · 문장/맞춤법 (과학 논문은 형식 · 선행 연구와의 차이 · 결론의 근거까지) → 보완 · 수정 항목 R1, R2… 를 **PDF 리포트**로 | 문서 리뷰 화면: 리뷰 의견 · 문서 요약 · 영역별 평가 · 원문 → 수정 제안, 리뷰 리포트(PDF) · 원본 보기, 리포트 확인 요청 |
 
 ## 설치
@@ -26,20 +29,25 @@ cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/rev
 `review-doc` 은 다른 스킬 없이 혼자 동작합니다 (메일 기능 없음).
 
 ```bash
-mkdir -p ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
-ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
-ln -sf <DevTrack 저장소>/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
+for s in review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf <DevTrack 저장소>/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
 ```
+
+`write-paper` · `make-slides` · `make-poster` 는 K-Dense 의 공개 스킬(MIT, 각 폴더의 `LICENSE-k-dense.txt`)을 고친 것입니다. 원래 스킬의
+외부 연결(이미지 생성 API · 문헌 검색 · arXiv 접속)과 "사용자의 원고 · 발표에 원작자 논문을 인용하라" 는 지시는 뺐고, pptx 는 pip 없이
+DevTrack 의 `devtrack pptx` 로 만듭니다. `review-doc` 과 저널 심사위원 지시에는 K-Dense peer-review 의 심사 기준을 더했습니다.
 
 `visualize-doc` 도 혼자 동작합니다. 도식 미리보기(`devtrack svgcheck --png`)와 PDF 는 헤드리스 Chrome 이 있을 때만 만들고, 없으면 점검 결과와 Markdown 만 냅니다.
 
 **Codex 에서도** 같은 파일을 씁니다 (Codex 는 `allowed-tools` 를 무시하고, `${CLAUDE_SKILL_DIR}` 는 이 파일이 있는 폴더로 읽습니다).
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
-ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
-ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
-ln -sf <DevTrack 저장소>/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
+for s in review-pr review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.codex/skills/$s
+  ln -sf <DevTrack 저장소>/integrations/claude-skills/$s/SKILL.md ~/.codex/skills/$s/SKILL.md
+done
 ```
 
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`

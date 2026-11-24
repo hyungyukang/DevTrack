@@ -108,10 +108,11 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `devtrack password` | Puts a password on the web. Only browsers that entered it can read the records (Apache `.htaccess` and `devtrack serve` enforce it) |
 | `devtrack mailbox` | Uses the issues of a private GitHub repository as a mailbox: instructions, messages and approvals sent from the static web as issues are recorded by the waiting `watch` · wait mode. Links to files uploaded to that repository come along as the task's sent files |
 | `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
+| `devtrack pptx` | Builds an editable PowerPoint (slides or a poster) from a JSON spec with the standard library, checks text overflow, and renders a preview PDF/PNG — used by `/make-slides` and `/make-poster` |
 | `devtrack doc` · `devtrack svgcheck` | Path of the document a task is about · check an SVG diagram (unsafe code, overflowing or overlapping text) with a PNG preview — used by `/visualize-doc` |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
-| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`, `/visualize-doc`) |
+| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`, `/visualize-doc`, `/write-paper`, `/make-slides`, `/make-poster`) |
 
 ## Quick start (see the example locally)
 
@@ -146,7 +147,8 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
 - **Code review** — **Review at a glance** (PR info, verdict, plain-language summary, remaining items by severity, findings R1, R2… with plain explanations and links to the GitHub location),
   a viewer for the review report (Markdown · PDF), **ticking the findings to comment on and proceeding**, approval of the draft comments before they are posted, and feedback on the review.
   The Claude Code `/review-pr` skill: [integrations/claude-skills](integrations/claude-skills/README.md)
-- **Paper writing** — a card per paper (type `paper`): manuscript outline (plan), **compiled PDF** (latest build · warnings · failure alerts), manuscript files, figures, linked data analyses, open issues. All paper artifacts (PDF · manuscript · figures · tables/data) in one place
+- **Paper writing** — a card per paper (type `paper`): manuscript outline (plan), **compiled PDF** (latest build · warnings · failure alerts), manuscript files, figures, linked data analyses, open issues. All paper artifacts (PDF · manuscript · figures · tables/data) in one place.
+  Skills: `/write-paper` drafts and revises tied to an evidence ledger (missing facts stay `[[MISSING]]`), `/make-slides` and `/make-poster` build editable PowerPoint talks and posters (A0…) from the paper's figures and numbers with `devtrack pptx` — no external service, no image-generation AI
 - **LaTeX document view** — shows a `.tex` artifact as a readable document instead of code: section headings · equations (KaTeX) · tables · lists · footnotes, numbered `\cite`/`\ref`/`\eqref` links, and for `\includegraphics` the figure uploaded under the same name (in the same task or a linked analysis task). `Source` switches back to the code. It is a preview: numbering and layout can differ from the real PDF
 - **Document review** — review tasks (type `docreview`) for papers, reports and proposals (PDF · Word · LaTeX). For the selected task: **Review at a glance** (verdict · one-line conclusion, document summary, rating per area, strengths, the parts to improve or fix R1… with location and **original → suggested revision**), the review report (PDF) and the original document. Word originals get a preview of their text and tables (standard library only). On New task you enter the document path, kind and purpose.
   **Ask for a visualization** in the message box of a paper or document-review task: the `/visualize-doc` skill posts a structured summary and 1–3 diagrams that Claude draws as SVG (the document never goes to an outside image service), shown in the task's **Visualization** box

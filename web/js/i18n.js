@@ -571,6 +571,8 @@ const EN = {
   '기타': 'Other',
   '시각화': 'Visualization',
   '시각화 요청': 'Ask for a visualization',
+  'PowerPoint 파일입니다 — 내려받아 여세요.': 'This is a PowerPoint file. Download it to open.',
+  '아래는 같은 이름의 미리보기 PDF 입니다 (PowerPoint 와 줄바꿈이 조금 다를 수 있음).': 'Below is the preview PDF with the same name (line breaks can differ slightly from PowerPoint).',
   '요약 {d}개 · 도식 {f}개': '{d} summaries · {f} diagrams',
   '문서를 요약하고 도식으로 그려 달라는 메시지를 채웁니다 — 보내기 전에 고칠 수 있습니다': 'Fills in a message asking the AI to summarize the document and draw diagrams. You can edit it before sending.',
   '문서': 'Documents',

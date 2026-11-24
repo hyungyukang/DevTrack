@@ -194,6 +194,7 @@ export const ART_KIND = translated({
   markdown: { label: '문서§종류', icon: 'file-text' },
   pdf: { label: 'PDF', icon: 'file-text' },
   docx: { label: 'Word', icon: 'file-text' },
+  pptx: { label: 'PowerPoint', icon: 'file' },
   image: { label: '그림§종류', icon: 'image' },
   diff: { label: '변경사항', icon: 'git' },
   code: { label: '코드', icon: 'code' },

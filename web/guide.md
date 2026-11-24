@@ -102,6 +102,8 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
 - 논문 · 문서 리뷰 작업에서 시각화(요약 · 도식 · 모식도)를 부탁받으면 `/visualize-doc <TID>` 스킬로 진행한다
   (inbox 에 `→ 문서 시각화 요청` 으로 표시된다).
+- 논문 작성 · 발표 자료 · 포스터를 부탁받으면 `/write-paper` · `/make-slides` · `/make-poster` 스킬로 진행한다
+  (inbox 에 `→ 논문 작성 요청` · `→ 발표 자료 요청` · `→ 포스터 요청` 으로 표시된다). 외부 서비스(이미지 생성 · 검색)는 쓰지 않는다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -119,17 +121,19 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
 
 > 설정은 **새로 연 Claude 대화부터** 적용됩니다. 이미 열려 있는 대화는 새로 시작하세요.
 
-### 5-2. 리뷰 · 시각화 스킬 설치 (코드 · 문서 리뷰나 문서 시각화를 맡길 경우)
+### 5-2. 리뷰 · 논문 스킬 설치 (코드 · 문서 리뷰, 논문 작성 · 시각화 · 발표 자료 · 포스터를 맡길 경우)
 
 `/review-pr` 스킬이 DevTrack 에 코드 리뷰 결과를 올리고, 웹에서 코멘트할 항목을 고를 수 있게 해 줍니다.
 `/review-doc` 스킬은 논문 · 보고서 · 제안서(PDF · Word · LaTeX)를 리뷰해 요약과 고칠 부분을 PDF 리포트로 올립니다 ([문서 리뷰](#/guide/s9)).
 `/visualize-doc` 스킬은 긴 논문 · 문서를 짜임새 있게 요약하고 도식(모식도)으로 그려 올립니다 ([문서 리뷰](#/guide/s9) 5번).
+`/write-paper` 는 논문 원고를 근거와 맞춰 쓰고 고치며, `/make-slides` · `/make-poster` 는 PowerPoint 발표 자료 · 포스터를 만듭니다
+([논문 작성](#/guide/s9) 5 · 6번). 이 셋은 K-Dense 의 공개 스킬(MIT)을 DevTrack 에 맞게 고친 것으로, 외부 서비스는 쓰지 않습니다.
 
 ```bash
-mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
-ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
+for s in review-pr review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.claude/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.claude/skills/$s/SKILL.md
+done
 ```
 
 복사 대신 링크로 걸어 두면 `git pull` 만으로 스킬도 함께 최신이 됩니다.
@@ -461,6 +465,20 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
    - 결과물이 바뀔 때마다 저절로 다시 만들어지므로 이 폴더의 파일은 직접 고치지 마세요.
      `devtrack paper <작업 번호>` 로 지금 상태와 빠진 그림(확장자가 안 맞는 그림 · 결과물이 없는 그림)을 확인합니다.
    - 기록 폴더만 다른 컴퓨터로 옮겨도 원고가 함께 따라갑니다. 예를 들어 Mac 에서 쓰던 논문을 HPC 에서 이어 쓸 수 있습니다.
+5. **원고 쓰기 · 고치기** (`/write-paper`): 원고를 쓰기 전에 이 작업과 연결된 분석 작업의 결과물에서 **근거 장부**(숫자 · 주장마다 출처)를 먼저 만들고,
+   그 근거로만 개요 → 초안을 씁니다. 원고의 숫자는 초록 · 본문 · 표 · 그림 설명끼리 맞추고, 인용은 내 `.bib` 에 있는 것만 씁니다.
+   - 근거가 없는 것은 지어내지 않고 원고에 `[[MISSING: …]]` · `[[CHECK: …]]` · `[[CITE: …]]` 로 남깁니다. 저자 · 소속 · 연구비 · 데이터 공개 ·
+     AI 사용 공개 문구는 내가 알려 준 것만 씁니다.
+   - `devtrack latex` 로 PDF 를 만들고 "원고를 확인해 주세요" 를 올립니다. 심사를 받기로 한 논문이면 심사평의 항목마다 답한 답변서까지 씁니다.
+   - 원고 · 근거는 이 컴퓨터 밖으로 나가지 않습니다 (검색 · 번역 · 문법 검사 서비스를 쓰지 않음).
+6. **발표 자료 · 포스터** (`/make-slides` · `/make-poster`): 메시지로 "그룹 미팅 10분 발표 자료 만들어 주세요" · "A0 포스터 만들어 주세요" 라고 보내면
+   원고와 연결된 분석 작업의 그림 · 표 · 숫자로 **PowerPoint(.pptx)** 를 만들어 올립니다.
+   - 발표 자료는 슬라이드마다 한 가지 메시지(제목 = 주장, 본문 = 그 근거 그림)와 발표자 노트, 포스터는 제목 띠 + 2–4단 블록입니다.
+   - DevTrack 이 표준 라이브러리만으로 pptx 를 만들어(`devtrack pptx`) HPC 에서도 됩니다. 이미지 생성 AI 는 쓰지 않습니다 —
+     그림은 내 파일과, 필요하면 AI 가 SVG 로 직접 그린 도식만 씁니다.
+   - 같은 이름의 **미리보기 PDF** 가 함께 올라와 웹에서 바로 볼 수 있습니다 (헤드리스 Chrome 이 있을 때. PowerPoint 와 줄바꿈이 조금 다를 수 있음).
+     인쇄용 PDF 는 PowerPoint 에서 pptx 를 열어 내보내세요.
+   - 채팅에서는 `/make-slides T-0005 학회 15분` · `/make-poster T-0005 A0 세로` 처럼 지시합니다 (스킬 설치: [5-2단계](#/guide/s5-2)).
 
 ### 문서 리뷰
 
@@ -472,7 +490,9 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
    - **문서의 목적 · 제출처**: 예) 학술지 투고 전 점검, 과제 제안서 심사 대비 — 이 목적에 맞게 잘 썼는지를 기준으로 봅니다
    - 채팅에서는 `/review-doc ~/papers/draft.pdf 학술지 투고 전 점검` 처럼 지시해도 됩니다 (스킬 설치: [5-2단계](#/guide/s5-2))
 2. Claude 는 이 순서로 봅니다: 문서 요약 → 목적에 비해 빠진 부분 → 전반적인 논리 → 어색한 문장 · 맞춤법.
-   **과학 논문**은 형식, 선행 연구와 무엇이 다른지, 결론을 이끄는 논리를 더 자세히 봅니다.
+   **과학 논문**은 형식, 선행 연구와 무엇이 다른지, 결론을 이끄는 논리를 더 자세히 봅니다. 판단 전에 연구 질문 · 방법 · 주요 주장을 정리하고,
+   핵심 주장마다 근거(결과 · 그림 · 표)가 크기 · 조건 · 불확도까지 맞는지, 방법 · 통계를 정해진 순서로, 재현성(버전 · 매개변수 · 데이터 공개)을 봅니다.
+   지적마다 위치 · 관찰 · 근거 · 왜 중요한지 · 고칠 방법을 적고, 새 실험 요구는 꼭 필요할 때만 합니다. 저널 심사 반복(6-3)의 심사위원도 같은 기준입니다.
 3. **문서 리뷰** 메뉴에서 결과를 봅니다.
    - **리뷰 결과 한눈에 보기**: 리뷰 의견(제출 가능 · 소폭 수정 · 대폭 보완 · 다시 작성)과 한 줄 결론, **문서 요약**,
      영역별 평가(양호 · 보완 필요 · 미흡), 잘된 점
@@ -936,6 +956,7 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
 - 논문 · 문서 작업의 시각화(요약 · 도식) 요청은 `~/.codex/skills/visualize-doc/SKILL.md` 를 읽고 그대로 진행한다.
+- 논문 작성 · 발표 자료 · 포스터 요청은 `~/.codex/skills/` 의 `write-paper` · `make-slides` · `make-poster` SKILL.md 를 읽고 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -969,13 +990,13 @@ writable_roots = ["/Users/me/devtrack/data"]    # 작업 폴더 밖에 있는 De
 - 인터넷(`gh` · `git push`)은 Codex 대화창에서는 필요할 때 허락을 묻고, 웹 지시를 처리하는 `devtrack watch` 는 대화창이 없어
   물을 수 없으므로 실행할 때 인터넷을 허용합니다 (막으려면 `devtrack watch --codex --no-network`).
 
-**③ 리뷰 · 시각화 스킬** (코드 · 문서 리뷰나 문서 시각화를 맡길 경우) — Claude 와 같은 파일을 링크합니다.
+**③ 리뷰 · 논문 스킬** (코드 · 문서 리뷰, 논문 작성 · 시각화 · 발표 자료 · 포스터를 맡길 경우) — Claude 와 같은 파일을 링크합니다.
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
-ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
-ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
+for s in review-pr review-doc visualize-doc write-paper make-slides make-poster; do
+  mkdir -p ~/.codex/skills/$s
+  ln -sf ~/devtrack/integrations/claude-skills/$s/SKILL.md ~/.codex/skills/$s/SKILL.md
+done
 ```
 
 **④ `codex` 명령** — 웹 지시를 받는 `devtrack watch` 가 Codex CLI 를 씁니다. 터미널의 `codex` 가 없으면 ChatGPT · Codex 앱,
@@ -1111,6 +1132,8 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | `devtrack list` · `devtrack show T-0001` | 터미널에서 작업 목록 · 상세 보기 |
 | `devtrack paper T-0005` | 논문 작업의 원고 폴더(`tasks/T-0005/paper`) 다시 만들기 · 빠진 그림 확인 (9. 논문 작성) |
 | `devtrack doc T-0010` | 작업이 다루는 문서 파일 경로 (심사 원고 · 원고 폴더 · 검토할 문서 순, `--all` 은 후보 모두) |
+| `devtrack pptx deck.json --pdf` | 슬라이드 · 포스터 설명(JSON)으로 PowerPoint 만들기 (표준 라이브러리) + 글자 넘침 점검 · 미리보기 PDF (`--example slides` · `poster` 로 형식 보기, 9. 논문 작성 6번) |
+| `devtrack doc T-0005 --figures` | 작업과 연결된 작업의 그림 파일 경로 (발표 자료 · 포스터용) |
 | `devtrack svgcheck fig.svg --png` | SVG 도식 점검 (실행 코드 · 넘치거나 겹친 글자 · 캔버스 밖) + PNG 미리보기 (9. 문서 리뷰 5번) |
 | `devtrack watch --claude` | 웹에서 Claude 에게 온 지시를 작업마다 정한 모델로 처리 (6-1) |
 | `devtrack watch --codex` | 웹에서 Codex 에게 온 지시를 Codex 로 처리 (11단계) |

@@ -278,6 +278,24 @@ devtrack artifact <TID> visual-<slug>.md --visual --replace -n "시각화 요약
 - 이미 있는 논문 · 문서 리뷰 작업에서 할 때는 `devtrack step <TID> "시각화: …"` 를 `-p` 없이 쓰고(그 작업의 진행률 · 계획은 그대로),
   승인 요청을 따로 올리지 않는다. 결과물과 기록(`devtrack log`)만 남기고 메시지는 `devtrack inbox --task <TID> --ack`.
 
+## 논문 작성 · 발표 자료 · 포스터
+
+`/write-paper` · `/make-slides` · `/make-poster` 스킬 ([integrations/claude-skills](../integrations/claude-skills/README.md)) 이 이 흐름을 따른다.
+스킬 도구가 없으면 inbox 안내에 적힌 SKILL.md 를 읽고 따른다.
+
+```bash
+devtrack doc <TID> --all            # 원고 · 문서 후보
+devtrack doc <TID> --figures        # 이 작업과 연결된 작업의 그림 파일 (발표 자료 · 포스터용)
+devtrack latex <TID> main.tex       # 원고 PDF (경고 · 실패 기록)
+devtrack pptx deck.json --pdf       # 설명 JSON → PowerPoint + 미리보기 PDF (형식: devtrack pptx --example slides · poster)
+devtrack artifact <TID> deck.pptx --replace -n "발표 자료 (PowerPoint)"   # 같은 이름의 .pdf 를 함께 올리면 웹이 미리보기로 보여 줌
+```
+
+- 원고 · 데이터 · 심사평은 외부 서비스에 보내지 않는다 (검색 · 번역 · 문법 검사 · 이미지 생성 모두). 그림은 사용자의 파일이나 직접 그린 SVG 만.
+- 숫자 · 방법 · 인용 · 저자 정보는 근거가 있는 것만 쓴다. 없으면 `[[MISSING: …]]` · `[[CHECK: …]]` · `[[CITE: …]]` 로 남기고 사용자에게 알린다.
+- 원래 스킬(K-Dense)의 "원작자 논문을 참고문헌에 넣어라" 같은 지시는 따르지 않는다 (이 저장소의 스킬에는 없다).
+- 이미 있는 논문 작업에서 발표 자료 · 포스터를 만들 때는 `devtrack step` 을 `-p` 없이 쓰고 승인 요청을 따로 올리지 않는다.
+
 ## 승인 요청을 올려야 하는 때
 
 - 저장소에 **커밋/푸시** 할 때 (`--commit`, 필수)
@@ -513,6 +531,8 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
 - 논문 · 문서 리뷰 작업에서 시각화(요약 · 도식 · 모식도)를 부탁받으면 `/visualize-doc <TID>` 스킬로 진행한다
   (inbox 에 `→ 문서 시각화 요청` 으로 표시된다).
+- 논문 작성 · 발표 자료 · 포스터를 부탁받으면 `/write-paper` · `/make-slides` · `/make-poster` 스킬로 진행한다
+  (inbox 에 `→ 논문 작성 요청` · `→ 발표 자료 요청` · `→ 포스터 요청` 으로 표시된다). 외부 서비스(이미지 생성 · 검색)는 쓰지 않는다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -553,6 +573,7 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
 - 논문 · 문서 작업의 시각화(요약 · 도식) 요청은 `~/.codex/skills/visualize-doc/SKILL.md` 를 읽고 그대로 진행한다.
+- 논문 작성 · 발표 자료 · 포스터 요청은 `~/.codex/skills/` 의 `write-paper` · `make-slides` · `make-poster` SKILL.md 를 읽고 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고

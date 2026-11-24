@@ -1743,3 +1743,52 @@ def _scenario(s, clk, tmp):
     clk.at(17)
     s.review_done(ptid, verdict="minor", summary="R1 · R2 는 해결됐습니다. 그림 기준선(R3)만 남았습니다.", author="Codex")
     clk.at(15); s.ack_inbox(s.inbox(agent="Claude", task=tid5))
+
+    # 발표 자료 · 포스터 (/make-slides · /make-poster → devtrack pptx, 표준 라이브러리) — 원고 4장의 숫자 · 그림만 씀
+    clk.at(12)
+    s.add_user_comment(tid5, "그룹 미팅용 10분 발표 자료(pptx)와 A0 포스터도 만들어 주세요 (/make-slides, /make-poster)")
+    clk.at(11); s.ack_inbox(s.inbox(task=tid5))
+    s.update_task(tid5, step="발표 자료 · 포스터: 원고 4장의 그림 · 표로 구성")
+    from . import pptx as _pptx
+    fig41, fig42 = os.path.join(tmp, "fig4_1_convergence.svg"), os.path.join(tmp, "fig4_2_speedup.svg")
+    table = {"header": ["Platform", "Time/step [ms]", "Speedup"],
+             "rows": [["CPU (64 cores)", "412.0", "1.0"], ["A100", "22.4", "18.4"], ["MI250X (1 GCD)", "25.9", "15.9"],
+                      ["MI250X (8 GCD)", "3.67", "112.3"]], "highlight": [[4, 2]]}
+    deck = {"title": "A portable GPU pressure solver — results", "numbers": True,
+            "footer": "Pressure solver HIP port · Results (Ch. 4)", "slides": [
+                {"layout": "title", "title": "A portable GPU pressure solver for incompressible flow",
+                 "subtitle": "Chapter 4: accuracy, performance and physical fidelity",
+                 "lines": ["[[MISSING: presenter · group meeting date]]"],
+                 "note": "Ten minutes, three questions from Chapter 4."},
+                {"layout": "figure-bullets", "title": "Second-order accurate: observed order p = 2.01", "image": fig41,
+                 "caption": "Relative L_{2} error vs grid spacing (Fig. 4.1)",
+                 "bullets": ["Three finest grids, Richardson extrapolation", "GCI = 0.4 % (Roache 1994)",
+                             "Double precision, Δτ = 10^{-4}"], "note": "Eq. 4.1; GCI after Roache 1994. ~1.5 min."},
+                {"layout": "table", "title": "8 MI250X GCDs: 3.67 ms per step, 112.3× the CPU", "table": table,
+                 "caption": "Wall-clock time per step on a 2048² grid (Table 4.1); mean of five runs, ±1.2 %",
+                 "note": "Same grid on every platform. ~1.5 min."},
+                {"layout": "figure-bullets", "title": "Why it is fast", "image": fig42, "image_side": "right",
+                 "caption": "Speedup relative to the 64-core CPU baseline (Fig. 4.2)",
+                 "bullets": ["64×4 thread blocks for 64-wide wavefronts", "Memory-bound: 1.31 TB/s (82 % of peak)",
+                             "Transfers overlapped with HIP streams"], "note": "The three factors of Section 4.2."},
+                {"layout": "statement", "title": "Take-home", "text": "One HIP code: second-order accurate and 112× faster",
+                 "sub": "Next: strong/weak scaling and the final turbulence statistics", "note": "~1 min."}]}
+    poster = {"title": "A portable GPU pressure solver", "size": "A0", "slides": [{
+        "layout": "poster", "title": "A portable GPU pressure solver for incompressible flow",
+        "authors": "[[MISSING: authors]]", "affiliation": "[[MISSING: affiliations]]", "text_size": 40, "heading_size": 60,
+        "columns": [
+            [{"heading": "Three checks for the HIP port",
+              "bullets": ["**Accuracy**: grid convergence against Taylor–Green", "**Performance**: speedup over a 64-core CPU",
+                          "**Physics**: turbulence statistics vs wind tunnel"]},
+             {"heading": "Second-order accurate", "image": fig41, "caption": "Relative L_{2} error vs grid spacing (Fig. 4.1)"},
+             {"heading": "Observed order", "text": "p = 2.01 on the three finest grids, GCI = 0.4 % (Roache 1994)."}],
+            [{"heading": "112.3× faster on 8 GCDs", "image": fig42, "caption": "Speedup vs the 64-core CPU (Fig. 4.2)"},
+             {"heading": "Time per step, 2048² grid", "table": table},
+             {"heading": "Take-home", "bullets": ["One HIP code for MI250X and A100", "Second-order accurate (p = 2.01)",
+                                                  "112.3× the 64-core CPU on 8 GCDs"]}]]}]}
+    clk.at(8)
+    for name, sp, title in (("deck.pptx", deck, "발표 자료 (PowerPoint, 10분)"), ("poster.pptx", poster, "포스터 (PowerPoint, A0)")):
+        out = os.path.join(tmp, name)
+        _pptx.write_pptx(sp, out, tmp, svg_fallback=False)
+        s.add_artifact(tid5, path=out, title=title)
+    s.add_log(tid5, "발표 자료 5장 · A0 포스터(2단) — 원고 4장의 그림 · 표 · 숫자만 사용, 발표자 · 저자 정보는 [[MISSING]] 으로 둠")
