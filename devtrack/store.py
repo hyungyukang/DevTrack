@@ -981,19 +981,49 @@ class Store:
         return sum(1 for e in t.get("log", []) if e.get("ts", "") > n["updated_at"]
                    and not (e.get("meta") or {}).get("note_version"))
 
-    def add_user_comment(self, tid, message, artifact=None):
+    def add_user_comment(self, tid, message, artifact=None, attachments=None):
         """사용자 메시지 (사용자 → 담당 AI). artifact: 이 메시지가 가리키는 결과물 (결과물 화면의 수정 요청 · 추가 지시) —
-        결과물은 새 버전이 올라와도 ID 가 같으므로 ref 로 남겨 두면 그 결과물의 기록으로 이어진다."""
+        결과물은 새 버전이 올라와도 ID 가 같으므로 ref 로 남겨 두면 그 결과물의 기록으로 이어진다.
+        attachments: 이 메시지와 함께 보낸 파일의 결과물 ID (add_sent_files) — 받은 편지함에 파일 경로가 붙는다."""
         if not message or not message.strip():
             raise DevTrackError("메시지가 비어 있습니다")
+        sent = {"attachments": list(attachments)} if attachments else {}
         with self.edit(tid) as t:
             if not artifact:
-                return self._log(t, message.strip(), kind="user", author=USER)
+                return self._log(t, message.strip(), kind="user", author=USER, meta=sent or None)
             fid = normalize_item_id(artifact, "F")
             art = self._find(t.get("artifacts", []), fid, "결과물")
             return self._log(t, message.strip(), kind="user", author=USER, ref=fid,
-                             meta={"artifact": fid, "artifact_title": art.get("title"),
-                                   "version": art.get("version", 1)})
+                             meta=dict(sent, artifact=fid, artifact_title=art.get("title"),
+                                       version=art.get("version", 1)))
+
+    def add_sent_files(self, tid, files, issue=None, rewrite=None, author=USER):
+        """사용자가 보낸 파일(GitHub 우편함)을 '보낸 파일' 결과물(분류 source, sent)로 올린다 → 결과물 목록.
+        files: [{"path": 내려받은 파일, "filename": 이름}]. rewrite: 새 작업이면 (결과물 목록 → 링크를 결과물 번호로 바꾼 지시) —
+        같은 저장에서 지시를 바꿔, AI 가 링크만 있는 지시를 먼저 보는 일이 없게 한다."""
+        with self.edit(tid) as t:
+            arts = []
+            for f in files:
+                a = self._add_artifact(t, path=f["path"], filename=f["filename"], category="source", author=author,
+                                       extra={"sent": {"via": "github", "issue": issue}}, log=False)
+                self._log(t, "보낸 파일: {}".format(a["title"]), kind="artifact", author=author, ref=a["id"],
+                          meta={"category": "source", "kind": a["kind"], "sent": True})
+                arts.append(a)
+            if rewrite:
+                t["instruction"] = rewrite(arts)
+                if arts:
+                    t["sent_files"] = [a["id"] for a in arts]
+            return arts
+
+    def _sent_list(self, t, ids):
+        """받은 편지함에 붙일 보낸 파일 (ID · 이름 · 파일 경로 · 종류)."""
+        out = []
+        for fid in ids or []:
+            a = next((x for x in t.get("artifacts", []) if x.get("id") == fid), None)
+            if a:
+                out.append({"id": fid, "filename": a.get("filename"), "kind": a.get("kind"),
+                            "file": self._artifact_file(t["id"], a)})
+        return out
 
     # ------------------------------------------------------------------ AI 끼리 메시지 · 리뷰 반복
     def _agent_message(self, t, message, author, meta=None, kind_label=None):
@@ -2277,10 +2307,12 @@ class Store:
             if t["status"] == "queued":
                 items.append(dict(base, type="new_task", instruction=t.get("instruction", ""), task_type=t["type"],
                                   repo=t.get("repo") or {}, ts=t["created_at"], related=t.get("related") or [],
-                                  review=_loop_summary(t.get("review_loop"))))
+                                  review=_loop_summary(t.get("review_loop")),
+                                  attachments=self._sent_list(t, t.get("sent_files"))))
             for e in t.get("log", []):
                 if e.get("author") == USER and e.get("kind") == "user" and e.get("ack") is False:
                     items.append(dict(base, type="comment", id=e["id"], message=e["message"], ts=e["ts"],
+                                      attachments=self._sent_list(t, (e.get("meta") or {}).get("attachments")),
                                       **self._comment_artifact(t, e)))
                 elif e.get("kind") == "agent" and e.get("ack") is False:
                     items.append(dict(base, type="agent_message", id=e["id"], message=e["message"],
@@ -2570,7 +2602,7 @@ class Store:
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
                                                    "created_at", "author", "size", "description", "lang", "build",
-                                                   "version", "updated_at", "preview", "filename")})
+                                                   "version", "updated_at", "preview", "filename", "sent")})
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)

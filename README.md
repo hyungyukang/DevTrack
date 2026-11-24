@@ -106,7 +106,7 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `devtrack serve` | Local web server. Approvals, feedback and new tasks from the web are saved directly |
 | `devtrack publish` | Publishes the dashboard and the data to a static directory (e.g. a web server's public folder) |
 | `devtrack password` | Puts a password on the web. Only browsers that entered it can read the records (Apache `.htaccess` and `devtrack serve` enforce it) |
-| `devtrack mailbox` | Uses the issues of a private GitHub repository as a mailbox: instructions, messages and approvals sent from the static web as issues are recorded by the waiting `watch` · wait mode |
+| `devtrack mailbox` | Uses the issues of a private GitHub repository as a mailbox: instructions, messages and approvals sent from the static web as issues are recorded by the waiting `watch` · wait mode. Links to files uploaded to that repository come along as the task's sent files |
 | `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |

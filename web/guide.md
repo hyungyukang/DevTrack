@@ -761,9 +761,10 @@ GitHub 오른쪽 위 프로필 사진 → **Settings** → 왼쪽 맨 아래 **D
 | Expiration | 원하는 기간 (예: 1년 — 만료되면 새로 만들어 ③을 다시) |
 | Repository access | **Only select repositories** → `devtrack-inbox` |
 | Permissions → Repository permissions → **Issues** | **Read and write** (Metadata 읽기는 저절로 붙음) |
+| Permissions → Repository permissions → **Contents** | **Read-only** (선택 — ⑦ 파일 보내기를 쓸 때) |
 
 **Generate token** 을 누르고 나온 토큰(`github_pat_…`)을 복사합니다. 이 화면을 벗어나면 다시 볼 수 없습니다.
-이 토큰은 그 저장소의 이슈만 다룰 수 있어서, 새어 나가도 다른 저장소나 코드에는 손댈 수 없습니다.
+이 토큰은 그 저장소의 이슈(와 Contents 를 더했다면 파일 읽기)만 다룰 수 있어서, 새어 나가도 다른 저장소나 코드에는 손댈 수 없습니다.
 
 **③ HPC 에서 우편함 켜기**
 
@@ -831,6 +832,27 @@ devtrack watch --codex       # Codex 담당 지시를 처리 (다른 창)
 본문 맨 위의 `이름: 값` 줄은 이어서 써야 하고, 처음으로 알 수 없는 줄이 나오면 거기부터가 지시입니다.
 담당 AI 를 적지 않았을 때의 기본값은 `devtrack mailbox <저장소> --agent Codex` 처럼 바꿀 수 있습니다.
 
+**⑦ 파일 보내기 (Word · 텍스트 · PDF …)**
+
+GitHub 이슈에 파일을 끌어다 놓는 첨부는 비공개 저장소에서는 로그인한 브라우저로만 열려서, DevTrack 이 내려받을 수 없습니다.
+대신 **파일을 우편함 저장소에 올리고, 그 파일의 링크를 이슈에 붙여 주세요.**
+
+1. (처음 한 번) 토큰에 **Contents: Read-only** 를 더합니다 — ②의 토큰 목록에서 그 토큰 → **Edit** → Repository permissions →
+   **Contents** → **Read-only** → **Update**. 토큰 값은 바뀌지 않습니다. `devtrack mailbox <저장소>` 를 다시 실행해 Enter(저장된 토큰 그대로)를
+   누르면 권한을 확인하고, `devtrack mailbox` 상태에 **파일 보내기: 됨** 이 나옵니다.
+2. 우편함 저장소 첫 화면 → **Add file** → **Upload files** → 파일을 끌어다 놓고 → **Commit changes**.
+3. 올라간 파일을 눌러 연 화면의 주소(`https://github.com/<저장소>/blob/main/파일이름.docx`)를 복사해 이슈 본문이나 댓글에 붙여 넣습니다.
+   정적 웹의 **GitHub 이슈로 보내기** 로 연 이슈라면 본문 맨 끝에 붙이면 됩니다.
+4. DevTrack 이 파일을 내려받아 그 작업의 **보낸 파일** 결과물(`F-3` 같은 번호)로 올리고, 지시 · 메시지 속 링크를 `📎 F-3 파일이름` 으로 바꿉니다.
+   AI 는 그 파일을 바로 열고, Word · PDF 는 `devtrack text` 로 글자를 뽑아 읽습니다. 웹에서는 결과물로 미리 볼 수 있습니다.
+
+- 새 작업 지시와 메시지(대화 이슈의 댓글 · `T-0041 메시지` 이슈)에 붙인 파일을 받습니다. 승인 · 완료 같은 명령에 붙인 파일은 받지 않고 답글로 알립니다.
+- 파일 하나에 25MB, 한 번에 10개까지입니다. 우편함 저장소의 파일 링크만 받고, 다른 사이트 링크는 그대로 둡니다.
+- 받은 결과는 답글로 남깁니다 (`📎 보낸 파일 2개를 결과물로 올렸습니다 …`). 받지 못하면 이유를 알려 줍니다 —
+  권한 없음 · 파일 없음 · 너무 큼 · GitHub 끌어다 놓기 첨부.
+- 저장소에 올린 파일은 DevTrack 이 지우지 않습니다. 필요 없으면 GitHub 에서 지우세요. 받은 파일은 기록 폴더에 결과물로 남습니다(기록 폴더의 용량을 씁니다).
+- 휴대폰 GitHub 앱에서는 저장소에 파일을 올리지 못할 수 있습니다. 그럴 때는 휴대폰 브라우저로 github.com 을 열어 올리세요.
+
 **안전장치**
 - **내 GitHub 계정이 쓴 이슈 · 댓글만** 받습니다. 저장소에 다른 사람을 초대했더라도 그 사람의 글은 건너뜁니다.
 - 공개 저장소는 쓰지 않습니다 (지시 내용이 누구에게나 보이므로 설정에서 거절).
@@ -840,7 +862,7 @@ devtrack watch --codex       # Codex 담당 지시를 처리 (다른 창)
 **확인 · 문제 해결**
 
 ```bash
-devtrack mailbox                  # 상태: 저장소 · 받는 계정 · 마지막 확인 · 마지막 오류 · 열린 작업 이슈
+devtrack mailbox                  # 상태: 저장소 · 받는 계정 · 마지막 확인 · 마지막 오류 · 열린 작업 이슈 · 파일 보내기
 devtrack mailbox --check          # 지금 바로 한 번 확인
 devtrack mailbox --off            # 끄기 (--forget-token 을 붙이면 저장한 토큰도 지움)
 ```

@@ -298,6 +298,7 @@ const EN = {
   '작업 지시': 'Instruction',
   '지시 내용이 기록되지 않았습니다': 'No instruction was recorded',
   '최근 진행 기록': 'Recent progress',
+  '보낸 파일': 'Sent file',
   '맨 위로': 'To top',
   '맨 아래로': 'To bottom',
   '메시지 칸으로': 'Go to the message box',

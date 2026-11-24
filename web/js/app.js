@@ -739,7 +739,7 @@ function artRow(tid, a, { showTask = false, thumb = false } = {}) {
 }
 
 /** 결과물 분류 표시: 리뷰 리포트 · 검토할 문서(문서 리뷰의 원본) · 리뷰할 변경(AI 리뷰의 diff) */
-const sourceLabel = (a) => (a.kind === 'diff' ? L('리뷰할 변경') : L('검토할 문서'));
+const sourceLabel = (a) => (a.sent ? L('보낸 파일') : a.kind === 'diff' ? L('리뷰할 변경') : L('검토할 문서'));
 function catBadge(a) {
   if (a.category === 'review') return html`<span class="badge tone-violet">${L('리뷰')}</span>`;
   if (a.category === 'source') return html`<span class="badge tone-orange">${sourceLabel(a)}</span>`;

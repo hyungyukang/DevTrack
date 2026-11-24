@@ -82,7 +82,11 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   (붙여 넣기 메시지 `[DevTrack …]` · 제목 `T-0041 …` · `이름: 값` 머리말 · 라벨) → `apply` 가 서버 POST 와 같은 Store 호출. **본인 계정의 글만**,
   삭제는 거절, 새 작업 이슈 = 그 작업의 대화(댓글 → 메시지 · `승인 A-1` …, 승인 요청 🔔, 끝나면 닫음). 우리 답글은 `BOT_MARK` 로 건너뜀(토큰이 사용자 것).
   설정은 기록 폴더 `.mailbox.json`(저장소 · 계정), 토큰은 `~/.config/devtrack/github-token`(0600) · `$DEVTRACK_GITHUB_TOKEN` — 기록 폴더에 두지 말 것.
-  웹의 붙여 넣기 메시지 형식을 바꾸면 `mailbox._paste` 도 함께 고칠 것
+  웹의 붙여 넣기 메시지 형식을 바꾸면 `mailbox._paste` 도 함께 고칠 것.
+  보낸 파일: 새 작업 · 메시지 글 속 **우편함 저장소의 파일 링크**(`…/blob/<브랜치>/<경로>` · raw)를 `fetch_files` 가 Contents API(raw)로 받아
+  `Store.add_sent_files` 가 결과물(분류 `source`, `sent`)로 올리고 링크를 `📎 F-n` 으로 바꾼다 (새 작업은 같은 저장에서 지시를 고침 — `sent_files`,
+  메시지는 로그 `meta.attachments`) → inbox 항목의 `attachments` · cli `_sent_lines` 가 파일 경로와 `devtrack text` 를 보여 준다.
+  GitHub 끌어다 놓기 첨부(user-attachments)는 비공개 저장소에서 토큰으로 못 받아(404) 답글로 알린다. 토큰 권한 Contents: Read (`can_read_files`, 설정 `files`)
 - 마크다운 리포트 안의 그림 · 링크: 결과물은 `artifacts/F-<n>_<이름>` 으로 저장되므로 `![](fig.png)` 같은 상대 경로는 그대로면 깨진다.
   `renderMarkdown(…, { resolveFile })` (viewers.js `linkLocalFiles`) 가 app.js `resolveFile` 로 같은 이름의 결과물(index.json `filename` = 올릴 때 이름,
   없던 기록은 `_safe_name` 과 같은 `safeName`)에 잇는다 — 이름 정리 규칙은 두 쪽을 함께 고칠 것. `devtrack pdf` 는 `<base>` 를 원본 .md 폴더로 둔다
@@ -142,5 +146,8 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   `T-0001 A-1 승인` · 삭제(거절) · 다른 계정(건너뜀) · 대화 이슈 댓글(메시지 · `승인 A-1` · `완료`) → `mailbox --check` 와 답글 · 닫힘을 본다.
   웹은 `publish --to` 한 정적 폴더에서 보내기 창의 버튼이 연 주소를 그대로 가짜 서버에 이슈로 넣어 폼 값이 그대로 돌아오는지(왕복), 긴 지시의
   붙여 넣을 자리, 실시간(`serve`)에는 버튼이 없는지 본다. `inbox --wait` 두 개를 함께 켜 이슈가 한 번만 들어오는지도.
+  보낸 파일: 가짜 서버에 `contents/<경로>?ref=`(raw) 응답과 Contents 권한이 없는 토큰(403)을 두고, 새 작업 이슈에 Word · 슬래시 브랜치 파일 ·
+  끌어다 놓기 첨부 · 없는 파일 · 다른 사이트 링크, 붙여 넣기 형식 끝의 링크, 대화 이슈 댓글의 raw 주소, `T-0041 완료` 에 붙인 링크(받지 않음),
+  너무 큰 파일(`ATTACH_MAX` 를 낮춰서) → 지시의 `📎 F-n` · 답글 · `--as Claude inbox` 의 `→ 보낸 파일` 줄 · `devtrack text` · 웹 '보낸 파일' 표시를 본다.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

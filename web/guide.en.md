@@ -764,9 +764,10 @@ GitHub top-right profile picture → **Settings** → **Developer settings** at 
 | Expiration | any period (e.g. 1 year — when it expires, make a new one and repeat ③) |
 | Repository access | **Only select repositories** → `devtrack-inbox` |
 | Permissions → Repository permissions → **Issues** | **Read and write** (Metadata read is added automatically) |
+| Permissions → Repository permissions → **Contents** | **Read-only** (optional — for ⑦ Sending files) |
 
 Press **Generate token** and copy the token (`github_pat_…`). You cannot see it again after leaving that page.
-The token can only handle issues of that one repository, so even if it leaks it cannot touch other repositories or code.
+The token can only handle issues of that one repository (and read its files, if you added Contents), so even if it leaks it cannot touch other repositories or code.
 
 **③ Turn on the mailbox on the HPC system**
 
@@ -834,6 +835,27 @@ An issue registered as a new task stays open until the task ends and becomes tha
 The `name: value` lines must come first and in a row; from the first line that is not one of them, the rest is the instruction.
 The default AI for issues that name none can be changed with `devtrack mailbox <repo> --agent Codex`.
 
+**⑦ Sending files (Word, text, PDF …)**
+
+Files dragged into a GitHub issue open only in a signed-in browser when the repository is private, so DevTrack cannot download them.
+Instead, **upload the file to the mailbox repository and paste the file's link into the issue.**
+
+1. (Once) Add **Contents: Read-only** to the token — in ②'s token list, that token → **Edit** → Repository permissions →
+   **Contents** → **Read-only** → **Update**. The token value does not change. Run `devtrack mailbox <repository>` again and press Enter (keeps the saved token):
+   it checks the permission, and the `devtrack mailbox` status shows **파일 보내기: 됨** (sending files: works).
+2. On the mailbox repository's front page → **Add file** → **Upload files** → drop the file → **Commit changes**.
+3. Open the uploaded file and copy the page address (`https://github.com/<repository>/blob/main/file-name.docx`) into the issue body or a comment.
+   For an issue opened with the static web's **Send as a GitHub issue**, paste it at the end of the body.
+4. DevTrack downloads the file, adds it to that task as a **Sent file** artifact (a number such as `F-3`), and replaces the link in the instruction or message with `📎 F-3 file-name`.
+   The AI opens the file directly and reads Word or PDF text with `devtrack text`. On the web you can preview it as an artifact.
+
+- Files are taken from new-task instructions and messages (comments on the task's issue, or `T-0041 메시지` issues). Files attached to commands such as approve or done are not taken; the reply says so.
+- Up to 25 MB per file and 10 files at a time. Only file links to the mailbox repository are taken; links to other sites are left as they are.
+- The reply reports what was taken (`📎 보낸 파일 2개를 결과물로 올렸습니다 …` — "2 sent files added as artifacts"). When a file cannot be taken, it says why:
+  no permission, file not found, too large, or a GitHub drag-and-drop attachment.
+- DevTrack does not delete the files you uploaded to the repository — delete them on GitHub when no longer needed. Downloaded files stay in the records folder as artifacts (they use its space).
+- The GitHub phone app may not be able to upload files to a repository. If so, open github.com in the phone's browser and upload there.
+
 **Safety**
 - Only issues and comments **written by your own GitHub account** are taken. Others' posts are skipped even if you invited them to the repository.
 - Public repositories are refused (anyone could read the instructions).
@@ -843,7 +865,7 @@ The default AI for issues that name none can be changed with `devtrack mailbox <
 **Check and troubleshoot**
 
 ```bash
-devtrack mailbox                  # status: repository, account, last check, last error, open task issues
+devtrack mailbox                  # status: repository, account, last check, last error, open task issues, sending files
 devtrack mailbox --check          # check once right now
 devtrack mailbox --off            # turn off (add --forget-token to delete the saved token too)
 ```

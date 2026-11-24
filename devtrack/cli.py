@@ -745,6 +745,18 @@ def _comment_artifact_lines(it):
     return out
 
 
+def _sent_lines(it):
+    """함께 보낸 파일 (GitHub 우편함) — AI 가 바로 열 수 있게 파일 경로와, Word · PDF 는 글자 뽑는 명령."""
+    out = []
+    for a in it.get("attachments") or []:
+        name = a.get("filename") or ""
+        how = ""
+        if os.path.splitext(name)[1].lower() in (".docx", ".pdf"):
+            how = " — 글자: devtrack text {}".format(shlex.quote(a["file"]))
+        out.append(_indent("→ 보낸 파일 {} {}: {}{}".format(a["id"], name, a.get("file") or "(파일 없음)", how)))
+    return out
+
+
 def _format_inbox(items):
     out = []
     for it in items:
@@ -762,6 +774,7 @@ def _format_inbox(items):
             out.append("[새 작업] {} {} ({} · {})".format(it["task_id"], it["title"], it["task_type"], who))
             if it.get("instruction"):
                 out.append(_indent(it["instruction"]))
+            out.extend(_sent_lines(it))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
             if it.get("related"):
                 out.append(_indent("→ 관련 작업 {}: 먼저 devtrack show <작업> --brief (인계 메모) 를 읽고, 리포트 · 파일은 필요한 것만"
@@ -780,8 +793,10 @@ def _format_inbox(items):
                 it["task_id"], it["id"], it["artifact"], it.get("artifact_title") or "",
                 " (v{})".format(ver) if ver and ver > 1 else "", it["message"]))
             out.extend(_comment_artifact_lines(it))
+            out.extend(_sent_lines(it))
         elif it["type"] == "comment":
             out.append("[메시지] {task_id} {id}: {message}".format(**it))
+            out.extend(_sent_lines(it))
         elif it["type"] == "agent_message":
             lines = it["message"].splitlines() or [""]
             out.append("[AI 메시지] {} {} ({} 이(가) 보냄): {}".format(it["task_id"], it["id"], it.get("sender") or "AI",
@@ -1972,8 +1987,8 @@ def cmd_show(store, args):
     if t.get("artifacts"):
         print("  결과물:")
         for a in t["artifacts"]:
-            print("    {} [{}{}] {}".format(a["id"], a["kind"], {"review": ", 리뷰", "source": ", 검토할 문서"}.get(
-                a.get("category"), ""), a["title"]))
+            print("    {} [{}{}] {}".format(a["id"], a["kind"], ", 보낸 파일" if a.get("sent") else {
+                "review": ", 리뷰", "source": ", 검토할 문서"}.get(a.get("category"), ""), a["title"]))
     print("  최근 기록:")
     for e in t.get("log", [])[-args.lines:]:
         print("    {} [{}] {}: {}".format(e["ts"][5:16].replace("T", " "), e["kind"], e["author"], e["message"]))
@@ -2091,7 +2106,7 @@ def _read_token(args):
             return saved, "saved"
         raise DevTrackError("토큰은 터미널에서 직접 입력하세요 (스크립트에서는 --stdin 으로 표준입력의 첫 줄을 씀)")
     import getpass
-    tok = getpass.getpass("GitHub 토큰 (Fine-grained, 이 저장소의 Issues 읽기 · 쓰기){}: ".format(
+    tok = getpass.getpass("GitHub 토큰 (Fine-grained, 이 저장소의 Issues 읽기 · 쓰기 — 파일 보내기는 Contents 읽기도){}: ".format(
         " — Enter 만 누르면 저장된 토큰" if saved else "")).strip()
     if not tok and saved:
         return saved, "saved"
@@ -2118,6 +2133,9 @@ def _mailbox_status(store, args):
              "  새 작업의 기본 담당 AI: {}".format(cfg.get("default_agent") or "Claude")]
     if cfg.get("site") or st.get("site"):
         lines.append("  웹 주소 (답글의 링크): {}".format(cfg.get("site") or st.get("site")))
+    if "files" in cfg:
+        lines.append("  파일 보내기: {}".format("됨 (저장소에 올린 파일 링크를 받음)" if cfg["files"] else
+                                            "토큰에 Contents: Read 가 없음 (설정할 때 확인 — 권한을 더한 뒤 다시 확인: devtrack mailbox {})".format(cfg["github"])))
     if st.get("last_error"):
         lines.append("  ⚠ 마지막 오류: {}".format(st["last_error"]))
     if threads:
@@ -2180,6 +2198,7 @@ def cmd_mailbox(store, args):
             raise DevTrackError("토큰에 Issues 쓰기 권한이 없습니다 — Repository permissions 의 Issues 를 'Read and write' 로 "
                                 "만든 토큰을 쓰세요")
         raise
+    files = gh.can_read_files()  # 보낸 파일(저장소에 올린 파일 링크)을 받으려면 Contents: Read
     old = mailbox.load_config(store.root) or {}
     if src in ("typed", "stdin"):
         mailbox.save_token(token)
@@ -2189,6 +2208,8 @@ def cmd_mailbox(store, args):
     site = args.site or old.get("site")
     if site:
         cfg["site"] = site
+    if files is not None:
+        cfg["files"] = files
     if old.get("github") != repo:
         mailbox.remove_config(store.root)  # 다른 저장소의 처리 기록은 버린다
     mailbox.save_config(store.root, cfg)
@@ -2203,6 +2224,9 @@ def cmd_mailbox(store, args):
         _info("  토큰 저장: {} (나만 읽기)".format(mailbox.token_path()))
     _info("  지금부터 {} 이(가) 쓴 이슈 · 댓글만 받습니다 (이전 이슈는 받지 않음).".format(login))
     _info("  확인은 devtrack watch · inbox --wait 가 기다리는 동안 {}초마다 합니다 — 켜 두세요.".format(cfg["interval"]))
+    if files is False:
+        _info("  파일 보내기: 이 토큰은 저장소 파일을 읽지 못합니다 — 저장소에 올린 파일을 이슈로 보내려면 토큰의 Repository permissions 에 "
+              "Contents: Read 를 더하세요 (토큰 값은 그대로라 다시 설정할 필요 없음)")
     _info("  정적 웹의 보내기 창에 'GitHub 이슈로 보내기' 가 나타납니다 (공개 폴더가 정해져 있으면 바로, 아니면 devtrack publish 뒤 —\n"
           "  DevTrack 을 업데이트한 뒤 처음이면 devtrack publish 를 한 번 실행해 웹 화면 파일도 새로 복사하세요).")
     return 0
