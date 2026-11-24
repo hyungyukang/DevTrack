@@ -100,6 +100,8 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
+- 논문 · 문서 리뷰 작업에서 시각화(요약 · 도식 · 모식도)를 부탁받으면 `/visualize-doc <TID>` 스킬로 진행한다
+  (inbox 에 `→ 문서 시각화 요청` 으로 표시된다).
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -117,15 +119,17 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
 
 > 설정은 **새로 연 Claude 대화부터** 적용됩니다. 이미 열려 있는 대화는 새로 시작하세요.
 
-### 5-2. 리뷰 스킬 설치 (코드 · 문서 리뷰를 맡길 경우)
+### 5-2. 리뷰 · 시각화 스킬 설치 (코드 · 문서 리뷰나 문서 시각화를 맡길 경우)
 
 `/review-pr` 스킬이 DevTrack 에 코드 리뷰 결과를 올리고, 웹에서 코멘트할 항목을 고를 수 있게 해 줍니다.
 `/review-doc` 스킬은 논문 · 보고서 · 제안서(PDF · Word · LaTeX)를 리뷰해 요약과 고칠 부분을 PDF 리포트로 올립니다 ([문서 리뷰](#/guide/s9)).
+`/visualize-doc` 스킬은 긴 논문 · 문서를 짜임새 있게 요약하고 도식(모식도)으로 그려 올립니다 ([문서 리뷰](#/guide/s9) 5번).
 
 ```bash
-mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc
+mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
 ```
 
 복사 대신 링크로 걸어 두면 `git pull` 만으로 스킬도 함께 최신이 됩니다.
@@ -477,6 +481,15 @@ Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 
    - 아래에서 **리뷰 리포트(PDF)** 와 **원본 문서**를 바꿔 봅니다. Word 원본은 글자 · 표만 뽑아 보여 줍니다 (그림 · 서식은 다운로드해서 확인)
 4. Claude 가 "리포트를 확인해 주세요" 를 올리면 확인하고 **승인** 합니다. 고쳐 달라는 부분은 코멘트나 **리뷰에 대한 의견 보내기** 로 적습니다.
    원문을 직접 고친 수정본이 필요하면 "R1, R3 반영한 수정본 만들어 줘" 라고 보내세요 — 원본 파일은 그대로 두고 수정본을 따로 올립니다.
+5. **시각화 (요약 + 도식)**: 긴 문서를 한눈에 보려면 작업 화면 아래 메시지 칸의 **시각화 요청** 을 누르고 보냅니다.
+   초점("방법 부분만", "3장")을 덧붙여도 됩니다. **논문 작성** 작업에서도 같습니다.
+   - Claude 가 `/visualize-doc` 스킬로 짜임새 있는 요약과 도식 1–3개를 만들어 올립니다.
+     요약은 한 줄 요약, 문서 지도, 핵심 주장과 근거, 방법 흐름, 주요 결과, 용어 풀이로 이뤄집니다.
+   - 작업 화면의 **시각화** 칸에서 도식을 봅니다. **시각화 요약** 을 열면 도식이 들어간 리포트를 볼 수 있고, PDF 도 함께 올라옵니다.
+   - 도식은 Claude 가 SVG 로 직접 그립니다. 그래서 문서 내용이 외부 이미지 생성 서비스로 나가지 않고, 그림 속 용어 · 숫자는 문서 그대로입니다.
+     배치는 내용에 맞게 고릅니다: 흐름 · 순환 · 계층 · 두 갈래 비교 · 중심과 주변 · 표.
+   - 채팅에서는 `/visualize-doc ~/papers/draft.pdf 방법 부분만` 이나 `/visualize-doc T-0010` 처럼 지시합니다 (스킬 설치: [5-2단계](#/guide/s5-2)).
+     고칠 점은 그 도식을 열고 아래 칸에 적으면 새 버전으로 올라옵니다.
 
 ### 데이터 분석 · 시각화
 
@@ -922,6 +935,7 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
 - 사용자 결정이 필요하면 `devtrack request` 로 요청을 남기고 사용자에게 알린 뒤 멈춘다. `devtrack wait` · `devtrack inbox --wait` 로 오래 기다리지 않는다
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
+- 논문 · 문서 작업의 시각화(요약 · 도식) 요청은 `~/.codex/skills/visualize-doc/SKILL.md` 를 읽고 그대로 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -955,12 +969,13 @@ writable_roots = ["/Users/me/devtrack/data"]    # 작업 폴더 밖에 있는 De
 - 인터넷(`gh` · `git push`)은 Codex 대화창에서는 필요할 때 허락을 묻고, 웹 지시를 처리하는 `devtrack watch` 는 대화창이 없어
   물을 수 없으므로 실행할 때 인터넷을 허용합니다 (막으려면 `devtrack watch --codex --no-network`).
 
-**③ 리뷰 스킬** (코드 · 문서 리뷰를 맡길 경우) — Claude 와 같은 파일을 링크합니다.
+**③ 리뷰 · 시각화 스킬** (코드 · 문서 리뷰나 문서 시각화를 맡길 경우) — Claude 와 같은 파일을 링크합니다.
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
+mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
 ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
 ```
 
 **④ `codex` 명령** — 웹 지시를 받는 `devtrack watch` 가 Codex CLI 를 씁니다. 터미널의 `codex` 가 없으면 ChatGPT · Codex 앱,
@@ -1095,6 +1110,8 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | `devtrack mailbox <계정>/<저장소>` | 정적 웹의 'GitHub 이슈로 보내기' 를 받을 우편함 켜기 (상태: 인자 없이, `--check` 지금 확인, `--off` 끄기, 10-8) |
 | `devtrack list` · `devtrack show T-0001` | 터미널에서 작업 목록 · 상세 보기 |
 | `devtrack paper T-0005` | 논문 작업의 원고 폴더(`tasks/T-0005/paper`) 다시 만들기 · 빠진 그림 확인 (9. 논문 작성) |
+| `devtrack doc T-0010` | 작업이 다루는 문서 파일 경로 (심사 원고 · 원고 폴더 · 검토할 문서 순, `--all` 은 후보 모두) |
+| `devtrack svgcheck fig.svg --png` | SVG 도식 점검 (실행 코드 · 넘치거나 겹친 글자 · 캔버스 밖) + PNG 미리보기 (9. 문서 리뷰 5번) |
 | `devtrack watch --claude` | 웹에서 Claude 에게 온 지시를 작업마다 정한 모델로 처리 (6-1) |
 | `devtrack watch --codex` | 웹에서 Codex 에게 온 지시를 Codex 로 처리 (11단계) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | 작업을 처리할 AI 모델 · 추론 강도 정하기 (`--clear` 해제, `--list` 고를 수 있는 모델 · 강도, 6-1) |

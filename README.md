@@ -108,9 +108,10 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `devtrack password` | Puts a password on the web. Only browsers that entered it can read the records (Apache `.htaccess` and `devtrack serve` enforce it) |
 | `devtrack mailbox` | Uses the issues of a private GitHub repository as a mailbox: instructions, messages and approvals sent from the static web as issues are recorded by the waiting `watch` · wait mode. Links to files uploaded to that repository come along as the task's sent files |
 | `devtrack config` | Shows or sets the records folder and the publish folder. `devtrack config data <dir>` keeps every terminal and program writing to the same place |
+| `devtrack doc` · `devtrack svgcheck` | Path of the document a task is about · check an SVG diagram (unsafe code, overflowing or overlapping text) with a PNG preview — used by `/visualize-doc` |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
-| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`) |
+| `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`, `/visualize-doc`) |
 
 ## Quick start (see the example locally)
 
@@ -147,7 +148,8 @@ To use it from anywhere, link it into your PATH: `ln -s "$PWD/bin/devtrack" ~/bi
   The Claude Code `/review-pr` skill: [integrations/claude-skills](integrations/claude-skills/README.md)
 - **Paper writing** — a card per paper (type `paper`): manuscript outline (plan), **compiled PDF** (latest build · warnings · failure alerts), manuscript files, figures, linked data analyses, open issues. All paper artifacts (PDF · manuscript · figures · tables/data) in one place
 - **LaTeX document view** — shows a `.tex` artifact as a readable document instead of code: section headings · equations (KaTeX) · tables · lists · footnotes, numbered `\cite`/`\ref`/`\eqref` links, and for `\includegraphics` the figure uploaded under the same name (in the same task or a linked analysis task). `Source` switches back to the code. It is a preview: numbering and layout can differ from the real PDF
-- **Document review** — review tasks (type `docreview`) for papers, reports and proposals (PDF · Word · LaTeX). For the selected task: **Review at a glance** (verdict · one-line conclusion, document summary, rating per area, strengths, the parts to improve or fix R1… with location and **original → suggested revision**), the review report (PDF) and the original document. Word originals get a preview of their text and tables (standard library only). On New task you enter the document path, kind and purpose
+- **Document review** — review tasks (type `docreview`) for papers, reports and proposals (PDF · Word · LaTeX). For the selected task: **Review at a glance** (verdict · one-line conclusion, document summary, rating per area, strengths, the parts to improve or fix R1… with location and **original → suggested revision**), the review report (PDF) and the original document. Word originals get a preview of their text and tables (standard library only). On New task you enter the document path, kind and purpose.
+  **Ask for a visualization** in the message box of a paper or document-review task: the `/visualize-doc` skill posts a structured summary and 1–3 diagrams that Claude draws as SVG (the document never goes to an outside image service), shown in the task's **Visualization** box
 - **Data analysis** — data analysis and visualization tasks (types `analysis`, `visualization`) with a figure gallery, data · notebooks · reports. The `For paper` filter shows only analyses linked to a paper task
 - **Brainstorming** — brainstorming tasks (type `brainstorm`). For the selected task: topic and plan, the idea notes the AI wrote, **ticking the ideas to pursue** (`request --choices "I1=…"`), the ideas picked so far, feedback, and a new task from the picked ideas (shown as a linked task)
 - **Artifacts** — Markdown, PDF, images/SVG, diff, code/LaTeX (highlighted), CSV tables, Jupyter notebooks, HTML.

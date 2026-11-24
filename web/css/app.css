@@ -1162,3 +1162,13 @@ body.locked #lock-root { display: flex; min-height: 100vh; min-height: 100dvh; a
 .sidebar-foot .lock-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
 .sidebar-foot .lock-btn .icon, .sidebar-foot .lock-warn .icon { width: 13px; height: 13px; }
 .sidebar-foot .lock-warn { display: flex; gap: 5px; align-items: center; margin-top: 8px; color: var(--red); font-weight: 600; }
+
+/* 시각화 칸 (분류 visual — 문서 요약 · 도식) */
+.visual-panel .vp-docs { display: flex; flex-wrap: wrap; gap: 8px; }
+.visual-panel .vp-docs + .vp-figs { margin-top: 12px; }
+.visual-panel .vp-figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.vp-fig { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  background: var(--surface); color: var(--text); }
+.vp-fig:hover { text-decoration: none; border-color: var(--border-strong); box-shadow: var(--shadow); }
+.vp-fig img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; }
+.vp-fig span { padding: 0 10px 8px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

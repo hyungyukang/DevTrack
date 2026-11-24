@@ -97,6 +97,12 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
 - 결과물에 대한 메시지: 결과물 화면 맨 아래 `feedbackBox(t, …, { artifact })` → `add_user_comment(artifact=)` 가 로그 `ref` · `meta.artifact`(보낼 때 버전)로 남긴다.
   결과물은 새 버전도 같은 ID 라 `ref` 로 그 결과물의 요청 · 버전 기록(`artifactThread`)이 이어지고, inbox 항목에는 `_comment_artifact` 가 지금 파일과
   새 버전으로 올리는 명령(`artifact --replace` · `review`)을 붙인다. 사용자 메시지의 `ack` 는 웹에 'AI 확인함 / 확인 전' 으로 표시
+- 문서 시각화: `integrations/claude-skills/visualize-doc/SKILL.md` (WilsonWukz/visual-architect 를 고친 것, MIT — `LICENSE-visual-architect.txt`).
+  결과물 분류 `visual` (`artifact --visual`) → 웹 `visualPanel`(작업 개요의 **시각화** 칸) · `catBadge`, 메시지 칸의 **시각화 요청**
+  (`VISUAL_TYPES` 작업만, `fillVisualRequest`). inbox 는 그 작업들의 시각화 요청 문구(`cli.VISUAL_RE`)에 `_visual_hint` 로 스킬을 가리킨다 —
+  작업 유형 목록은 두 쪽(`cli.VISUAL_TYPES` · app.js `VISUAL_TYPES`)을 함께 고칠 것. `Store.task_documents` (`devtrack doc`) 가 읽을 문서를 찾고,
+  `devtrack/svgcheck.py` (`devtrack svgcheck`) 가 SVG 안전(실행 코드 · 외부 주소) · 모양(넘치거나 겹친 글자 · 캔버스 밖)을 보고 `--png` 로 그린다.
+  `Store.add_artifact` 는 안전하지 않은 SVG 를 거절한다 (웹에서 새 탭으로 직접 열릴 수 있음). 데모 T-0010 의 시각화는 `devtrack/demo_assets/visualize/`
 - 코드 리뷰: `Store.set_review`(검토 항목 R1… 은 같은 ID 끼리 합침) · 승인 요청의 `choices`/`selected`(웹 체크박스 선택). `integrations/claude-skills/` 는 이를 쓰는 `/review-pr` · `/review-doc` 스킬 (사용자가 `~/.claude/skills` 로 복사해 설치)
 - 자동 갱신: `poll`(10초 · 탭으로 돌아올 때)이 바뀐 화면을 `render({auto})` 로 다시 그린다. 입력 중(`isBusy` — 입력 칸 포커스 · 누르는 중 ·
   `api` 쓰기 중 · 승인 선택지 · 새 작업 폼)이면 `deferRender` 로 미루고 입력 칸에서 나오면 `applyPending`. 써 두기만 한 글은 같은 화면이면
@@ -156,5 +162,9 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   보낸 파일: 가짜 서버에 `contents/<경로>?ref=`(raw) 응답과 Contents 권한이 없는 토큰(403)을 두고, 새 작업 이슈에 Word · 슬래시 브랜치 파일 ·
   끌어다 놓기 첨부 · 없는 파일 · 다른 사이트 링크, 붙여 넣기 형식 끝의 링크, 대화 이슈 댓글의 raw 주소, `T-0041 완료` 에 붙인 링크(받지 않음),
   너무 큰 파일(`ATTACH_MAX` 를 낮춰서) → 지시의 `📎 F-n` · 답글 · `--as Claude inbox` 의 `→ 보낸 파일` 줄 · `devtrack text` · 웹 '보낸 파일' 표시를 본다.
+- 문서 시각화 변경 후: 임시 데이터의 데모 T-0010 에 시각화 요청 메시지 → `inbox` 의 `→ 문서 시각화 요청` → `devtrack doc T-0010` →
+  일부러 글자가 넘치고 겹친 SVG · `<script>` 가 든 SVG 로 `svgcheck --png` (경고 · 오류 · 미리보기) → `artifact --visual` 거절 확인 →
+  실제 도식 2개 · 요약 md 를 올려 `#/task/T-0010` 의 **시각화** 칸, `#/artifact/T-0010/<md>` 의 그림, 390px · 다크, 정적 모드(`publish --to`)를 본다.
+  논문 · 문서 리뷰 작업에만 **시각화 요청** 버튼이 있는지(코드 작업은 없음)도.
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

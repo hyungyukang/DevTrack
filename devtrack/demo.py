@@ -1586,6 +1586,23 @@ def _scenario(s, clk, tmp):
         description="요약 · 점검 영역 · 보완할 부분(R1–R10)을 PDF 로 정리했습니다.\n\n"
                     "- **반드시 수정:** R1 선행 연구와의 차이, R2 결론의 일반화\n"
                     "- 원하시면 고를 항목만 원고(main.tex)에 반영한 수정안을 따로 만들어 드립니다.")
+    # 시각화 요청 (/visualize-doc): 사용자가 메시지 칸의 '시각화 요청' 으로 보냄 → 요약 + 도식 2개 (분류 visual)
+    clk.at(125)
+    s.add_user_comment(tid10, "이 문서를 시각화해 주세요 (/visualize-doc) — 짜임새 있는 요약과 핵심 모식도 · 문서 구조 도식.\n"
+                              "초점 (선택): 두 자료(DNS · 실험)가 어떻게 비교되는지")
+    clk.at(118); s.ack_inbox(s.inbox(task=tid10))
+    s.update_task(tid10, step="시각화: 원고 구조 · 핵심 주장 정리, 도식 설계 (Parallel Dual-Stream · Linear Pipeline)")
+    assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_assets", "visualize")
+    clk.at(104)
+    for name, title in (("v1-overview.svg", "도식 1: DNS vs hot-wire 왜도 비교"), ("v2-structure.svg", "도식 2: 원고의 구조"),
+                        ("visual-skewness.md", "시각화 요약")):
+        with open(os.path.join(assets, name), encoding="utf-8") as fh:
+            s.add_artifact(tid10, path=f(name, fh.read()), title=title, category="visual")
+    clk.at(102)
+    s.add_log(tid10, "시각화: 요약 + 도식 2개 — V1 두 자료 → 왜도 비교 → 결론 (Parallel Dual-Stream), "
+                     "V2 원고 다섯 부분의 주장 (Linear Pipeline). 결론의 'independent of the Reynolds number' 와 "
+                     "방법의 Re_τ = 180 하나를 나란히 볼 수 있게 했습니다.")
+    s.update_task(tid10, step="리뷰 리포트 확인을 기다리는 중")
 
     # ---------------------------------------------------------------- T-0011 제안서(Word) 문서 리뷰 (완료)
     clk.at(1500)

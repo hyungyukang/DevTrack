@@ -733,7 +733,7 @@ function artRow(tid, a, { showTask = false, thumb = false } = {}) {
   const img = thumb && a.kind === 'image' && a.path ? artifactUrl(tid, a) : null;
   return html`<a class="art-row" href="#/artifact/${tid}/${a.id}">
     <span class="ic ${img ? 'has-img' : ''}">${img ? html`<img src="${img}" alt="" loading="lazy">` : icon(k.icon)}</span>
-    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : a.category === 'source' ? ` · ${sourceLabel(a)}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
+    <div class="body"><div class="title">${a.title}</div><div class="meta">${showTask ? `${tid} · ` : `${a.id} · `}${k.label}${a.category === 'review' ? ` · ${L('리뷰')}` : a.category === 'source' ? ` · ${sourceLabel(a)}` : a.category === 'visual' ? ` · ${L('시각화')}` : ''}${a.version > 1 ? ` · v${a.version}` : ''} · ${ago(a.updated_at || a.created_at)}${a.size ? ` · ${fmtBytes(a.size)}` : ''}${showTask && a.task_title ? ` · ${a.task_title}` : ''}</div></div>
     ${icon('chev')}
   </a>`;
 }
@@ -742,6 +742,7 @@ function artRow(tid, a, { showTask = false, thumb = false } = {}) {
 const sourceLabel = (a) => (a.sent ? L('보낸 파일') : a.kind === 'diff' ? L('리뷰할 변경') : L('검토할 문서'));
 function catBadge(a) {
   if (a.category === 'review') return html`<span class="badge tone-violet">${L('리뷰')}</span>`;
+  if (a.category === 'visual') return html`<span class="badge tone-pink">${L('시각화')}</span>`;
   if (a.category === 'source') return html`<span class="badge tone-orange">${sourceLabel(a)}</span>`;
   return '';
 }
@@ -844,6 +845,19 @@ function artifactThread(t, art) {
 }
 
 /** 작업의 담당 AI 에게 메시지 보내기. artifact 를 주면 결과물 화면의 '수정 요청 · 추가 지시' 칸 (그 결과물을 가리키는 메시지) */
+// 시각화 요청 버튼을 두는 작업 유형 — 보낸 메시지는 AI 의 inbox 에서 /visualize-doc 스킬로 안내된다 (cli.VISUAL_TYPES)
+const VISUAL_TYPES = ['paper', 'docreview', 'visualization'];
+// AI 에게 가는 글이라 한국어 그대로
+const VISUAL_REQUEST = '이 문서를 시각화해 주세요 (/visualize-doc) — 짜임새 있는 요약과 핵심 모식도 · 문서 구조 도식.\n초점 (선택): ';
+
+function fillVisualRequest(task) {
+  const ta = document.getElementById(`fb-${task}`);
+  if (!ta) return;
+  if (!ta.value.includes('/visualize-doc')) ta.value = ta.value.trim() ? `${ta.value.trim()}\n\n${VISUAL_REQUEST}` : VISUAL_REQUEST;
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
 function feedbackBox(t, title = L('{ai}에게 메시지', { ai: aiName(t) }), { artifact = null } = {}) {
   const ai = aiName(t);
   return html`<section class="card feedback-card">
@@ -853,6 +867,7 @@ function feedbackBox(t, title = L('{ai}에게 메시지', { ai: aiName(t) }), { 
       <textarea id="fb-${t.id}" placeholder="${artifact ? L('이 결과물에서 고칠 부분이나 추가로 할 일을 적어 주세요 (markdown 지원)') : L('추가 지시, 질문, 수정 요청 등을 입력하세요 (markdown 지원)')}"></textarea>
       <div class="actions">
         <span class="hint">${feedbackHint(t)}</span>
+        ${!artifact && VISUAL_TYPES.includes(t.type) ? html`<button class="btn" data-action="visual-request" data-task="${t.id}" title="${L('문서를 요약하고 도식으로 그려 달라는 메시지를 채웁니다 — 보내기 전에 고칠 수 있습니다')}">${icon('image')} ${L('시각화 요청')}</button>` : ''}
         <button class="btn btn-primary" data-action="comment" data-task="${t.id}" data-artifact="${artifact?.id || ''}">${icon('send')} ${L('보내기')}</button>
       </div>
     </div>
@@ -1478,6 +1493,22 @@ function reviewLoopPanel(t) {
   </section>`;
 }
 
+/** 시각화 결과물(분류 visual — /visualize-doc 의 요약 · 도식): 요약 리포트는 바로 열고, 도식은 그림으로 */
+function visualPanel(t) {
+  const arts = (t.artifacts || []).filter((a) => a.category === 'visual');
+  if (!arts.length) return '';
+  const figs = arts.filter((a) => a.kind === 'image' && a.path);
+  const docs = arts.filter((a) => !(a.kind === 'image' && a.path));
+  const ver = (a) => (a.version > 1 ? html` <span class="badge tone-accent">v${a.version}</span>` : '');
+  return html`<section class="card visual-panel">
+    <div class="card-head"><h2>${icon('image')} ${L('시각화')}</h2><span class="muted">${L('요약 {d}개 · 도식 {f}개', { d: docs.length, f: figs.length })}</span></div>
+    <div class="card-body">
+      ${docs.length ? html`<div class="vp-docs">${docs.map((a) => html`<a class="btn btn-sm" href="#/artifact/${t.id}/${a.id}">${icon(pick(ART_KIND, a.kind, 'file').icon)} ${a.title}${ver(a)}</a>`)}</div>` : ''}
+      ${figs.length ? html`<div class="vp-figs">${figs.map((a) => html`<a class="vp-fig" href="#/artifact/${t.id}/${a.id}" title="${a.title}"><img src="${artifactUrl(t.id, a)}" alt="${a.title}" loading="lazy"><span>${a.title}${ver(a)}</span></a>`)}</div>` : ''}
+    </div>
+  </section>`;
+}
+
 /** 리뷰 작업: 무엇을 리뷰하는지 (개발 작업 · 차례) */
 function reviewOfPanel(t) {
   const of = t.review_of;
@@ -1498,7 +1529,7 @@ function taskOverview(t, openIssues) {
   const arts = [...t.artifacts].reverse().slice(0, 6);
   return html`<div class="detail-grid">
     <div>
-      ${reviewLoopPanel(t)}${reviewOfPanel(t)}
+      ${reviewLoopPanel(t)}${reviewOfPanel(t)}${visualPanel(t)}
       ${t.type === 'docreview' || t.review?.doc ? (t.review ? docReviewPanel(t) : '') : reviewPanel(t)}
       <section class="card">
         <div class="card-head"><h2>${icon('message')} ${L('작업 지시')}</h2><span class="muted" style="font-size:12.5px">${authorName(t.created_by)} · ${fmtAbs(t.created_at)}</span></div>
@@ -2257,6 +2288,7 @@ const ART_GROUPS = translated({
   figure: { label: '그림 · 시각화', test: (a) => ['image', 'html'].includes(a.kind) },
   data: { label: '데이터 · 노트북', test: (a) => ['csv', 'notebook'].includes(a.kind) },
   review: { label: '리뷰', test: (a) => a.category === 'review' },
+  visual: { label: '시각화', test: (a) => a.category === 'visual' },
   link: { label: '링크 · 기타', test: (a) => ['link', 'file'].includes(a.kind) },
 });
 
@@ -3047,6 +3079,7 @@ async function onAction(el, ev) {
   switch (a) {
     case 'decide': return actDecide(el);
     case 'comment': return actComment(el);
+    case 'visual-request': return fillVisualRequest(el.dataset.task);
     case 'fab': return fabScroll(el.dataset.fab);
     case 'note-edit': return actNote(el, 'edit');
     case 'note-cancel': return actNote(el, 'cancel');

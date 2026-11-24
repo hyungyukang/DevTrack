@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - Windows
     fcntl = None
 
-from . import DevTrackError, access, gitops, mailbox, manuscript, models
+from . import DevTrackError, access, gitops, mailbox, manuscript, models, svgcheck
 
 # 데모 데이터 생성 시 시간을 조작하기 위한 훅 (callable -> datetime)
 _clock = None
@@ -1711,7 +1711,8 @@ class Store:
             self._docx_preview(t, art)
         self._mark_paper(t, art)
         if log:
-            label = {"review": "리뷰 리포트 등록", "source": "검토할 문서 등록"}.get(category, "결과물 추가")
+            label = {"review": "리뷰 리포트 등록", "source": "검토할 문서 등록",
+                     "visual": "시각화 결과물 추가"}.get(category, "결과물 추가")
             self._log(t, "{}: {}".format(label, art["title"]), kind="artifact", author=author, ref=fid,
                       meta={"category": category, "kind": art["kind"]})
         return art
@@ -1722,6 +1723,56 @@ class Store:
         if art.get("category", "result") == "result" and not art.get("build") and \
                 (ext in PAPER_SOURCE_EXT or ext in manuscript.FIGURE_EXT):
             self._paper_dirty.add(t["id"])
+
+    def task_documents(self, tid):
+        """작업이 다루는 문서 파일 (시각화 · 요약할 때 AI 가 읽을 것), 먼저 쓸 것부터:
+        심사 원고(review_loop.doc) > 논문 원고 폴더의 본문 .tex > 검토할 문서(원본) > 문서 결과물.
+        같은 종류 안에서는 LaTeX 본문(\\documentclass) > PDF > Word > Markdown · 글 순, 새것 먼저.
+        → [{"path", "label", "id"?, "version"?}]"""
+        t = self.load(normalize_task_id(tid))
+        tid = t["id"]
+        out, seen = [], set()
+
+        def add(path, label, a=None):
+            if not path or not os.path.isfile(path) or os.path.realpath(path) in seen:
+                return
+            seen.add(os.path.realpath(path))
+            item = {"path": os.path.abspath(path), "label": label}
+            if a:
+                item.update(id=a["id"], version=a.get("version", 1), title=a.get("title"))
+            out.append(item)
+
+        def main_tex(path):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    return "\\documentclass" in fh.read(200000)
+            except OSError:
+                return False
+
+        def rank(path):
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".tex":
+                return 0 if main_tex(path) else 4
+            return {".pdf": 1, ".docx": 2, ".md": 3, ".markdown": 3, ".txt": 5, ".rst": 5}.get(ext, 9)
+
+        loop = t.get("review_loop") or {}
+        if loop.get("kind") == "doc" and loop.get("doc"):
+            add(loop["doc"], "심사 원고")
+        paper = os.path.join(self.tasks_dir, tid, PAPER_DIR)
+        if t.get("type") == "paper" and os.path.isdir(paper):
+            for name in sorted(os.listdir(paper)):
+                p = os.path.join(paper, name)
+                if name.lower().endswith(".tex") and main_tex(p):
+                    add(p, "원고 폴더 (devtrack paper {})".format(tid))
+        for cat, label in (("source", "검토할 문서"), ("result", "문서 결과물"), ("review", "리뷰 리포트")):
+            arts = [a for a in t.get("artifacts", []) if a.get("category", "result") == cat and not a.get("figure")
+                    and not a.get("build") and self._artifact_file(tid, a)]
+            arts = [a for a in arts if rank(self._artifact_file(tid, a)) < 9]
+            arts.sort(key=lambda a: a.get("updated_at") or a.get("created_at") or "", reverse=True)  # 새것 먼저
+            arts.sort(key=lambda a: rank(self._artifact_file(tid, a)))
+            for a in arts:
+                add(self._artifact_file(tid, a), label, a)
+        return out
 
     # ------------------------------------------------------------------ 논문 원고 폴더
     def _artifact_file(self, tid, a):
@@ -1914,7 +1965,14 @@ class Store:
 
     def add_artifact(self, tid, replace_same_name=False, **kw):
         """replace_same_name: 같은 작업 · 같은 분류에 같은 파일 이름의 결과물이 있으면 새 결과물을 만들지 않고
-        그 결과물의 새 버전으로 교체한다 (이전 파일은 versions 에 남김). 내용이 같으면 그대로 둔다."""
+        그 결과물의 새 버전으로 교체한다 (이전 파일은 versions 에 남김). 내용이 같으면 그대로 둔다.
+        SVG 는 실행 코드 · 외부 주소가 없어야 올린다 — 웹에서 새 탭으로 직접 열릴 수 있다 (svgcheck.unsafe_file)."""
+        path = kw.get("path")
+        name = kw.get("filename") or (os.path.basename(path.rstrip("/")) if path else "")
+        if path and name.lower().endswith(".svg") and os.path.isfile(os.path.expanduser(path)):
+            bad = svgcheck.unsafe_file(os.path.expanduser(path))
+            if bad:
+                raise DevTrackError("SVG 를 올리지 않습니다 — {} (devtrack svgcheck 로 확인)".format(" · ".join(bad[:3])))
         with self.edit(tid) as t:
             path = kw.get("path")
             if replace_same_name and path and kw.get("copy", True):
@@ -1959,7 +2017,8 @@ class Store:
             self._docx_preview(t, art)
         self._mark_paper(t, art)
         if log:
-            label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신"}.get(art.get("category"), "결과물 갱신")
+            label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신",
+                     "visual": "시각화 결과물 갱신"}.get(art.get("category"), "결과물 갱신")
             self._log(t, "{} (v{}): {}".format(label, n + 1, art["title"]), kind="artifact", author=author,
                       ref=art["id"], meta={"category": art.get("category"), "kind": art.get("kind"), "version": n + 1})
         return art
@@ -2304,7 +2363,7 @@ class Store:
             if (task and t["id"] != task) or not agent_matches(t.get("agent"), agent):
                 continue
             of = t.get("review_of") or {}
-            base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent"),
+            base = {"task_id": t["id"], "title": t["title"], "agent": t.get("agent"), "task_type": t["type"],
                     "model": t.get("model"), "effort": t.get("effort"),
                     "review_of": of.get("task"), "review_same_session": bool(of.get("same_session"))}
             c = t.get("cancelled") or {}

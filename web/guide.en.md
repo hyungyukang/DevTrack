@@ -98,6 +98,8 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 - Keep paper figures in `figures/` next to the manuscript, put `\graphicspath{{figures/}}` in the manuscript, and load them without an extension: `\includegraphics{fig_name}`.
   Upload each figure as an artifact under that same file name (DevTrack gathers the manuscript and figures in `tasks/<TID>/paper/`).
 - When the user says "wait for web instructions" (or "웹 지시 기다려줘"), run `devtrack inbox --wait` in the background; when it ends (new input), handle the input and run it again.
+- When asked to visualize a paper or document-review task (summary, diagrams, schematics), use the `/visualize-doc <TID>` skill
+  (the inbox marks such a message `→ 문서 시각화 요청`).
 - If an instruction from the web contains a skill call such as `/review-pr <URL>`, load that skill fresh with the Skill tool every time and follow its latest instructions
   (do not reuse what was loaded earlier in the same conversation).
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
@@ -119,15 +121,17 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 >
 > The bracketed tags (`[DevTrack 결정]`, `[완료 처리]` and so on) stay in Korean: they are exactly what DevTrack prints, and Claude understands them either way.
 
-### 5-2. Install the review skills (if you will ask for code or document reviews)
+### 5-2. Install the review and visualization skills (if you will ask for code or document reviews, or document visualizations)
 
 The `/review-pr` skill posts code review results to DevTrack and lets you pick on the web which items to comment on.
 The `/review-doc` skill reviews a paper, report or proposal (PDF, Word, LaTeX) and posts the summary and what to fix as a PDF report ([Document review](#/guide/s9)).
+The `/visualize-doc` skill turns a long paper or document into a structured summary and diagrams (schematics) ([Document review](#/guide/s9), item 5).
 
 ```bash
-mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc
+mkdir -p ~/.claude/skills/review-pr ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/review-pr/SKILL.md
 ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
 ```
 
 Linking instead of copying means `git pull` keeps the skill up to date too.
@@ -480,6 +484,15 @@ Have Claude read a paper, report or proposal and give you a **summary** and **wh
    - Below, switch between the **review report (PDF)** and the **original document**. For a Word original only the text and tables are shown (download it to see figures and formatting)
 4. When Claude posts "please check the report", look at it and click **Approve**. Write what should change in the comment or in **Send feedback on the review**.
    If you want a revised copy of the document itself, send "make a revision with R1 and R3": the original file stays as it is and the revision is uploaded separately.
+5. **Visualization (summary + diagrams)**: to take in a long document at a glance, click **Ask for a visualization** in the message box at the bottom of the task page and send it.
+   You can add a focus ("only the method", "chapter 3"). It works the same on **Paper writing** tasks.
+   - Claude uses the `/visualize-doc` skill to post a structured summary and 1–3 diagrams.
+     The summary has a one-line summary, a map of the document, the key claims with their evidence, the method flow, the main results and a glossary.
+   - The task page's **Visualization** box shows the diagrams. **시각화 요약** (visual summary) opens the report with the diagrams in it, and a PDF is posted too.
+   - Claude draws the diagrams itself as SVG. So the document never goes to an outside image-generation service, and the terms and numbers in the diagrams are exactly the document's.
+     The layout is chosen to fit the content: flow, cycle, layers, two streams compared, a hub with spokes, or a table.
+   - In the chat, say `/visualize-doc ~/papers/draft.pdf only the method` or `/visualize-doc T-0010` (install the skill in [step 5-2](#/guide/s5-2)).
+     To change a diagram, open it and write in the box below; the fix comes back as a new version.
 
 ### Data analysis · visualization
 
@@ -925,6 +938,7 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 - When a user decision is needed, leave a request with `devtrack request`, tell the user, and stop. Do not wait for long with `devtrack wait` or `devtrack inbox --wait`
   (input from the web is delivered by `devtrack watch --codex`, which the user keeps running in a terminal and which starts me again).
 - If an instruction contains a skill call such as `/review-pr <URL>`, read `~/.codex/skills/<name>/SKILL.md` fresh every time and follow it.
+- For a request to visualize a paper or document task (summary, diagrams), read `~/.codex/skills/visualize-doc/SKILL.md` and follow it.
 - At each meaningful step, record `devtrack step <TID> "what I am doing now" -p <progress>`.
 - Keep a handoff note per task (`devtrack note <TID>`) up to date when a step ends, before an approval request and before done — only
   conclusions, numbers, file locations, commands, decisions and pitfalls, kept short (template: `--template`, save: `devtrack note <TID> -`).
@@ -958,12 +972,13 @@ writable_roots = ["/Users/me/devtrack/data"]    # allow writing to the DevTrack 
 - For network access (`gh` · `git push`), Codex asks for permission in its chat window when needed. `devtrack watch`, which handles web instructions, has no chat window
   to ask in, so it allows network access when it runs Codex (to block it: `devtrack watch --codex --no-network`).
 
-**③ Review skills** (if you will ask for code or document reviews) — link the same files as for Claude.
+**③ Review and visualization skills** (if you will ask for code or document reviews, or document visualizations) — link the same files as for Claude.
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
+mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
 ln -sf ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
 ln -sf ~/devtrack/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
+ln -sf ~/devtrack/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
 ```
 
 **④ The `codex` command** — `devtrack watch`, which receives web instructions, uses the Codex CLI. If there is no `codex` in the terminal, it automatically finds
@@ -1098,6 +1113,8 @@ Commands you use yourself:
 | `devtrack mailbox <owner>/<repo>` | Turn on the mailbox that receives the static web's 'Send as a GitHub issue' (status without arguments, `--check` to check now, `--off` to turn off, 10-8) |
 | `devtrack list` · `devtrack show T-0001` | View the task list · a task's details in the terminal |
 | `devtrack paper T-0005` | Rebuild a paper task's manuscript folder (`tasks/T-0005/paper`) and check for missing figures (9. Paper writing) |
+| `devtrack doc T-0010` | Path of the document a task is about (manuscript under review, manuscript folder, original under review, in that order; `--all` lists every candidate) |
+| `devtrack svgcheck fig.svg --png` | Check an SVG diagram (executable code, text that overflows or overlaps, text off the canvas) and render a PNG preview (9. Document review, item 5) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |

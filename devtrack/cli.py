@@ -394,10 +394,11 @@ def cmd_resolve(store, args):
 
 
 def cmd_artifact(store, args, category=None):
-    if getattr(args, "source", False) and getattr(args, "review", False):
-        raise DevTrackError("--source 와 --review 는 함께 쓸 수 없습니다")
+    if sum(bool(getattr(args, k, False)) for k in ("source", "review", "visual")) > 1:
+        raise DevTrackError("--source · --review · --visual 은 하나만 쓸 수 있습니다")
     category = category or ("source" if getattr(args, "source", False) else
-                            "review" if getattr(args, "review", False) else "result")
+                            "review" if getattr(args, "review", False) else
+                            "visual" if getattr(args, "visual", False) else "result")
     common = dict(title=args.title, description=_text(args.desc, args.desc_file), category=category,
                   author=args.author)
     if getattr(args, "git_diff", None):
@@ -420,8 +421,8 @@ def cmd_artifact(store, args, category=None):
     elif art.get("version", 1) > 1 and getattr(args, "replace", False):
         _info("결과물 갱신: {} — {} (v{})".format(art["id"], art["title"], art["version"]))
     else:
-        _info("{}: {} — {} ({})".format("검토할 문서 등록" if category == "source" else "결과물 추가",
-                                       art["id"], art["title"], art["kind"]))
+        _info("{}: {} — {} ({})".format({"source": "검토할 문서 등록", "visual": "시각화 결과물 추가"}.get(
+            category, "결과물 추가"), art["id"], art["title"], art["kind"]))
     if art.get("kind") == "docx" and not art.get("unchanged"):
         _info("  Word 미리보기: {}".format("만듦 (웹에서 글자 · 표를 볼 수 있음)" if art.get("preview")
                                         else "만들지 못함 — 웹에서는 내려받아 보세요"))
@@ -488,6 +489,69 @@ def cmd_review(store, args):
                 store.add_log(args.task, "리뷰 리포트 PDF 변환 실패", kind="warning", detail=str(e),
                               author=args.author)
     _out(args, arts, "\n".join(a["id"] for a in arts))
+    return 0
+
+
+def cmd_svgcheck(store, args):
+    """SVG 도식 점검 (+ PNG 미리보기). 오류(안전 · 형식)가 있으면 1, 경고만 있으면 0."""
+    from . import svgcheck
+    results, bad = [], False
+    for path in args.files:
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            raise DevTrackError("파일을 찾을 수 없습니다: {}".format(path))
+        r = svgcheck.check(path)
+        if args.png is not None and r["size"] and not r["errors"]:
+            out_dir = os.path.abspath(os.path.expanduser(args.png)) if args.png else os.path.dirname(path)
+            png = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + ".png")
+            try:
+                r["png"] = svgcheck.render_png(path, png, r["size"])
+            except DevTrackError as e:
+                r["png_error"] = str(e)
+        bad = bad or bool(r["errors"])
+        results.append(r)
+    if args.json:
+        _out(args, results)
+        return 1 if bad else 0
+    for r in results:
+        n = len(r["errors"]) + len(r["warnings"])
+        print("{} — 상자 {} · 글자 {}: {}".format(os.path.basename(r["file"]), r["shapes"], r["texts"],
+                                              "문제 없음" if not n else "오류 {} · 경고 {}".format(
+                                                  len(r["errors"]), len(r["warnings"]))))
+        for e in r["errors"]:
+            print("  ✗ " + e)
+        for w in r["warnings"]:
+            print("  ⚠ " + w)
+        if r["skipped"]:
+            print("  · 회전 · 기울인 도형 {}개는 모양 검사를 건너뜀".format(r["skipped"]))
+        if r.get("png"):
+            print("  미리보기: " + r["png"])
+        elif r.get("png_error"):
+            print("  미리보기 못 만듦: " + r["png_error"])
+    sys.stdout.flush()
+    if any(r["warnings"] for r in results):
+        _info("글자 폭은 어림값입니다 — 미리보기(PNG)로 함께 확인하세요")
+    return 1 if bad else 0
+
+
+def cmd_doc(store, args):
+    """작업이 다루는 문서 파일 경로 (시각화 · 요약할 때 읽을 것)."""
+    docs = store.task_documents(args.task)
+    if not docs:
+        raise DevTrackError("{} 에서 문서를 찾지 못했습니다 — 문서 경로를 직접 주세요 (논문 작업이면 devtrack paper {} 로 "
+                            "원고 폴더를 먼저 만들 수 있음)".format(normalize_task_id(args.task), normalize_task_id(args.task)))
+    if args.json:
+        _out(args, docs if args.all else docs[0])
+        return 0
+    for d in docs if args.all else docs[:1]:
+        label = "{}{}".format(d["label"], " · {} {}{}".format(d["id"], d.get("title") or "", " (v{})".format(
+            d["version"]) if d.get("version", 1) > 1 else "") if d.get("id") else "")
+        if args.all:
+            print("{}\n    {}".format(d["path"], label))
+        else:
+            print(d["path"])
+            sys.stdout.flush()
+            _info("  " + label)
     return 0
 
 
@@ -776,6 +840,8 @@ def _format_inbox(items):
                 out.append(_indent(it["instruction"]))
             out.extend(_sent_lines(it))
             out.append(_indent("→ devtrack start {task_id}".format(**it)))
+            if _visual_hint(it):
+                out.append(_visual_hint(it))
             if it.get("related"):
                 out.append(_indent("→ 관련 작업 {}: 먼저 devtrack show <작업> --brief (인계 메모) 를 읽고, 리포트 · 파일은 필요한 것만"
                                    .format(", ".join(it["related"]))))
@@ -794,9 +860,13 @@ def _format_inbox(items):
                 " (v{})".format(ver) if ver and ver > 1 else "", it["message"]))
             out.extend(_comment_artifact_lines(it))
             out.extend(_sent_lines(it))
+            if _visual_hint(it):
+                out.append(_visual_hint(it))
         elif it["type"] == "comment":
             out.append("[메시지] {task_id} {id}: {message}".format(**it))
             out.extend(_sent_lines(it))
+            if _visual_hint(it):
+                out.append(_visual_hint(it))
         elif it["type"] == "agent_message":
             lines = it["message"].splitlines() or [""]
             out.append("[AI 메시지] {} {} ({} 이(가) 보냄): {}".format(it["task_id"], it["id"], it.get("sender") or "AI",
@@ -822,6 +892,26 @@ def _format_inbox(items):
             if it["decision"] == "approved" and it.get("has_action"):
                 out.append(_indent("→ devtrack apply {task_id} {id}".format(**it)))
     return out
+
+
+# 논문 · 문서 작업에서 시각화(요약 + 도식)를 부탁하는 말 — inbox 가 /visualize-doc 스킬을 가리킨다
+VISUAL_RE = re.compile(r"시각화|도식|모식도|도해|개념도|구조도|흐름도|다이어그램|마인드\s*맵|그림으로\s*(정리|보여|설명|요약)|"
+                       r"visuali[sz]|diagram|schematic|infographic|mind\s*map", re.I)
+VISUAL_TYPES = ("paper", "docreview", "visualization")
+_DOC_FILE_RE = re.compile(r"\.(pdf|docx|tex|md)\b", re.I)
+VISUAL_SKILL = os.path.join(REPO_ROOT, "integrations", "claude-skills", "visualize-doc", "SKILL.md")
+
+
+def _visual_hint(it):
+    """시각화 요청이면 스킬 안내 한 줄. 시각화 작업은 문서 파일을 말했을 때만 (데이터 가시화와 구분)."""
+    text = " ".join(str(it.get(k) or "") for k in ("title", "instruction", "message"))
+    kind = it.get("task_type")
+    if kind not in VISUAL_TYPES or not VISUAL_RE.search(text):
+        return None
+    if kind == "visualization" and not _DOC_FILE_RE.search(text):
+        return None
+    return _indent("→ 문서 시각화 요청: /visualize-doc {} 스킬로 진행 (요약 + 도식 → devtrack artifact --visual). 스킬이 "
+                   "설치되지 않았으면 {} 를 읽고 따름".format(it["task_id"], VISUAL_SKILL))
 
 
 def _print_inbox(items, hint=True):
@@ -1987,8 +2077,9 @@ def cmd_show(store, args):
     if t.get("artifacts"):
         print("  결과물:")
         for a in t["artifacts"]:
-            print("    {} [{}{}] {}".format(a["id"], a["kind"], ", 보낸 파일" if a.get("sent") else {
-                "review": ", 리뷰", "source": ", 검토할 문서"}.get(a.get("category"), ""), a["title"]))
+            cat = ", 보낸 파일" if a.get("sent") else {"review": ", 리뷰", "source": ", 검토할 문서",
+                                                     "visual": ", 시각화"}.get(a.get("category"), "")
+            print("    {} [{}{}] {}".format(a["id"], a["kind"], cat, a["title"]))
     print("  최근 기록:")
     for e in t.get("log", [])[-args.lines:]:
         print("    {} [{}] {}: {}".format(e["ts"][5:16].replace("T", " "), e["kind"], e["author"], e["message"]))
@@ -2375,6 +2466,8 @@ def build_parser():
     sp.add_argument("-d", "--desc", help="설명 (markdown)")
     sp.add_argument("--desc-file", metavar="FILE")
     sp.add_argument("--review", action="store_true", help="리뷰 섹션에 표시")
+    sp.add_argument("--visual", action="store_true",
+                    help="시각화 결과물 (문서 요약 · 도식) — 작업 화면의 시각화 칸에 표시")
     sp.add_argument("--source", action="store_true",
                     help="문서 리뷰의 검토할 원본 문서로 등록 (PDF · Word .docx · LaTeX — Word 는 웹 미리보기를 함께 만듦)")
     sp.add_argument("--no-copy", action="store_true", help="복사하지 않고 경로만 기록 (웹에서는 볼 수 없음)")
@@ -2401,6 +2494,16 @@ def build_parser():
     sp.add_argument("file", help=".docx · .pdf · .tex · .md 등")
     sp.add_argument("-o", "--output", help="저장할 파일 (없으면 표준출력)")
     sp.add_argument("--timeout", type=int, default=120, help="pdftotext 제한 시간 (초)")
+
+    sp = add("doc", cmd_doc, "작업이 다루는 문서 파일 경로 — 심사 원고 · 논문 원고 폴더의 본문 · 검토할 문서 · 문서 결과물 순")
+    sp.add_argument("task")
+    sp.add_argument("--all", action="store_true", help="후보를 모두 (먼저 쓸 것부터)")
+
+    sp = add("svgcheck", cmd_svgcheck, "SVG 도식 점검 — 실행 코드 · 외부 주소, 상자를 넘거나 겹친 글자, 캔버스 밖 · 너무 작은 "
+                                       "글자 (+ --png 미리보기)")
+    sp.add_argument("files", nargs="+", metavar="SVG")
+    sp.add_argument("--png", nargs="?", const="", metavar="DIR",
+                    help="헤드리스 Chrome 으로 PNG 미리보기 (기본: SVG 옆, 같은 이름 .png)")
 
     sp = add("pdf", cmd_pdf, "Markdown 문서를 PDF 로 변환 (헤드리스 Chrome/Chromium, 한글 글꼴 포함)")
     sp.add_argument("markdown", help="변환할 .md 파일")

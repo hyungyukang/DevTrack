@@ -259,6 +259,25 @@ devtrack done $TID -m "리뷰 리포트 전달 — 소폭 수정"
 - 원본을 고쳐 달라는 요청이 오면(예: "R1, R3 반영해 줘") 고칠 항목을 `request -k review --choices` 로 고르게 하고,
   수정본은 다른 이름으로 결과물에 올린다. 사용자의 원본 파일은 덮어쓰지 않는다
 
+## 문서 시각화 (요약 + 도식)
+
+논문 · 문서 리뷰 작업에서 사용자가 시각화(요약 · 도식 · 모식도)를 부탁하면 `/visualize-doc` 스킬로 진행한다.
+웹 메시지 칸의 **시각화 요청** 으로 온 메시지는 inbox 에 `→ 문서 시각화 요청` 이 붙는다.
+Codex 등 스킬 도구가 없으면 [integrations/claude-skills/visualize-doc/SKILL.md](../integrations/claude-skills/visualize-doc/SKILL.md) 를 읽고 따른다.
+
+```bash
+devtrack doc <TID>                                   # 읽을 문서 (심사 원고 · 원고 폴더 · 검토할 문서 순, --all 은 후보 모두)
+devtrack svgcheck v1-overview.svg --png preview/     # 도식 점검 (실행 코드 · 넘치거나 겹친 글자 · 캔버스 밖) + PNG 미리보기
+devtrack artifact <TID> v1-overview.svg --visual --replace -n "도식 1: …"   # 작업 화면 '시각화' 칸
+devtrack artifact <TID> visual-<slug>.md --visual --replace -n "시각화 요약"
+```
+
+- 도식은 SVG 로 직접 그린다. 문서 내용을 이미지 생성 서비스(DALL·E · Midjourney · Gemini 등)에 보내지 않는다.
+  `<script>` · `<foreignObject>` · `on…` 속성 · 외부 주소가 있는 SVG 는 DevTrack 이 받지 않는다.
+- 그림 속 용어 · 숫자는 문서 그대로, 도식마다 근거 위치를 리포트에 적는다.
+- 이미 있는 논문 · 문서 리뷰 작업에서 할 때는 `devtrack step <TID> "시각화: …"` 를 `-p` 없이 쓰고(그 작업의 진행률 · 계획은 그대로),
+  승인 요청을 따로 올리지 않는다. 결과물과 기록(`devtrack log`)만 남기고 메시지는 `devtrack inbox --task <TID> --ack`.
+
 ## 승인 요청을 올려야 하는 때
 
 - 저장소에 **커밋/푸시** 할 때 (`--commit`, 필수)
@@ -492,6 +511,8 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
 - 사용자가 "웹 지시 기다려줘" 라고 하면 `devtrack inbox --wait` 를 백그라운드로 실행해 두고, 끝나면(새 입력) 처리한 뒤 다시 실행한다.
 - 웹에서 온 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 매번 Skill 도구로 그 스킬을 새로 불러 최신 지침대로 진행한다
   (같은 대화에서 전에 불러온 내용을 다시 쓰지 않는다).
+- 논문 · 문서 리뷰 작업에서 시각화(요약 · 도식 · 모식도)를 부탁받으면 `/visualize-doc <TID>` 스킬로 진행한다
+  (inbox 에 `→ 문서 시각화 요청` 으로 표시된다).
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고
@@ -531,6 +552,7 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
 - 사용자 결정이 필요하면 `devtrack request` 로 요청을 남기고 사용자에게 알린 뒤 멈춘다. `devtrack wait` · `devtrack inbox --wait` 로 오래 기다리지 않는다
   (웹에서 온 입력은 사용자가 터미널에 켜 둔 `devtrack watch --codex` 가 나를 다시 실행해 전달한다).
 - 지시에 `/review-pr <URL>` 같은 스킬 호출이 있으면 `~/.codex/skills/<이름>/SKILL.md` 를 매번 새로 읽고 그 지침대로 진행한다.
+- 논문 · 문서 작업의 시각화(요약 · 도식) 요청은 `~/.codex/skills/visualize-doc/SKILL.md` 를 읽고 그대로 진행한다.
 - 의미 있는 단계마다 `devtrack step <TID> "지금 하는 일" -p <진행률>` 을 남긴다.
 - 작업마다 인계 메모(`devtrack note <TID>`)를 단계가 끝날 때 · 승인 요청 전 · 완료 전에 최신으로 둔다 — 결론 · 숫자 · 파일 위치 · 명령 ·
   결정 · 주의점만 짧게 (틀: `--template`, 저장: `devtrack note <TID> -`). 다른 작업을 참고할 때는 먼저 `devtrack show <T> --brief` 를 읽고

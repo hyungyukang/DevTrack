@@ -6,6 +6,7 @@ DevTrack 에 기록하도록 고친 Claude Code 스킬입니다. `devtrack` 명�
 | 스킬 | 하는 일 | DevTrack 에서 보이는 것 |
 |---|---|---|
 | `review-pr` | 다른 사람의 PR 리뷰 → 쉬운 말 리포트 + 검토 항목 R1, R2… → 고른 항목만 코멘트 초안 → 승인 후 게시 | 코드 리뷰 화면: 리뷰 결과 한눈에 보기, 리포트(md/pdf), **코멘트할 항목 체크 → 진행**, 코멘트 초안 게시 승인 |
+| `visualize-doc` | 긴 논문 · 문서(PDF · Word · LaTeX · Markdown)를 **짜임새 있는 요약 + 도식 1–3개**로 — 내용에 맞는 배치(흐름 · 순환 · 계층 · 두 갈래 · 중심 · 표)를 골라 Claude 가 SVG 로 직접 그리고 `devtrack svgcheck` 로 점검. [visual-architect](https://github.com/WilsonWukz/paper-visualizer-skill) (MIT) 를 고친 것 | 작업 화면의 **시각화** 칸 (도식 · 시각화 요약 md/PDF), 메시지 칸의 **시각화 요청** 버튼 |
 | `review-doc` | 논문 · 보고서 · 제안서(PDF · Word · LaTeX) 리뷰 → 문서 요약 · 목적 대비 미비한 부분 · 논리 · 문장/맞춤법 (과학 논문은 형식 · 선행 연구와의 차이 · 결론의 근거까지) → 보완 · 수정 항목 R1, R2… 를 **PDF 리포트**로 | 문서 리뷰 화면: 리뷰 의견 · 문서 요약 · 영역별 평가 · 원문 → 수정 제안, 리뷰 리포트(PDF) · 원본 보기, 리포트 확인 요청 |
 
 ## 설치
@@ -25,16 +26,20 @@ cp ~/devtrack/integrations/claude-skills/review-pr/SKILL.md ~/.claude/skills/rev
 `review-doc` 은 다른 스킬 없이 혼자 동작합니다 (메일 기능 없음).
 
 ```bash
-mkdir -p ~/.claude/skills/review-doc
+mkdir -p ~/.claude/skills/review-doc ~/.claude/skills/visualize-doc
 ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.claude/skills/review-doc/SKILL.md
+ln -sf <DevTrack 저장소>/integrations/claude-skills/visualize-doc/SKILL.md ~/.claude/skills/visualize-doc/SKILL.md
 ```
+
+`visualize-doc` 도 혼자 동작합니다. 도식 미리보기(`devtrack svgcheck --png`)와 PDF 는 헤드리스 Chrome 이 있을 때만 만들고, 없으면 점검 결과와 Markdown 만 냅니다.
 
 **Codex 에서도** 같은 파일을 씁니다 (Codex 는 `allowed-tools` 를 무시하고, `${CLAUDE_SKILL_DIR}` 는 이 파일이 있는 폴더로 읽습니다).
 
 ```bash
-mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc
+mkdir -p ~/.codex/skills/review-pr ~/.codex/skills/review-doc ~/.codex/skills/visualize-doc
 ln -sf <DevTrack 저장소>/integrations/claude-skills/review-pr/SKILL.md ~/.codex/skills/review-pr/SKILL.md
 ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.codex/skills/review-doc/SKILL.md
+ln -sf <DevTrack 저장소>/integrations/claude-skills/visualize-doc/SKILL.md ~/.codex/skills/visualize-doc/SKILL.md
 ```
 
 `devtrack` 이 PATH 에 있어야 DevTrack 모드가 켜집니다: `ln -s <DevTrack 저장소>/bin/devtrack ~/bin/devtrack`
@@ -80,3 +85,16 @@ ln -sf <DevTrack 저장소>/integrations/claude-skills/review-doc/SKILL.md ~/.co
 ```
 
 웹에서 유형 **문서 리뷰** 로 지시해도 됩니다 (문서 경로 · 종류 · 목적 칸). 원고는 기밀일 수 있어, 스킬은 문서 내용을 검색이나 외부 서비스에 넣지 않습니다.
+
+## 사용 흐름 (`visualize-doc`)
+
+```
+(웹) 논문 · 문서 리뷰 작업의 메시지 칸 → '시각화 요청' (초점을 덧붙여도 됨) → 보내기
+  → (AI 의 inbox) [메시지] … → 문서 시각화 요청: /visualize-doc T-0010
+  → (Claude) devtrack doc T-0010 로 문서 찾기 → 읽기 → 짜임새 있는 요약 → 도식 설계(배치 · 구역 · 연결)
+  → (Claude) SVG 그리기 → devtrack svgcheck --png 로 점검 · 미리보기 확인 → 시각화 요약(md → PDF)
+  → (Claude) devtrack artifact … --visual --replace → 작업 화면 '시각화' 칸
+```
+
+채팅에서는 `/visualize-doc ~/papers/draft.pdf 방법 부분만` 이나 `/visualize-doc T-0010`. 원래 스킬(이미지 생성 AI 용 프롬프트)과 달리
+도식을 직접 그려 문서가 밖으로 나가지 않습니다. 원래 형식의 프롬프트가 필요하면 `prompt` 인자를 붙이면 부록으로 씁니다.
