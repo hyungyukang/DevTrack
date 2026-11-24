@@ -16,6 +16,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 from xml.sax.saxutils import escape as _x
@@ -786,6 +787,26 @@ def _rels(items):
         '<Relationship Id="{}" Type="{}" Target="{}"/>'.format(i, "http://schemas.openxmlformats.org/officeDocument/2006/"
                                                                   "relationships/" + t if "/" not in t else t, _x(tg))
         for i, t, tg in items) + "</Relationships>")
+
+
+# ---------------------------------------------------------------------------- 정보
+POSTER_MIN_MM = 500  # 한 장짜리이고 긴 변이 이보다 크면 포스터 (A2 594 mm 이상, 16:9 슬라이드는 339 mm)
+
+
+def pptx_info(path):
+    """pptx 의 슬라이드 수 · 크기(mm) · 포스터인지 (한 장짜리 큰 판 — 웹이 발표 자료와 포스터를 나눈다). 읽지 못하면 None."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            root = ET.fromstring(z.read("ppt/presentation.xml"))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError):
+        return None
+    ns = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    sz, ids = root.find(ns + "sldSz"), root.find(ns + "sldIdLst")
+    if sz is None:
+        return None
+    w_mm, h_mm = int(round(int(sz.get("cx", 0)) / float(MM))), int(round(int(sz.get("cy", 0)) / float(MM)))
+    n = len(ids) if ids is not None else 0
+    return {"slides": n, "w_mm": w_mm, "h_mm": h_mm, "poster": n == 1 and max(w_mm, h_mm) >= POSTER_MIN_MM}
 
 
 # ---------------------------------------------------------------------------- 만들기

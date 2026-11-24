@@ -1172,3 +1172,12 @@ body.locked #lock-root { display: flex; min-height: 100vh; min-height: 100dvh; a
 .vp-fig:hover { text-decoration: none; border-color: var(--border-strong); box-shadow: var(--shadow); }
 .vp-fig img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; }
 .vp-fig span { padding: 0 10px 8px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 발표 자료 · 포스터 · 시각화 모아 보기 */
+.deck-card .card-head h2 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.deck-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-2); font-size: 13px; margin-bottom: 12px; }
+.deck-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.deck-pdf { display: block; width: 100%; height: min(70vh, 720px); border: 0; border-top: 1px solid var(--border); }
+.deck-pdf.poster { height: min(85vh, 1100px); }
+.deck-nopreview { padding: 14px 18px; border-top: 1px solid var(--border); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+.review-item .deck-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

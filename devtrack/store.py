@@ -1710,6 +1710,8 @@ class Store:
         t.setdefault("artifacts", []).append(art)
         if art.get("kind") == "docx" and art.get("path"):
             self._docx_preview(t, art)
+        if art.get("kind") == "pptx" and art.get("path"):
+            self._pptx_meta(t, art)
         self._mark_paper(t, art)
         if log:
             label = {"review": "리뷰 리포트 등록", "source": "검토할 문서 등록",
@@ -1919,6 +1921,16 @@ class Store:
             self._sync_publish(tid)
             return status
 
+    def _pptx_meta(self, t, art):
+        """PowerPoint 결과물의 슬라이드 수 · 크기 — 웹의 발표 자료 · 포스터 화면이 나눠 보여 준다."""
+        from .pptx import pptx_info
+        f = self._artifact_file(t["id"], art)
+        info = pptx_info(f) if f and os.path.isfile(f) else None
+        if info:
+            art["pptx"] = info
+        else:
+            art.pop("pptx", None)
+
     def _docx_preview(self, t, art):
         """Word 문서의 글자 · 표를 Markdown 으로 뽑아 웹 미리보기(art['preview'])로 둔다. 실패해도 결과물 등록은 계속."""
         from .docx import docx_to_markdown
@@ -2037,6 +2049,8 @@ class Store:
             art["description"] = description
         if art.get("kind") == "docx":
             self._docx_preview(t, art)
+        if art.get("kind") == "pptx":
+            self._pptx_meta(t, art)
         self._mark_paper(t, art)
         if log:
             label = {"review": "리뷰 리포트 갱신", "source": "검토할 문서 갱신",
@@ -2692,7 +2706,10 @@ class Store:
                 item = {"task_id": t["id"], "task_title": t["title"], "task_type": t["type"]}
                 item.update({k: a.get(k) for k in ("id", "title", "kind", "category", "path", "url",
                                                    "created_at", "author", "size", "description", "lang", "build",
-                                                   "version", "updated_at", "preview", "filename", "sent")})
+                                                   "version", "updated_at", "preview", "filename", "sent", "pptx")})
+                if item.get("kind") == "pptx" and not item.get("pptx") and item.get("path"):  # 예전에 올린 pptx
+                    from .pptx import pptx_info
+                    item["pptx"] = pptx_info(self._artifact_file(t["id"], a))
                 artifacts.append(item)
                 if a.get("category") == "review":
                     reviews.append(item)

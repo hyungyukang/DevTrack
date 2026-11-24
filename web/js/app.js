@@ -109,6 +109,9 @@ const VIEWS = {
   analysis: viewAnalysis,
   brainstorm: viewBrainstorm,
   docreview: viewDocReview,
+  slides: (r) => viewDecks(r, false),
+  posters: (r) => viewDecks(r, true),
+  visuals: viewVisuals,
   artifacts: viewArtifacts,
   artifact: viewArtifact,
   activity: viewActivity,
@@ -1982,6 +1985,130 @@ function viewAnalysis({ q }) {
     </div>`;
 }
 
+// ---------------------------------------------------------------- 발표 자료 · 포스터 · 시각화 (여러 작업의 결과물을 모아 보기)
+// 발표 자료 · 포스터 = PowerPoint 결과물 (한 장짜리 큰 판이면 포스터 — store._pptx_meta 의 pptx.poster),
+// 시각화 = 분류 visual 결과물 (/visualize-doc 의 요약 · 도식). 미리보기는 같은 작업 · 같은 이름의 PDF 결과물
+const fileStem = (n) => (n || '').replace(/\.[^.]+$/, '');
+const newestFirst = (a, b) => tsNum(b.updated_at || b.created_at) - tsNum(a.updated_at || a.created_at);
+
+function previewPdfOf(a) {
+  return state.index.artifacts.filter((x) => x.task_id === a.task_id && x.kind === 'pdf' && x.path
+    && fileStem(x.filename) === fileStem(a.filename)).sort(newestFirst)[0] || null;
+}
+
+const PAPER_SIZES = { '841x1189': 'A0', '594x841': 'A1', '420x594': 'A2', '1219x914': '48×36 in', '914x1219': '36×48 in' };
+function paperSize(p) {
+  const name = PAPER_SIZES[`${Math.min(p.w_mm, p.h_mm)}x${Math.max(p.w_mm, p.h_mm)}`]
+    || PAPER_SIZES[`${p.w_mm}x${p.h_mm}`];
+  const orient = p.w_mm > p.h_mm ? L('가로') : L('세로');
+  return name ? `${name} ${orient}` : `${p.w_mm} × ${p.h_mm} mm`;
+}
+
+// 메뉴에서 새로 만들 때: 새 작업 지시에 스킬 호출을 채워 둔다 (AI 에게 가는 글이라 한국어 그대로)
+const DECK_NEW = {
+  slides: { type: 'other', title: '발표 자료: ', instruction: '/make-slides <발표할 논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 발표 종류 · 길이: (예: 학회 15분, 그룹 미팅 10분)\n- 청중:\n- 언어:' },
+  posters: { type: 'other', title: '포스터: ', instruction: '/make-poster <논문 · 문서의 작업 번호(T-…) 또는 경로>\n\n- 크기 · 방향: (예: A0 세로)\n- 학회 · 규정:' },
+  visuals: { type: 'visualization', title: '문서 시각화: ', instruction: '/visualize-doc <문서의 작업 번호(T-…) 또는 경로>\n\n- 초점 (선택): (예: 방법 부분, 3장)' },
+};
+const newHref = (k) => `#/new?type=${DECK_NEW[k].type}&title=${encodeURIComponent(DECK_NEW[k].title)}&instruction=${encodeURIComponent(DECK_NEW[k].instruction)}`;
+
+function deckListItem(a, sel, route) {
+  const p = a.pptx || {};
+  return html`<a class="review-item ${a === sel ? 'active' : ''}" href="#/${route}/${a.task_id}/${a.id}">
+    <div class="title">${a.title}</div>
+    <div class="meta"><span>${a.task_id}</span>${p.slides ? html`<span>${p.poster ? paperSize(p) : L('{n}장', { n: p.slides })}</span>` : ''}${a.version > 1 ? html`<span class="badge tone-accent">v${a.version}</span>` : ''}${ago(a.updated_at || a.created_at)}</div>
+    <div class="meta muted deck-task">${a.task_title}</div>
+  </a>`;
+}
+
+function deckDetail(a, poster) {
+  const pv = previewPdfOf(a);
+  const p = a.pptx || {};
+  const url = artifactUrl(a.task_id, a);
+  return html`<section class="card deck-card">
+    <div class="card-head"><h2>${icon(poster ? 'poster' : 'slides')} ${a.title}</h2>${a.version > 1 ? html`<span class="badge tone-accent">v${a.version}</span>` : ''}</div>
+    <div class="card-body">
+      <div class="deck-meta">
+        <a href="#/task/${a.task_id}">${a.task_id} · ${a.task_title}</a>
+        ${p.slides ? html`<span>${poster ? paperSize(p) : L('슬라이드 {n}장', { n: p.slides })}${poster ? '' : html` · ${paperSize(p)}`}</span>` : ''}
+        ${a.size ? html`<span>${fmtBytes(a.size)}</span>` : ''}
+        <span>${authorName(a.author)} · ${ago(a.updated_at || a.created_at)}</span>
+      </div>
+      <div class="deck-actions">
+        ${url ? html`<a class="btn btn-primary btn-sm" href="${url}" download>${icon('download')} ${L('PowerPoint 내려받기')}</a>` : ''}
+        ${pv ? html`<a class="btn btn-sm" href="${artifactUrl(pv.task_id, pv)}" target="_blank" rel="noopener">${icon('external')} ${L('미리보기 PDF 새 탭')}</a>` : ''}
+        <a class="btn btn-sm" href="#/artifact/${a.task_id}/${a.id}">${icon('message')} ${L('결과물 화면 · 수정 요청')}</a>
+      </div>
+    </div>
+    ${pv ? html`<iframe class="pdf-frame deck-pdf ${poster ? 'poster' : ''}" src="${artifactUrl(pv.task_id, pv)}#view=${poster ? 'Fit' : 'FitH'}" title="${pv.title || 'PDF'}"></iframe>`
+      : html`<div class="deck-nopreview muted">${icon('info')} ${L('미리보기 PDF 가 없습니다 — 내려받아 PowerPoint 에서 여세요. (미리보기는 devtrack pptx --pdf 로 만든 같은 이름의 PDF 를 함께 올리면 보입니다)')}</div>`}
+  </section>`;
+}
+
+function viewDecks({ rest }, poster) {
+  const route = poster ? 'posters' : 'slides';
+  const title = poster ? L('포스터') : L('발표 자료');
+  const sub = poster ? L('한 장짜리 PowerPoint 포스터 (A0 · A1 …) — /make-poster 스킬이 만듭니다')
+    : L('PowerPoint 발표 자료와 미리보기 — /make-slides 스킬이 만듭니다');
+  const head = html`<div class="page-head"><div><h1>${title}</h1><p class="sub">${sub}</p></div>
+    <a class="btn btn-primary" href="${newHref(route)}">${icon('plus')} ${poster ? L('새 포스터') : L('새 발표 자료')}</a></div>`;
+  const items = state.index.artifacts.filter((a) => a.kind === 'pptx' && a.path && !!a.pptx?.poster === poster).sort(newestFirst);
+  if (!items.length) {
+    return html`${head}<div class="card empty">${icon(poster ? 'poster' : 'slides')}<p>${poster ? L('아직 포스터가 없습니다') : L('아직 발표 자료가 없습니다')}</p>
+      <p class="muted">${poster ? L('논문 작업의 메시지 칸에 "A0 포스터 만들어 주세요" 라고 보내거나, 새 포스터로 지시하세요.')
+        : L('논문 작업의 메시지 칸에 "학회 15분 발표 자료 만들어 주세요" 라고 보내거나, 새 발표 자료로 지시하세요.')}</p>
+      <p><a href="${newHref(route)}">${poster ? L('새 포스터') : L('새 발표 자료')}</a> · <a href="#/guide/s9">${L('사용 방법')}</a></p></div>`;
+  }
+  const [tid, fid] = rest;
+  const sel = items.find((a) => a.task_id === tid && a.id === fid) || items[0];
+  return html`${head}
+    <div class="review-layout">
+      <aside class="card review-list">${items.map((a) => deckListItem(a, sel, route))}</aside>
+      <div style="min-width:0">${deckDetail(sel, poster)}</div>
+    </div>`;
+}
+
+async function viewVisuals({ rest }) {
+  const idx = state.index;
+  const head = html`<div class="page-head"><div><h1>${L('시각화§메뉴')}</h1><p class="sub">${L('긴 논문 · 문서를 짜임새 있는 요약과 도식(모식도)으로 — /visualize-doc 스킬이 만든 결과물을 작업별로 봅니다')}</p></div>
+    <a class="btn btn-primary" href="${newHref('visuals')}">${icon('plus')} ${L('새 시각화')}</a></div>`;
+  const byTask = new Map();
+  idx.artifacts.filter((a) => a.category === 'visual').forEach((a) => {
+    if (!byTask.has(a.task_id)) byTask.set(a.task_id, []);
+    byTask.get(a.task_id).push(a);
+  });
+  const groups = [...byTask.entries()].map(([tid, arts]) => ({ tid, arts: arts.sort(newestFirst), title: arts[0].task_title }))
+    .sort((a, b) => newestFirst(a.arts[0], b.arts[0]));
+  if (!groups.length) {
+    return html`${head}<div class="card empty">${icon('visual')}<p>${L('아직 시각화가 없습니다')}</p>
+      <p class="muted">${L('논문 · 문서 리뷰 작업의 메시지 칸에서 시각화 요청을 보내면, AI 가 요약과 도식을 만들어 여기에 모읍니다.')}</p>
+      <p><a href="${newHref('visuals')}">${L('새 시각화')}</a> · <a href="#/guide/s9">${L('사용 방법')}</a></p></div>`;
+  }
+  const g = groups.find((x) => x.tid === rest[0]) || groups[0];
+  await loadTask(g.tid); // 요약 리포트를 화면 안에서 열려면 작업 상세가 필요 (mountArtifact)
+  const figs = g.arts.filter((a) => a.kind === 'image' && a.path).sort((a, b) => tsNum(a.created_at) - tsNum(b.created_at));
+  const docs = g.arts.filter((a) => !(a.kind === 'image' && a.path));
+  const report = docs.find((a) => a.kind === 'markdown') || docs.find((a) => a.kind === 'pdf');
+  return html`${head}
+    <div class="review-layout">
+      <aside class="card review-list">${groups.map((x) => html`<a class="review-item ${x === g ? 'active' : ''}" href="#/visuals/${x.tid}">
+        <div class="title">${x.title}</div>
+        <div class="meta"><span>${x.tid}</span><span>${L('요약 {d}개 · 도식 {f}개', { d: x.arts.filter((a) => !(a.kind === 'image' && a.path)).length, f: x.arts.filter((a) => a.kind === 'image' && a.path).length })}</span>${ago(x.arts[0].updated_at || x.arts[0].created_at)}</div>
+      </a>`)}</aside>
+      <div style="min-width:0;display:flex;flex-direction:column;gap:16px">
+        <section class="card visual-panel">
+          <div class="card-head"><h2>${icon('visual')} <a href="#/task/${g.tid}">${g.tid} · ${g.title}</a></h2></div>
+          <div class="card-body">
+            ${docs.length ? html`<div class="vp-docs">${docs.map((a) => html`<a class="btn btn-sm" href="#/artifact/${a.task_id}/${a.id}">${icon(pick(ART_KIND, a.kind, 'file').icon)} ${a.title}${a.version > 1 ? html` <span class="badge tone-accent">v${a.version}</span>` : ''}</a>`)}</div>` : ''}
+            ${figs.length ? html`<div class="vp-figs">${figs.map((a) => html`<a class="vp-fig" href="#/artifact/${a.task_id}/${a.id}" title="${a.title}"><img src="${artifactUrl(a.task_id, a)}" alt="${a.title}" loading="lazy"><span>${a.title}${a.version > 1 ? html` <span class="badge tone-accent">v${a.version}</span>` : ''}</span></a>`)}</div>` : ''}
+          </div>
+        </section>
+        ${report ? html`<section class="card"><div class="card-head"><h2>${icon('file-text')} ${report.title}</h2><a class="muted" href="#/artifact/${report.task_id}/${report.id}">${L('결과물 화면 · 수정 요청')}</a></div>
+          <div data-av="${report.task_id}/${report.id}"></div></section>` : ''}
+      </div>
+    </div>`;
+}
+
 // ---------------------------------------------------------------- 브레인스토밍
 // 아이디어 노트(문서 결과물)를 읽고, AI 가 올린 선택지(--choices "I1=…")에서 이어갈 아이디어를 고르고,
 // 의견을 보내고, 고른 아이디어로 새 작업을 지시하는 곳
@@ -2368,7 +2495,7 @@ function viewNewTask({ q = {} } = {}) {
     <div class="page-head"><div><h1>${L('새 작업 지시')}</h1><p class="sub">${L('AI 에이전트에게 맡길 작업을 적어주세요. 에이전트는 진행 상황을 기록하고, 확인이 필요하면 알림으로 요청합니다.')}</p></div></div>
     ${state.mode !== 'live' ? html`<div class="alert alert-info">${icon('info')}<div class="alert-body"><b>${L('정적 모드')}</b><p>${L('등록을 누르면 담당 AI 세션에 붙여넣을 지시문이 만들어집니다.')}</p></div></div>` : ''}
     <form id="new-task-form" class="card card-pad" style="max-width:820px" autocomplete="off">
-      <label class="field"><span>${L('작업 제목')} *</span><input type="text" name="title" required maxlength="200" placeholder="${L('예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성')}"></label>
+      <label class="field"><span>${L('작업 제목')} *</span><input type="text" name="title" required maxlength="200" value="${q.title || ''}" placeholder="${L('예: 논문 4장 실험 결과 그림 정리 및 LaTeX 표 작성')}"></label>
       <div class="field-row">
         <label class="field"><span>${L('작업 유형')}</span><select name="type">${Object.entries(TYPES).map(([k, v]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${v.label}</option>`)}</select></label>
         <label class="field"><span>${L('담당 AI')}</span><select name="agent">${agentOptions()}</select><small>${L('이 AI 만 이 작업을 가져갑니다')}</small></label>
@@ -2394,7 +2521,7 @@ function viewNewTask({ q = {} } = {}) {
         <div class="rel-chips" data-rel-chips ${rel.length ? '' : raw('hidden')}>${rel.map((id) => relChip(id))}</div>
         <small>${L('목록에서 여러 개를 차례로 고르거나 작업 번호를 직접 적으세요 (쉼표 · ; · 띄어쓰기로 구분, 3 = T-0003). 예: 논문에 쓸 데이터 분석이라면 그 논문 작업을 고르세요 — 논문 작성 화면에 연결되어 표시됩니다.')}</small>
       </div>
-      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}"></textarea></label>
+      <label class="field"><span>${L('지시 내용')}</span><textarea name="instruction" rows="9" placeholder="${L('무엇을, 어떤 기준으로 해야 하는지 구체적으로 적어주세요. (markdown 지원)\n\n- 목표:\n- 참고 자료:\n- 완료 기준:\n- 승인이 필요한 시점:')}">${q.instruction || ''}</textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <a class="btn btn-ghost" href="#/tasks">${L('취소')}</a>
         <button class="btn btn-primary" type="submit">${icon('send')} ${state.mode === 'live' ? L('작업 지시 등록') : L('지시문 만들기')}</button>

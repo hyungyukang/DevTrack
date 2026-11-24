@@ -112,7 +112,10 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   SVG 는 svgBlip + PNG 대체 — 같은 이름 .png > Chrome > 투명 그림), 같은 계산으로 HTML 미리보기 → Chrome 으로 PDF · PNG.
   글자 넘침 · 작은 글자 · 그림 해상도 · 포스터 단 채움은 `_check` 가 어림한다 (`svgcheck.text_width`). 결과물 종류 `pptx` → 웹 `viewers.js` 가 같은 이름의
   PDF 결과물을 미리보기로 붙인다 (app.js `mountArtifact` 의 `previewPdf`). `Store.task_figures` (`devtrack doc --figures`) 는 작업 · 연결된 작업의 그림.
-  데모 T-0005 의 발표 자료 · 포스터는 `write_pptx(svg_fallback=False)` 로 Chrome 없이 만든다
+  데모 T-0005 의 발표 자료 · 포스터는 `write_pptx(svg_fallback=False)` 로 Chrome 없이 만든다.
+  메뉴 **발표 자료** · **포스터** (`#/slides` · `#/posters`, app.js `viewDecks`) 는 pptx 결과물을 `pptx.poster`(`Store._pptx_meta` · `pptx_info` —
+  한 장이고 긴 변 `POSTER_MIN_MM` 이상)로 나누고 같은 이름 PDF 를 미리보기로, **시각화** (`#/visuals`, `viewVisuals`) 는 분류 visual 을 작업별로.
+  새로 만들기는 `newHref` 가 새 작업 지시에 `?title=` · `?instruction=` (스킬 호출)을 채운다
 - 코드 리뷰: `Store.set_review`(검토 항목 R1… 은 같은 ID 끼리 합침) · 승인 요청의 `choices`/`selected`(웹 체크박스 선택). `integrations/claude-skills/` 는 이를 쓰는 `/review-pr` · `/review-doc` 스킬 (사용자가 `~/.claude/skills` 로 복사해 설치)
 - 자동 갱신: `poll`(10초 · 탭으로 돌아올 때)이 바뀐 화면을 `render({auto})` 로 다시 그린다. 입력 중(`isBusy` — 입력 칸 포커스 · 누르는 중 ·
   `api` 쓰기 중 · 승인 선택지 · 새 작업 폼)이면 `deferRender` 로 미루고 입력 칸에서 나오면 `applyPending`. 써 두기만 한 글은 같은 화면이면

@@ -484,6 +484,11 @@ Use the buttons at the top right of the task detail page.
    - A **preview PDF** with the same name is posted too and shows on the web (when headless Chrome is available; line breaks can differ slightly from
      PowerPoint). For a print PDF, open the .pptx in PowerPoint and export it.
    - In the chat, say `/make-slides T-0005 conference 15 min` or `/make-poster T-0005 A0 portrait` (install the skills in [step 5-2](#/guide/s5-2)).
+   - The **Slides** and **Posters** menus on the left gather them from all tasks: pick one in the list to see its preview PDF and **Download PowerPoint**.
+     A one-slide large page (long side 500 mm or more) counts as a poster, everything else as slides. **New slides** and **New poster** at the top open
+     New task with the skill call (`/make-slides …`) filled in; pick the paper task as a related task and send it.
+   - The **Visualizer** menu gathers the `/visualize-doc` results (summaries and diagrams) by task and shows the diagrams with the summary report
+     ([Document review](#/guide/s9), item 5).
 
 ### Document review
 
