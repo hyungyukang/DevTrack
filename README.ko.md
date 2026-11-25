@@ -103,6 +103,7 @@ Claude · Codex 등 AI 에이전트가 수행하는 작업(코드 개발, 코드
 | `devtrack pptx` | 설명 JSON 으로 편집 가능한 PowerPoint(발표 자료 · 포스터)를 표준 라이브러리만으로 만들고 글자 넘침 점검 · 미리보기 PDF/PNG — `/make-slides` · `/make-poster` 가 씀 |
 | `devtrack doc` · `devtrack svgcheck` | 작업이 다루는 문서 파일 경로 · SVG 도식 점검(실행 코드, 넘치거나 겹친 글자) + PNG 미리보기 — `/visualize-doc` 이 씀 |
 | `docs/AGENT_PROTOCOL.md` | 에이전트가 따를 기록 규칙 + CLAUDE.md 에 넣을 문구 |
+| `docs/AGENT_QUICK.md` | 에이전트가 먼저 읽는 짧은 규칙 (`devtrack rules`) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | 코드 리뷰 · 문서 리뷰 리포트 양식 (일반 사용자도 읽기 쉬운 구성) |
 | `integrations/claude-skills/` | DevTrack 에 기록하는 Claude Code 스킬 (`/review-pr`, `/review-doc`, `/visualize-doc`, `/write-paper`, `/make-slides`, `/make-poster`) |
 
@@ -211,6 +212,7 @@ devtrack inbox                              # 웹에서 온 새 지시 · 메시
 | `paper` | 논문 작업의 원고 폴더(`tasks/<작업 번호>/paper`: 최신 `.tex` · `.bib` 와 원고가 부르는 그림) 다시 만들기, LaTeX 가 찾지 못할 그림(확장자가 다름 · 그림 결과물 없음) 확인. 원고 · 그림 결과물이 바뀔 때마다 저절로도 다시 만든다 |
 | `request` / `wait` / `apply` | 승인 요청 (`--commit` 이면 diff 자동 첨부, `--choices` 면 사용자가 웹에서 항목을 체크해 고름) / 결정 대기 / 승인된 커밋 실행 |
 | `withdraw` | 결정 전인 승인 요청 거두기 (예: 변경을 더해 커밋을 다시 요청할 때) |
+| `rules` | 에이전트 규칙: 짧은 규칙(`docs/AGENT_QUICK.md`), 주제를 주면 `docs/AGENT_PROTOCOL.md` 의 그 절만 |
 | `decide` / `comment` | 사용자 결정(`--select R1 R3`) · 메시지 기록 (`--artifact F-ID` 는 결과물 하나에 대한 메시지, 정적 모드에서 에이전트가 대신 기록) |
 | `inbox` | 처리할 사용자 입력 — 내게 배정된 작업만 (`--ack` 로 처리 완료 표시, `--wait` 로 새 입력이 올 때까지 대기 — 에이전트가 백그라운드로 실행해 두면 웹 지시에 바로 반응, `--all-agents` 모든 AI, `--task` 한 작업만, `--any-model` 다른 모델로 정한 작업까지) |
 | `hook` | Claude Code · Codex 의 PreToolUse 훅 — 그 세션이 맡은 작업을 사용자가 완료로 처리 · 취소 · 삭제했으면 다음 도구 실행을 막고 멈추게 함. 훅에는 항상 0 으로 끝나는 `bin/devtrack-hook` 을 건다 (설정: 웹의 사용 방법 5-4 · 11단계 ⑤) |

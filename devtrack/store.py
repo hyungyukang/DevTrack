@@ -12,6 +12,7 @@
 
 import contextlib
 import datetime as _dt
+import glob
 import hashlib
 import json
 import os
@@ -2511,8 +2512,10 @@ class Store:
         return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
 
     def _seen_path(self, agent):
-        # 점(.)으로 시작하는 디렉토리는 publish / 웹 서버에서 제외된다
-        return os.path.join(self.root, ".agent", "inbox-seen-{}.json".format(_safe_name(agent or "agent")))
+        # 점(.)으로 시작하는 디렉토리는 publish / 웹 서버에서 제외된다. 'AI@대화' 는 대화별 기록 (새 입력 알림 줄)
+        name, _, sess = (agent or "agent").partition("@")
+        return os.path.join(self.root, ".agent", "inbox-seen-{}{}.json".format(
+            _safe_name(name), "@" + _safe_name(sess) if sess else ""))
 
     def inbox_seen(self, agent):
         try:
@@ -2520,6 +2523,16 @@ class Store:
                 return set(json.load(fh).get("seen", []))
         except (OSError, ValueError):
             return set()
+
+    def prune_seen(self, days=14):
+        """오래된 대화별 '본 것' 기록(inbox-seen-<AI>_<대화>.json — 새 입력 알림 줄용)을 지운다. 실패해도 조용히."""
+        limit = time.time() - days * 86400
+        for p in glob.glob(os.path.join(self.root, ".agent", "inbox-seen-*@*.json")):
+            try:
+                if os.path.getmtime(p) < limit:
+                    os.remove(p)
+            except OSError:
+                pass
 
     def mark_inbox_seen(self, agent, items, merge=False):
         """에이전트가 본 항목을 기록한다. 현재 받은 편지함에 남아 있는 항목만 유지.

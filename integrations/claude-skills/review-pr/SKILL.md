@@ -59,7 +59,7 @@ DevTrack is the user's progress dashboard (web): it shows what you are doing, th
         --plan "PR 정보 · 변경사항 수집" "코드 검토" "리뷰 리포트 작성" "코멘트할 항목 선택 (사용자)" "코멘트 초안 작성 · 게시 승인" "PR 에 게시")
   ```
   Store the TID as `devtrack_task` in the state file.
-- **Progress.** At each phase: `devtrack step <TID> "<지금 하는 일 — 작업 언어로, 쉬운 말>" -p <0-100>`; when plan step k is done: `devtrack check <TID> <k>`. Something that limits the review (no access to a file, parts of a huge PR skipped, CI logs unavailable) → `devtrack issue <TID> "<무엇이 문제인지>" -s medium`.
+- **Progress.** At each phase: `devtrack step <TID> "<지금 하는 일 — 작업 언어로, 쉬운 말>" -p <0-100>`; when plan step k is done: `devtrack check <TID> <k>`. Chain these in one Bash call (`devtrack check <TID> 1 && devtrack step <TID> "…" -p 35`), or with the next command — every separate call re-reads the whole conversation. Run `devtrack inbox` only when a devtrack output shows a `📬` line. Something that limits the review (no access to a file, parts of a huge PR skipped, CI logs unavailable) → `devtrack issue <TID> "<무엇이 문제인지>" -s medium`.
 - `devtrack` commands that create something print only the new ID on stdout. Do not pass `--data`; the user's DevTrack setting (`devtrack config` or `$DEVTRACK_DATA`) decides where records go.
 
 ## Phase 1: Collect
@@ -74,7 +74,7 @@ DevTrack is the user's progress dashboard (web): it shows what you are doing, th
 
 Large PRs (roughly > 50 files or > 3000 changed lines): say so, review the core logic first, and list what was skimmed or skipped (generated files, vendored code, lockfiles, test data, pure renames/moves).
 
-DevTrack: `devtrack step <TID> "PR 정보 수집: <N>개 파일, +A −D, CI <상태>" -p 10`, then `devtrack check <TID> 1`.
+DevTrack (one call): `devtrack step <TID> "PR 정보 수집: <N>개 파일, +A −D, CI <상태>" -p 10 && devtrack check <TID> 1`.
 
 ## Phase 2: Review
 

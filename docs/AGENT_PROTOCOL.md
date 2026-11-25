@@ -6,6 +6,9 @@ Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 
 > Claude 가 이 규칙을 항상 따르게 하려면 아래 [CLAUDE.md 에 넣을 내용](#claudemd-에-넣을-내용)을
 > `~/.claude/CLAUDE.md`(모든 프로젝트) 또는 작업 대상 저장소의 `CLAUDE.md` 에 붙여 넣으세요.
 > Codex 는 [AGENTS.md 에 넣을 내용](#agentsmd-에-넣을-내용-codex)을 `~/.codex/AGENTS.md` 에 넣습니다.
+>
+> **에이전트는 이 문서를 통째로 읽지 않는다.** 먼저 짧은 규칙(`devtrack rules` = [AGENT_QUICK.md](AGENT_QUICK.md), 약 2,400토큰)을 읽고,
+> 그 표에 있는 상황이 오면 이 문서의 그 절만 `devtrack rules <주제>` 로 읽는다 (주제 목록: `devtrack rules --list`). 이 문서 전체는 약 3만 토큰이다.
 
 ## 원칙
 
@@ -16,7 +19,8 @@ Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 
 4. **결과물은 웹에서 볼 수 있게 남긴다.** 그림, 리포트, 로그, 노트북, LaTeX, diff 등은 `artifact` 로 첨부한다.
    Markdown 리포트에 넣은 그림(`![그림 1](figs/fig1.png)`)은 **같은 파일 이름으로 그림도 결과물로 올린다** — 웹은 리포트 안의 상대 경로를
    같은 이름의 결과물(이 작업 > 연결된 작업)로 이어 보여 준다 (폴더는 상관없음, 올리지 않은 그림은 '그림 결과물이 없음' 으로 표시).
-5. **사용자 입력을 주기적으로 확인하고, 온 것은 묻지 않고 처리한다.** 작업 시작 시, 단계가 끝날 때마다 `devtrack inbox` 를 확인한다.
+5. **사용자 입력을 확인하고, 온 것은 묻지 않고 처리한다.** 작업을 시작할 때 `devtrack inbox` 를 확인하고, 그 뒤로는 devtrack 명령
+   출력에 `📬 DevTrack 새 입력 …건` 줄이 보일 때만 inbox 를 본다 (이 대화가 아직 보지 않은 입력이 있을 때만 붙는다 — 단계마다 따로 부르지 않는다).
    웹에서 온 새 작업 지시 · 메시지는 그 자체가 사용자의 지시다 — [다른 작업 중에 온 입력](#다른-작업-중에-온-입력).
 6. **내게 배정된 작업만 처리한다.** `devtrack inbox` 에는 나(`$DEVTRACK_AGENT`)에게 배정된 작업과 담당이 정해지지 않은 작업만 보인다.
    다른 AI 의 작업은 사용자가 맡으라고 할 때만 `devtrack start <TID> --take` 로 가져온다.
@@ -26,11 +30,15 @@ Claude · Codex 등 AI 에이전트가 사용자 대신 작업할 때 따르는 
 10. **작업 지시에 쓴 언어로 기록한다.** 작업 언어(작업을 만들 때 제목 · 지시의 언어, `devtrack new --lang` 으로 정할 수 있음)는
    `devtrack show` 의 `언어` 로 보이고, 영어 작업은 inbox · `start` 에 `→ 작업 언어: 영어` 가 붙는다. 단계 · 기록 · 문제 · 결과물(제목과 내용) ·
    리포트 · 승인 요청 · 인계 메모를 그 언어로 쓴다. DevTrack 이 자동으로 남기는 기록 문구도 그 언어로 남는다.
+11. **토큰을 아낀다.** AI 는 도구를 부를 때마다 대화 전체를 다시 읽는다 — 기록 명령만 따로 부른 호출이 작업 대화 비용의 12–18% 였다.
+   기록 명령(step · check · log · artifact)은 묶어서 한 번에 부르거나(`devtrack check $TID 2 && devtrack step $TID "…" -p 60`)
+   다음 작업 명령과 같은 호출로 부른다(`devtrack step $TID "테스트 중" -p 70 && pytest -q`). 다른 작업은 `show --brief` 부터,
+   규칙은 필요한 절만(`devtrack rules <주제>`) 읽는다.
 
 ## 작업 흐름
 
 ```bash
-# 0. 사용자 입력 확인 (웹에서 들어온 새 지시, 메시지, 승인 결정)
+# 0. 사용자 입력 확인 (웹에서 들어온 새 지시, 메시지, 승인 결정) — 시작할 때, 그 뒤로는 📬 줄이 보일 때
 devtrack inbox
 
 # 1. 작업 시작 (웹에서 지시된 작업이면 new 대신 start)
@@ -40,9 +48,8 @@ devtrack start T-0007 "지시 확인, 분석 시작"        # 대기(queued) 작
 devtrack link  T-0008 T-0005                         # 관련 작업 연결 (예: 이 분석 → 논문 작업)
 devtrack show  T-0005 --brief                        # 관련 작업은 상태 · 인계 메모부터 (전체 기록 대신)
 
-# 2. 진행 기록 — 지금 무엇을 하는지
-devtrack step $TID "hipify 변환 중 (커널 3개)" -p 30
-devtrack check $TID 1                                 # 계획 1단계 완료
+# 2. 진행 기록 — 지금 무엇을 하는지 (기록 명령은 묶어서, 또는 실제 작업 명령과 함께 한 번에)
+devtrack check $TID 1 && devtrack step $TID "hipify 변환 중 (커널 3개)" -p 30 && hipify-perl -inplace src/*.cu
 devtrack log $TID "빌드 성공, 경고 2개" -k success -d "상세 내용 (markdown)"
 
 # 3. 문제
@@ -531,8 +538,11 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
 ```markdown
 ## DevTrack 작업 기록
 - 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
-  규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
-- 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다.
+  세션에서 처음 DevTrack 작업을 할 때 `devtrack rules` (짧은 규칙)를 읽고, 상세 규칙은 필요한 절만 `devtrack rules <주제>` 로 읽는다.
+- 작업을 시작할 때 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 그 뒤로는 devtrack 명령 출력에
+  `📬 DevTrack 새 입력` 줄이 보일 때만 inbox 를 본다 (단계마다 따로 부르지 않는다).
+- 기록 명령(step · check · log · artifact)은 혼자 부르지 말고 묶어서 부른다 — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60`,
+  또는 다음 작업 명령과 같은 호출로 (명령마다 대화 전체를 다시 읽어 토큰이 든다).
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
@@ -578,9 +588,13 @@ inbox 의 새 작업 줄에 `· 끝나면 Codex 심사 (최대 3번)` 가 보이
 ## DevTrack 작업 기록 (Codex)
 - DevTrack 에서 나는 "Codex" 다. `devtrack` 은 환경 변수 `DEVTRACK_AGENT=Codex` 로 실행한다
   (~/.codex/config.toml 의 `shell_environment_policy` 에 설정해 두었으면 따로 붙이지 않는다).
-  `devtrack` 이 PATH 에 없으면 `<DevTrack 저장소>/bin/devtrack` 을 쓴다. 규칙: <DevTrack 저장소>/docs/AGENT_PROTOCOL.md
+  `devtrack` 이 PATH 에 없으면 `<DevTrack 저장소>/bin/devtrack` 을 쓴다.
+- 세션에서 처음 DevTrack 작업을 할 때 `devtrack rules` (짧은 규칙)를 읽고, 상세 규칙은 필요한 절만 `devtrack rules <주제>` 로 읽는다.
 - 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
-- 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 나에게 배정된 작업의 입력만 보인다.
+- 작업을 시작할 때 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다 (나에게 배정된 작업의 입력만 보인다). 그 뒤로는 devtrack 명령 출력에
+  `📬 DevTrack 새 입력` 줄이 보일 때만 inbox 를 본다 (단계마다 따로 부르지 않는다).
+- 기록 명령(step · check · log · artifact)은 혼자 부르지 말고 묶어서 부른다 — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60`,
+  또는 다음 작업 명령과 같은 호출로 (명령마다 대화 전체를 다시 읽어 토큰이 든다).
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.

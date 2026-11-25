@@ -83,7 +83,7 @@ DevTrack mode is on when `devtrack --version` succeeds.
   - `devtrack show <TID>` gives the instruction, plan, artifacts and messages.
   - For each linked task (`related`), read `devtrack show <R> --brief` first: status, key artifacts and the handoff note. Open reports and files only as needed.
   - Run `devtrack paper <TID>` to see the manuscript folder (`tasks/<TID>/paper/`) and any missing figures.
-- **Progress.** After each step: `devtrack step <TID> "..." -p <N>`, `devtrack check <TID> <n>`, then `devtrack inbox` for messages from the web.
+- **Progress.** After each step, in one Bash call: `devtrack check <TID> <n> && devtrack step <TID> "..." -p <N>` (or chain it with the next command). Run `devtrack inbox` only when a devtrack output shows a `📬` line.
   - Problems go to `devtrack issue`. Examples: a number in two sources that disagree, or a figure with no data.
   - Keep the handoff note current: `devtrack note <TID> -`.
 - **No DevTrack** (no `devtrack`): do the same steps on the files, and report in chat.

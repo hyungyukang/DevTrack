@@ -111,6 +111,7 @@ as is or upload it to Overleaf, and it moves with the records to another compute
 | `devtrack pptx` | Builds an editable PowerPoint (slides or a poster) from a JSON spec with the standard library, checks text overflow, and renders a preview PDF/PNG — used by `/make-slides` and `/make-poster` |
 | `devtrack doc` · `devtrack svgcheck` | Path of the document a task is about · check an SVG diagram (unsafe code, overflowing or overlapping text) with a PNG preview — used by `/visualize-doc` |
 | `docs/AGENT_PROTOCOL.md` | The rules agents follow when recording, and the text to put in CLAUDE.md (Korean) |
+| `docs/AGENT_QUICK.md` | The short rules agents read first (`devtrack rules`, Korean) |
 | `templates/review_report.md` · `templates/doc_review_report.md` | Report forms for code review and document review, readable by non-specialists |
 | `integrations/claude-skills/` | Claude Code skills that record in DevTrack (`/review-pr`, `/review-doc`, `/visualize-doc`, `/write-paper`, `/make-slides`, `/make-poster`) |
 
@@ -221,6 +222,7 @@ devtrack inbox                              # new instructions · messages · de
 | `paper` | Rebuild a paper task's manuscript folder (`tasks/<T-ID>/paper`: the latest `.tex` · `.bib` and the figures the manuscript loads) and list figures LaTeX would not find (wrong extension, no figure artifact). It is also rebuilt whenever a manuscript or figure artifact changes |
 | `request` / `wait` / `apply` | Approval request (`--commit` attaches the diff automatically, `--choices` lets the user tick items on the web) / wait for the decision / run an approved commit |
 | `withdraw` | Take back an approval request that is not decided yet (e.g. to add more changes and request the commit again) |
+| `rules` | Agent rules: the short rules (`docs/AGENT_QUICK.md`), or with a topic just that section of `docs/AGENT_PROTOCOL.md` |
 | `decide` / `comment` | Record a user decision (`--select R1 R3`) · message (`--artifact F-ID` for a message about one artifact; in static mode the agent records them for the user) |
 | `inbox` | User input to handle, for tasks assigned to me only (`--ack` marks it handled; `--wait` waits until new input arrives, so an agent that runs it in the background reacts to web instructions right away; `--all-agents` for all AIs; `--task` for one task; `--any-model` also for tasks set to another model) |
 | `hook` | PreToolUse hook for Claude Code · Codex: if the user marked the session's task as done, cancelled or deleted it, the next tool call is blocked so the agent stops. Always hook up `bin/devtrack-hook`, which always exits 0 (setup: Guide 5-4 and step 11 ⑤) |

@@ -85,8 +85,11 @@ Claude Code follows what is written in `~/.claude/CLAUDE.md` in every conversati
 ```markdown
 ## DevTrack work records
 - Record meaningful work (code changes, code reviews, document reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
-  Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
-- Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`.
+  The first time you do DevTrack work in a session, read `devtrack rules` (the short rules); read the detailed rules only section by section with `devtrack rules <topic>`.
+- When starting work, check user input (new instructions, messages, approval decisions) with `devtrack inbox`. After that, look at the inbox only when
+  a devtrack command's output shows a `📬 DevTrack 새 입력` line (do not call it after every step).
+- Do not run recording commands (step · check · log · artifact) on their own; chain them — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60` —
+  or put them in the same call as the next work command (every call re-reads the whole conversation, which costs tokens).
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
@@ -959,9 +962,13 @@ To have another AI take over a task, tell the AI that should take it: "take T-00
 ## DevTrack work records (Codex)
 - In DevTrack I am "Codex". Run `devtrack` with the environment variable `DEVTRACK_AGENT=Codex`
   (no need to add it if it is set in `shell_environment_policy` in ~/.codex/config.toml).
-  If `devtrack` is not on PATH, use `~/devtrack/bin/devtrack`. Rules: ~/devtrack/docs/AGENT_PROTOCOL.md
+  If `devtrack` is not on PATH, use `~/devtrack/bin/devtrack`.
+- The first time you do DevTrack work in a session, read `devtrack rules` (the short rules); read the detailed rules only section by section with `devtrack rules <topic>`.
 - Record meaningful work (code changes, code reviews, document reviews, data analysis, papers, visualization, model development, brainstorming) with `devtrack`. Do not record simple questions or explanations.
-- Before starting work and after each step, check user input (new instructions, messages, approval decisions) with `devtrack inbox`. Only input for tasks assigned to me is shown.
+- When starting work, check user input (new instructions, messages, approval decisions) with `devtrack inbox` (only input for tasks assigned to me is shown). After that, look at the inbox only when
+  a devtrack command's output shows a `📬 DevTrack 새 입력` line (do not call it after every step).
+- Do not run recording commands (step · check · log · artifact) on their own; chain them — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60` —
+  or put them in the same call as the next work command (every call re-reads the whole conversation, which costs tokens).
 - Act on new task instructions and messages (follow-up questions, research requests) from the inbox without asking the user again. If you are working on something else,
   handle messages after the current step, and new tasks in the order they arrived once the current task is finished or waiting for approval, then return to the original task.
   Record the answer to a message in its task (`devtrack log` · `devtrack artifact`) and mark it handled with `devtrack inbox --task <TID> --ack`. Commits, posts and the like still need approval.
@@ -1139,6 +1146,15 @@ With the English UI (**EN** at the top), the templates that New task, New slides
 **Where are the records, and how do I back them up?**
 Everything is in the records folder (see `devtrack config`; default `~/devtrack/data/`). Copying this folder is a backup.
 
+**Does DevTrack use more tokens? How do I save them?**
+The text DevTrack commands print is about 4% of the tokens in a work conversation. How you use it matters more, because Claude re-reads the whole conversation every time it calls a tool.
+- **Do not run many tasks in one long conversation.** When a waiting-mode conversation gets long, carrying it along alone costs about 26% more. When a task is done, open a new chat
+  and say "Wait for web instructions" again — the records, handoff notes and pending approvals are in DevTrack, so nothing is lost.
+- When you send many tasks from the web at once, `devtrack watch --claude` gives each task its own conversation.
+- Turn waiting mode off if you will be away for more than an hour. Waking after a long break writes the whole long conversation to the cache again.
+- On Claude's side the rules save tokens by themselves: it checks the inbox only when a `📬` line appears instead of after every step, chains recording commands,
+  and reads the short rules (`devtrack rules`) plus only the sections it needs. If your rule text from 5-1 is the old one, replace it with the new one.
+
 **Can Claude commit without my approval?**
 For DevTrack tasks, Claude commits only through approved requests (`devtrack apply`). If the actual change differs from the diff you approved, it refuses to run.
 However, if you directly say "commit it" in the chat, Claude does as asked.
@@ -1173,5 +1189,6 @@ Commands you use yourself:
 Commands Claude uses (for reference): `new` create a task · `step` what it is doing now · `issue` issue · `artifact` artifact · `review` review report · `text` text from a Word/PDF file ·
 `link` link tasks · `latex` compile LaTeX (records the PDF as a build) ·
 `request` approval request · `withdraw` take back a request not yet decided · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
+`rules` agent rules (the short rules; `rules <topic>` prints just that section of the detailed rules) ·
 `start --take` take over another AI's task · `note` handoff note · `show --brief` short view of another task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).

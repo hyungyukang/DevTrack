@@ -85,8 +85,11 @@ Claude Code 는 `~/.claude/CLAUDE.md` 에 적힌 내용을 모든 대화에서 �
 ```markdown
 ## DevTrack 작업 기록
 - 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
-  규칙: ~/devtrack/docs/AGENT_PROTOCOL.md
-- 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다.
+  세션에서 처음 DevTrack 작업을 할 때 `devtrack rules` (짧은 규칙)를 읽고, 상세 규칙은 필요한 절만 `devtrack rules <주제>` 로 읽는다.
+- 작업을 시작할 때 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 그 뒤로는 devtrack 명령 출력에
+  `📬 DevTrack 새 입력` 줄이 보일 때만 inbox 를 본다 (단계마다 따로 부르지 않는다).
+- 기록 명령(step · check · log · artifact)은 혼자 부르지 말고 묶어서 부른다 — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60`,
+  또는 다음 작업 명령과 같은 호출로 (명령마다 대화 전체를 다시 읽어 토큰이 든다).
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
@@ -953,9 +956,13 @@ Claude 와 Codex 를 함께 쓸 수 있습니다. 작업마다 **담당 AI** 를
 ## DevTrack 작업 기록 (Codex)
 - DevTrack 에서 나는 "Codex" 다. `devtrack` 은 환경 변수 `DEVTRACK_AGENT=Codex` 로 실행한다
   (~/.codex/config.toml 의 `shell_environment_policy` 에 설정해 두었으면 따로 붙이지 않는다).
-  `devtrack` 이 PATH 에 없으면 `~/devtrack/bin/devtrack` 을 쓴다. 규칙: ~/devtrack/docs/AGENT_PROTOCOL.md
+  `devtrack` 이 PATH 에 없으면 `~/devtrack/bin/devtrack` 을 쓴다.
+- 세션에서 처음 DevTrack 작업을 할 때 `devtrack rules` (짧은 규칙)를 읽고, 상세 규칙은 필요한 절만 `devtrack rules <주제>` 로 읽는다.
 - 의미 있는 작업(코드 변경, 코드 리뷰, 문서 리뷰, 데이터 분석, 논문, 시각화, 모델 개발, 브레인스토밍)은 `devtrack` 으로 기록한다. 간단한 질문 · 설명은 기록하지 않는다.
-- 작업 시작 전과 각 단계 후 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다. 나에게 배정된 작업의 입력만 보인다.
+- 작업을 시작할 때 `devtrack inbox` 로 사용자 입력(새 지시, 메시지, 승인 결정)을 확인한다 (나에게 배정된 작업의 입력만 보인다). 그 뒤로는 devtrack 명령 출력에
+  `📬 DevTrack 새 입력` 줄이 보일 때만 inbox 를 본다 (단계마다 따로 부르지 않는다).
+- 기록 명령(step · check · log · artifact)은 혼자 부르지 말고 묶어서 부른다 — `devtrack check <TID> 2 && devtrack step <TID> "…" -p 60`,
+  또는 다음 작업 명령과 같은 호출로 (명령마다 대화 전체를 다시 읽어 토큰이 든다).
 - inbox 의 새 작업 지시 · 메시지(추가 질문 · 조사 요청)는 사용자에게 다시 묻지 않고 진행한다. 다른 작업 중이면 메시지는 지금 단계를 마친 뒤,
   새 작업은 지금 작업이 끝나거나 승인 대기가 되면 온 순서대로 처리하고 원래 작업으로 돌아온다. 메시지의 답은 그 작업에 기록하고
   (`devtrack log` · `devtrack artifact`) `devtrack inbox --task <TID> --ack` 로 처리 표시한다. 커밋 · 게시 등은 그대로 승인을 받는다.
@@ -1132,6 +1139,15 @@ DevTrack 이 자동으로 남기는 기록("상태 변경" · "결과물 추가"
 **기록은 어디에 있고, 백업은 어떻게 하나요?**
 기록 폴더(`devtrack config` 로 확인, 기본 `~/devtrack/data/`)가 전부입니다. 이 폴더를 복사하면 백업이 됩니다.
 
+**DevTrack 을 쓰면 토큰이 더 드나요? 아끼려면?**
+DevTrack 명령이 출력하는 글은 작업 대화 토큰의 4% 정도입니다. 더 큰 것은 쓰는 방식입니다 — Claude 는 도구를 부를 때마다 대화 전체를 다시 읽기 때문입니다.
+- **한 대화에서 여러 작업을 오래 이어 하지 않기.** 대기 모드 대화가 길어지면 이어 한 몫만 26% 정도 더 듭니다. 작업이 끝나면 새 채팅을 열고 다시
+  "웹 지시 기다려줘" 라고 하세요 — 기록 · 인계 메모 · 승인 대기가 DevTrack 에 있어 그대로 이어집니다.
+- 웹에서 여러 작업을 몰아서 지시할 때는 `devtrack watch --claude` 가 작업마다 대화를 나눠 줍니다.
+- 1시간 넘게 자리를 비우면 대기 모드를 꺼 두세요. 오래 쉰 뒤 깨어나면 긴 대화 전체를 캐시에 다시 씁니다.
+- Claude 쪽은 규칙이 알아서 아낍니다: 단계마다 inbox 를 부르지 않고 `📬` 알림 줄이 보일 때만 보고, 기록 명령은 묶어서 부르고,
+  규칙 문서는 짧은 규칙(`devtrack rules`)과 필요한 절만 읽습니다. 5-1 의 규칙 문구가 예전 것이면 새 문구로 바꿔 주세요.
+
 **Claude 가 내 승인 없이 커밋할 수 있나요?**
 DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 승인한 diff 와 실제 변경이 다르면 실행을 거부합니다.
 다만 채팅에서 직접 "커밋해줘" 라고 지시하면 그대로 따릅니다.
@@ -1166,5 +1182,6 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 일 · `issue` 문제 · `artifact` 결과물 · `review` 리뷰 리포트 · `text` Word · PDF 의 글자 뽑기 ·
 `link` 작업 연결 · `latex` LaTeX 컴파일 (PDF 를 빌드로 기록) ·
 `request` 승인 요청 · `withdraw` 결정 전인 요청 거두기 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
+`rules` 에이전트 규칙 (짧은 규칙, `rules <주제>` 는 상세 규칙의 그 절만) ·
 `start --take` 다른 AI 의 작업 가져오기 · `note` 인계 메모 · `show --brief` 다른 작업의 요약 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
 전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.

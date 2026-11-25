@@ -43,7 +43,7 @@ DevTrack mode is on when `devtrack --version` succeeds and `no-devtrack` was not
   ```
   Save `devtrack_task` in `state.json`.
 - **Original.** `devtrack artifact <TID> <path> --source -n "검토할 문서: <file name>"` (on a re-review add `--replace` so it becomes a new version). For a LaTeX project upload the main `.tex` (and figures under the names `\includegraphics` uses, so the web preview can show them).
-- After each step below: `devtrack step <TID> "..." -p <N>`, `devtrack check <TID> <n>`, and `devtrack inbox` for messages from the web. A problem that blocks the review (unreadable file, missing pages) → `devtrack issue`.
+- After each step below, in one Bash call: `devtrack check <TID> <n> && devtrack step <TID> "..." -p <N>` (or chain it with the next command). Run `devtrack inbox` only when a devtrack output shows a `📬` line. A problem that blocks the review (unreadable file, missing pages) → `devtrack issue`.
 
 ## Step 1: Read the whole document
 

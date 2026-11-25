@@ -2,7 +2,8 @@
 
 AI 에이전트의 작업 진행/문제/결과물을 기록하는 CLI(`devtrack/`)와, 이를 보여주고 승인받는 웹(`web/`)으로 구성된다.
 사용자 문서는 README.md(영어 — GitHub 첫 화면) · README.ko.md(한국어판 — README.md 를 고치면 함께 고친다)와 web/guide.md(웹의 `사용 방법` 화면 — 기능을 바꾸면 함께 갱신) · web/guide.en.md(영어 화면의 같은 문서 —
-guide.md 를 고치면 같은 절 번호로 함께 고친다), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md.
+guide.md 를 고치면 같은 절 번호로 함께 고친다), 에이전트 기록 규칙은 docs/AGENT_PROTOCOL.md (에이전트가 먼저 읽는 짧은 규칙은
+docs/AGENT_QUICK.md = `devtrack rules` — 상세 규칙의 절을 바꾸면 `cli.RULE_TOPICS` 와 짧은 규칙의 '더 읽을 때' 표도 맞출 것).
 README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.ko.png`(한국어 화면)는 데모 대시보드에 번호 표시를 얹은 캡처다 — 대시보드 모양이 크게 바뀌면 다시 찍는다.
 
 ## 반드시 지킬 제약
@@ -31,6 +32,10 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   결과물 제목, 심사 · 답변 기록 `RECORD_KO` · `RECORD_EN`, 빌드 결과물 이유 `gitops.excluded_text(en=)`)는 작업 언어로 직접 쓴다 — 한쪽을 고치면 다른 쪽도.
   `devtrack withdraw <T> <A>` 는 결정 전인 승인 요청을 요청한 쪽이 거둔다 (상태 `withdrawn`, 변경을 더해 커밋을 다시 요청할 때)
   웹의 화면 틀(새로 만들기 · 유형 틀 `DECK_NEW` · 시각화 요청 · 복사 문구)은 화면 언어를 따른다 — AI 에게 보내는 정해진 형식의 메시지만 한국어
+- 토큰 절약 (T-0085 측정 → T-0086): AI 가 단계마다 inbox 를 부르지 않게, 작업 중 명령(`TASK_WORK_CMDS` · `NOTICE_CMDS`)의 끝에
+  `_inbox_notice` 가 이 대화가 아직 안 본 입력이 있을 때만 `📬 DevTrack 새 입력 …` 한 줄을 **표준 오류로** 붙인다 (`AID=$(…)` 를 깨지 않게,
+  어떤 오류도 조용히, `DEVTRACK_NO_NOTICE`). '본 것' 은 AI 단위(`inbox-seen-<AI>.json`, `inbox --wait` 용)와 대화 단위(`<AI>@<대화>`, `_session_seen`,
+  14일 지나면 `prune_seen`)를 함께 적는다 — inbox · `inbox --wait` 가 둘 다 적고, 알림은 대화 단위로 본다
 - `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화 —
   기록 폴더가 곧 공개 폴더의 `data/` 이면(`publish_is_root`, 심볼릭 링크 · 다른 경로 이름도 `same_dir` 로 판단) 복사 · 정리를 건너뜀)
 - `devtrack/cli.py` argparse CLI, `devtrack/server.py` 로컬 서버(정적 + POST API), `devtrack/gitops.py` diff/commit/push, `devtrack/demo.py` 예시 데이터

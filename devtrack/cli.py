@@ -1134,7 +1134,24 @@ class _Listening(object):
         return False
 
 
-def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_tick=None, keep=None):
+def _session_seen(args):
+    """이 대화의 '본 것' 기록 이름 ('Claude@<대화 ID>') — 대화를 모르면 None. 같은 AI 의 여러 대화가 서로의 알림을 먹지 않게."""
+    sid = _session_id()
+    return "{}@{}".format(args.author, sid[:36]) if sid else None
+
+
+def _mark_seen(store, args, items, merge):
+    store.mark_inbox_seen(args.author, items, merge=merge)
+    name = _session_seen(args)
+    if name:
+        try:
+            store.mark_inbox_seen(name, items, merge=True)
+            store.prune_seen()
+        except (OSError, DevTrackError):
+            pass
+
+
+def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_tick=None, keep=None, also=None):
     """seen_name 기준으로 아직 보지 않은 입력이 생길 때까지 기다려 그 항목들을 돌려준다 (시간 초과면 None).
     keep: 받은 편지함 항목 중 기다릴 것만 남기는 함수 (예: 모델 지정이 다른 작업 빼기)."""
     deadline = time.time() + timeout if timeout else None
@@ -1152,6 +1169,8 @@ def _wait_for_new(store, agent, seen_name, task=None, timeout=0, interval=3, on_
             new = [it for it in items if store.inbox_key(it) not in seen]
             if new:
                 store.mark_inbox_seen(seen_name, items, merge=bool(task))
+                if also:
+                    store.mark_inbox_seen(also, items, merge=True)
                 return new
         if deadline and time.time() >= deadline:
             return None
@@ -1185,7 +1204,7 @@ def _inbox_wait(store, args):
     with _Listening(store, "wait", agent, task=task, seen=args.author, model=me and me[0],
                     effort=me and me[1]) as listening:
         new = _wait_for_new(store, agent, args.author, task=task, timeout=args.timeout, interval=args.interval,
-                            on_tick=_with_mailbox(store, listening.tick, _info), keep=keep)
+                            on_tick=_with_mailbox(store, listening.tick, _info), keep=keep, also=_session_seen(args))
     if new is None:
         _out(args, [])
         _info("시간 초과: 새 입력이 없습니다")
@@ -1209,7 +1228,7 @@ def cmd_inbox(store, args):
     held = held + own
     if args.ack:
         store.ack_inbox(items)
-    store.mark_inbox_seen(args.author, items, merge=bool(task))
+    _mark_seen(store, args, items, merge=bool(task))
     if args.json:
         _out(args, items)
         return 0
@@ -1224,6 +1243,113 @@ def cmd_inbox(store, args):
         _print_inbox(items, hint=not args.ack)
     for line in _held_lines([x for x in held if x not in own], me) + _own_review_lines(own):
         print(line)
+    return 0
+
+
+# ---------------------------------------------------------------------------- 새 입력 알림 줄 (토큰 절약)
+# 단계마다 devtrack inbox 를 따로 부르면 그때마다 AI 가 대화 전체를 다시 읽는다 (T-0085 측정: 작업 대화 비용의 12–18%).
+# 대신 작업 중에 쓰는 명령의 끝에, 이 대화가 아직 보지 않은 입력이 있을 때만 한 줄을 붙인다 → 그 줄이 보이면 inbox.
+NOTICE_CMDS = ("new", "show", "note", "list", "send", "withdraw", "paper", "doc", "rules")
+INBOX_TYPE_WORDS = (("new_task", "새 작업"), ("comment", "메시지"), ("agent_message", "AI 메시지"), ("decision", "결정"),
+                    ("cancelled", "취소"), ("completed", "완료 처리"), ("deleted", "삭제"))
+
+
+def _inbox_notice(store, args):
+    """아직 보지 않은 새 입력이 있으면 '📬 …' 한 줄 (표준 오류 — AID=$(devtrack request …) 같은 출력 받기를 깨지 않게).
+    보조 기능이라 어떤 오류도 조용히 넘긴다. DEVTRACK_NO_NOTICE=1 이면 끈다."""
+    if os.environ.get("DEVTRACK_NO_NOTICE"):
+        return
+    try:
+        me = _session_me(args)
+        items = store.inbox(agent=args.author, task=os.environ.get("DEVTRACK_TASK") or None)
+        items = _split_by_session(store, _split_by_model(items, me)[0])[0]
+        if not items:
+            return
+        seen = store.inbox_seen(_session_seen(args) or args.author)
+        new = [it for it in items if store.inbox_key(it) not in seen]
+        if not new:
+            return
+        counts = ["{} {}".format(word, n) for word, n in
+                  ((w, sum(1 for it in new if it["type"] == k)) for k, w in INBOX_TYPE_WORDS) if n]
+        ids = []
+        for it in new:
+            if it["task_id"] not in ids:
+                ids.append(it["task_id"])
+        sys.stdout.flush()
+        sys.stderr.write("📬 DevTrack 새 입력 {}건 ({} — {}{}) → devtrack inbox 로 확인하세요\n".format(
+            len(new), " · ".join(counts), ", ".join(ids[:4]), " 외" if len(ids) > 4 else ""))
+    except Exception:  # noqa — 알림 줄 때문에 본래 명령이 실패하면 안 된다
+        pass
+
+
+# ---------------------------------------------------------------------------- 짧은 규칙 · 절별로 읽기 (devtrack rules)
+DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs")
+# 주제 이름 → AGENT_PROTOCOL.md 의 절 제목에 든 말 (짧은 규칙의 '더 읽을 때' 표와 맞출 것)
+RULE_TOPICS = [
+    ("principles", "원칙", "원칙 전체"),
+    ("flow", "작업 흐름", "기본 명령 순서 (시작 → 기록 → 커밋 승인 → 완료)"),
+    ("note", "인계 메모", "인계 메모 쓰는 법 · 다른 작업 메모 읽기"),
+    ("types", "작업 유형별 요령", "분석 · 시뮬레이션 · 논문 등 유형별 요령"),
+    ("code-review", "코드 리뷰", "PR 리뷰 리포트 · 검토 항목 · 코멘트 게시"),
+    ("brainstorm", "브레인스토밍", "아이디어 노트 · 고르게 하기"),
+    ("doc-review", "문서 리뷰", "문서(PDF · Word · LaTeX) 리뷰"),
+    ("visual", "문서 시각화", "요약 + 도식"),
+    ("paper", "논문 작성 · 발표 자료 · 포스터", "논문 · 발표 자료 · 포스터 · 원고 폴더"),
+    ("approvals", "승인 요청을 올려야 하는 때", "승인이 필요한 일"),
+    ("wait", "웹 지시를 바로 받기", "대기 모드 (inbox --wait)"),
+    ("inputs", "다른 작업 중에 온 입력", "작업 중에 온 새 작업 · 메시지 · 결정 처리"),
+    ("agents", "여러 AI 함께 쓰기", "담당 AI · 모델 지정 · devtrack watch"),
+    ("review-loop", "AI 끼리 리뷰 반복", "코드 리뷰 반복 · 논문 심사 반복 · AI 메시지"),
+    ("decisions", "사용자 결정이 도착하는 방법", "결정 받기 · 작업 도중 취소 · 삭제 (hook)"),
+    ("claude-md", "에 넣을 내용", "CLAUDE.md · AGENTS.md 에 넣을 문구"),
+]
+
+
+def _md_sections(text):
+    """Markdown 의 ## · ### 절 → [(수준, 제목, 시작 줄, 끝 줄)] (코드 블록 안의 # 은 제목이 아님)."""
+    lines = text.splitlines()
+    heads, fence = [], False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+        elif not fence and re.match(r"^#{2,3} ", line):
+            heads.append((len(line.split(" ")[0]), line.lstrip("#").strip(), i))
+    out = []
+    for k, (lv, title, i) in enumerate(heads):
+        end = next((j for lv2, _, j in heads[k + 1:] if lv2 <= lv), len(lines))
+        out.append((lv, title, i, end))
+    return lines, out
+
+
+def cmd_rules(store, args):
+    """에이전트 규칙: 기본은 짧은 규칙(AGENT_QUICK.md), 주제를 주면 상세 규칙(AGENT_PROTOCOL.md)의 그 절만."""
+    full = os.path.join(DOCS_DIR, "AGENT_PROTOCOL.md")
+    if args.list or (args.topic and args.topic in ("list", "목록")):
+        text = open(full, encoding="utf-8").read()
+        lines, secs = _md_sections(text)
+        print("devtrack rules <주제> — 상세 규칙(docs/AGENT_PROTOCOL.md)에서 그 절만 출력:")
+        for name, key, desc in RULE_TOPICS:
+            sec = next((s for s in secs if key in s[1]), None)
+            size = len("\n".join(lines[sec[2]:sec[3]])) if sec else 0
+            print("  {:<12} {} (약 {:,}자)".format(name, desc, size))
+        print("주제 대신 절 제목의 일부를 써도 됩니다 (예: devtrack rules 심사). 전체: {}".format(full))
+        return 0
+    if not args.topic:
+        print(open(os.path.join(DOCS_DIR, "AGENT_QUICK.md"), encoding="utf-8").read().rstrip())
+        return 0
+    text = open(full, encoding="utf-8").read()
+    lines, secs = _md_sections(text)
+    key = next((k for n, k, _ in RULE_TOPICS if n == args.topic.lower()), args.topic)
+    hits = [s for s in secs if key.lower() in s[1].lower()]
+    if not hits:
+        raise DevTrackError("'{}' 에 맞는 절이 없습니다 — 주제 목록: devtrack rules --list".format(args.topic))
+    first = hits[0]
+    hits = [first] + [s for s in hits[1:] if not (first[2] <= s[2] < first[3])]  # 앞 절에 들어 있는 하위 절은 빼기
+    for lv, title, a, b in hits[:3]:
+        print("\n".join(lines[a:b]).rstrip())
+        print()
+    if len(hits) > 3:
+        _info("맞는 절이 {}개 더 있습니다 — 더 구체적인 말로 찾으세요 (devtrack rules --list)".format(len(hits) - 3))
     return 0
 
 
@@ -1467,8 +1593,8 @@ def find_claude():
 def _watch_prompt(agent, tid, items):
     lines = [
         "DevTrack 에 {} 에게 온 새 입력이 있습니다. (devtrack watch 가 이 세션을 실행했습니다)".format(agent),
-        "이번 실행에서는 {} 작업만 처리하세요. 기록 규칙은 AGENTS.md · CLAUDE.md 의 DevTrack 규칙"
-        "(또는 DevTrack 저장소의 docs/AGENT_PROTOCOL.md)을 따릅니다.".format(tid),
+        "이번 실행에서는 {} 작업만 처리하세요. 기록 규칙은 AGENTS.md · CLAUDE.md 의 DevTrack 규칙을 따르고, "
+        "더 필요하면 devtrack rules (짧은 규칙 — 상세는 devtrack rules <주제> 로 그 절만) 를 봅니다.".format(tid),
         "",
         "- 작업 내용과 지금까지의 기록: devtrack show {}".format(tid),
         "- [새 작업] 이면 devtrack start {} 로 시작하고 지시대로 진행합니다. 지시에 /review-pr 같은 스킬 호출이 있으면 "
@@ -2735,6 +2861,11 @@ def build_parser():
     sp.add_argument("--any-model", action="store_true",
                     help="모델 · 강도 지정이 이 세션과 다른 작업의 입력도 보기 (기본은 따로 알리고 처리하지 않음)")
 
+    sp = add("rules", cmd_rules, "에이전트 규칙 — 짧은 규칙(처음 DevTrack 작업을 할 때 읽음), 주제를 주면 상세 규칙의 그 절만",
+             epilog="예: devtrack rules   ·   devtrack rules --list   ·   devtrack rules review-loop")
+    sp.add_argument("topic", nargs="?", help="주제 (devtrack rules --list) 또는 절 제목의 일부")
+    sp.add_argument("--list", action="store_true", help="주제 목록과 크기")
+
     add("hook", cmd_hook, "AI 도구 실행 전 확인 (Claude Code · Codex 의 PreToolUse 훅) — 하던 작업을 사용자가 "
                           "취소 · 삭제했으면 멈추게 한다. 훅 입력(JSON)을 표준입력으로 받는다")
 
@@ -2840,6 +2971,8 @@ def main(argv=None):
         if args.cmd in TASK_WORK_CMDS:
             _guard_task(store, args)
         rc = args.func(store, args)
+        if args.cmd in TASK_WORK_CMDS or args.cmd in NOTICE_CMDS:
+            _inbox_notice(store, args)
         return rc or 0
     except DevTrackError as e:
         _info("오류: {}".format(e))
