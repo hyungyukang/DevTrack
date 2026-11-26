@@ -139,7 +139,19 @@ export const LOG_KIND = translated({
   artifact: { label: '결과물', icon: 'package', tone: 'teal' },
   status: { label: '상태', icon: 'circle', tone: 'gray' },
   agent: { label: 'AI 메시지', icon: 'cpu', tone: 'violet' },
+  run: { label: '실행§기록', icon: 'play', tone: 'blue' },
 });
+/** 오래 걸리는 실행의 상태 (runs.RUN_STATES — devtrack run) */
+export const RUN_STATE = translated({
+  starting: { label: '시작 중', tone: 'gray', icon: 'clock' },
+  running: { label: '실행 중§실행', tone: 'blue', icon: 'play' },
+  stalled: { label: '멈춤 의심', tone: 'amber', icon: 'alert' },
+  done: { label: '끝남§실행', tone: 'green', icon: 'check-circle' },
+  failed: { label: '실패', tone: 'red', icon: 'x-circle' },
+  stopped: { label: '중지됨', tone: 'gray', icon: 'pause' },
+  lost: { label: '감시 끊김', tone: 'orange', icon: 'slash' },
+});
+export const RUN_ACTIVE = ['starting', 'running', 'stalled'];
 /** 리뷰 반복의 상태 (store.REVIEW_STATES) */
 export const REVIEW_STATE = translated({
   planned: { label: '리뷰 전', tone: 'gray', icon: 'clock' },

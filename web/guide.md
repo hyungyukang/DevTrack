@@ -387,6 +387,33 @@ DevTrack 이 그 대화의 모델 · 강도를 Claude Code 기록에서 읽어 �
   **맨 위로** · **메시지 칸으로**(그 화면에 **Claude에게 메시지** 칸이 있는데 지금 보이지 않을 때) · **맨 아래로**. 글을 쓰는 동안에는 숨습니다.
   이 폭에서 작업의 **진행 기록** 탭은 메시지 칸이 기록 위에 옵니다.
 
+### 7-1. 오래 걸리는 실행 지켜보기 (`devtrack run`)
+
+빌드 · 시뮬레이션 · 학습처럼 몇 분 넘게 걸리는 명령은 AI 가 `devtrack run` 으로 실행합니다 (에이전트 규칙에 들어 있어 따로 말하지 않아도 됩니다).
+DevTrack 이 그 명령을 백그라운드에서 돌리며:
+
+- **정해진 간격마다 진행을 확인해** 진행 기록에 한 줄씩 남깁니다 (기본 10분, `--every`): 새 출력 줄 수 · CPU 사용 · 진행률과 남은 시간(`--progress`) · Slurm 상태.
+- **움직임이 없으면 '멈춤 의심' 문제를 엽니다** — 기본 15분(`--stall`) 동안 새 출력도 CPU 사용도 파일 변화도 없을 때. 다시 움직이면 저절로 닫습니다.
+- 끝나거나 멈춘 듯하면 **AI 에게 알립니다**. 기다리던 AI 는 바로 결과를 받고, 대기 모드 · `devtrack watch` 는 `[실행 알림]` 으로 깨어납니다.
+  AI 가 대화를 끝냈거나 창을 닫아도 실행과 확인은 계속됩니다.
+- 작업 화면 **개요**의 **실행** 칸에 상태 · 경과 시간 · 진행률 · 마지막 확인 시각 · 마지막 출력이 보이고, 제목 옆에 **실행 중** 표시가 붙습니다.
+- **멈추기**: 로컬 서버(실시간) 화면의 **중지** 단추, 또는 터미널에서 `devtrack runs T-0012 R-1 --stop`. 작업을 취소해도 멈춥니다.
+
+직접 쓸 때:
+
+```bash
+devtrack run T-0012 -n "본 학습" --progress 'epoch (\d+)/(\d+)' -- python train.py --epochs 200
+devtrack run T-0012 --slurm 2318842            # 이미 제출한 Slurm 작업 따라가기 (출력 파일은 scontrol 로 찾음)
+devtrack run T-0012 --pid 4321 --log run.log   # 이미 돌고 있는 프로세스 따라가기
+devtrack runs                                  # 실행 중인 것 모두 (runs T-0012 R-1 --log 80 은 출력의 마지막 80줄)
+```
+
+- 화면 출력 없이 결과 파일만 쓰는 시뮬레이션은 `--watch <폴더>` 를 주면 파일이 바뀌는 것도 진행으로 봅니다.
+- Slurm 배치 스크립트 안에서는 `devtrack run T-0012 --fg -- srun ./model` 처럼 `--fg` 로 같은 프로세스에서 지켜봅니다.
+- `--pid` · `--slurm` 으로 따라가기만 한 것은 작업을 취소해도 그대로 두고 따라가기만 그만둡니다. **중지** 를 눌러야 멈춥니다 (Slurm 은 `scancel`).
+- 다른 컴퓨터에서 보거나 정적 웹에서는 **마지막 확인** 이 간격보다 한참 오래되면 '확인이 끊겼습니다' 로 표시합니다 (실행기를 띄운 컴퓨터가 꺼졌거나 실행기가 끝남).
+- 마지막 출력 몇 줄이 웹에 보이므로, 비밀 값을 출력하는 명령은 조심하세요.
+
 ## 8. 승인 · 수정 요청 · 거절
 
 Claude 가 확인이 필요한 지점에 오면 **승인 요청** 메뉴와 종 아이콘에 표시됩니다.
@@ -1170,6 +1197,7 @@ DevTrack 작업은 승인된 요청(`devtrack apply`)으로만 커밋합니다. 
 | `devtrack pptx deck.json --pdf` | 슬라이드 · 포스터 설명(JSON)으로 PowerPoint 만들기 (표준 라이브러리) + 글자 넘침 점검 · 미리보기 PDF (`--example slides` · `poster` 로 형식 보기, 9. 논문 작성 6번) |
 | `devtrack doc T-0005 --figures` | 작업과 연결된 작업의 그림 파일 경로 (발표 자료 · 포스터용) |
 | `devtrack svgcheck fig.svg --png` | SVG 도식 점검 (실행 코드 · 넘치거나 겹친 글자 · 캔버스 밖) + PNG 미리보기 (9. 문서 리뷰 5번) |
+| `devtrack runs` | 실행 중인 명령(`devtrack run`) 보기 — `runs T-0012 R-1` 요약 · `--log 80` 마지막 출력 · `--stop` 멈추기 (7-1) |
 | `devtrack watch --claude` | 웹에서 Claude 에게 온 지시를 작업마다 정한 모델로 처리 (6-1) |
 | `devtrack watch --codex` | 웹에서 Codex 에게 온 지시를 Codex 로 처리 (11단계) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | 작업을 처리할 AI 모델 · 추론 강도 정하기 (`--clear` 해제, `--list` 고를 수 있는 모델 · 강도, 6-1) |
@@ -1183,5 +1211,6 @@ Claude 가 쓰는 명령 (참고): `new` 작업 생성 · `step` 지금 하는 �
 `link` 작업 연결 · `latex` LaTeX 컴파일 (PDF 를 빌드로 기록) ·
 `request` 승인 요청 · `withdraw` 결정 전인 요청 거두기 · `apply` 승인된 커밋 실행 · `inbox` 사용자 입력 확인 (자기에게 배정된 작업만) ·
 `rules` 에이전트 규칙 (짧은 규칙, `rules <주제>` 는 상세 규칙의 그 절만) ·
+`run` 오래 걸리는 명령을 백그라운드로 실행하며 진행 확인 · 멈춤 감지 (7-1) ·
 `start --take` 다른 AI 의 작업 가져오기 · `note` 인계 메모 · `show --brief` 다른 작업의 요약 · `done` 완료 · `hook` 취소 · 삭제를 일하는 중인 AI 에 전달 (5-4).
 전체 설명은 `devtrack --help` 와 [에이전트 규칙](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md)을 보세요.

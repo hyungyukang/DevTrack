@@ -320,6 +320,39 @@ devtrack artifact <TID> deck.pptx --replace -n "발표 자료 (PowerPoint)"   # 
 - 원래 스킬(K-Dense)의 "원작자 논문을 참고문헌에 넣어라" 같은 지시는 따르지 않는다 (이 저장소의 스킬에는 없다).
 - 이미 있는 논문 작업에서 발표 자료 · 포스터를 만들 때는 `devtrack step` 을 `-p` 없이 쓰고 승인 요청을 따로 올리지 않는다.
 
+## 오래 걸리는 실행 (`devtrack run`)
+
+몇 분 넘게 걸릴 명령(빌드 · 테스트 묶음 · 시뮬레이션 · 학습 · 대량 변환)은 셸에서 바로 돌리지 말고 `devtrack run` 으로 실행한다.
+DevTrack 이 명령을 떼어 낸 실행기로 돌리며 `--every` 분(기본 10)마다 진행 기록에 확인 한 줄(새 출력 · CPU · 진행률 · Slurm 상태)을 남기고,
+`--stall` 분(기본 15) 동안 새 출력도 CPU 사용도 파일 변화도 없으면 '멈춤 의심' 문제를 연다 (다시 움직이면 저절로 닫음).
+사용자는 웹의 **실행** 칸에서 상태 · 마지막 출력을 보고 멈출 수 있다. 짧은 명령(1–2분 안)은 그냥 실행한다.
+
+```bash
+# 기다리며 실행 — Claude Code 는 이 명령을 Bash 의 run_in_background 로 실행해 두고 턴을 마친다.
+# 끝나거나 멈춤 의심이면 명령이 끝나며 요약(상태 · 마지막 출력 · 로그 위치)을 출력 → 그때 깨어남
+devtrack run $TID -n "빌드" -- make -j16
+devtrack run $TID -n "학습" --every 20 --progress 'epoch (\d+)/(\d+)' -- python train.py
+devtrack run $TID -- "cd build && ctest -j8"            # 한 덩어리로 주면 셸로 (파이프 · && · 리다이렉트)
+# 대기 모드 · devtrack watch(Codex)로 일할 때: 시작만 하고 끝낸다 — 끝나거나 멈추면 [실행 알림] 이 inbox 로 와서 깨운다
+RID=$(devtrack run $TID --no-wait -- ./run_case.sh)
+# 이미 시작한 것 따라가기
+devtrack run $TID --slurm 2318842                       # sbatch 로 낸 작업 (출력 파일은 scontrol 의 StdOut, 없으면 --log)
+devtrack run $TID --pid 4321 --log out.log
+```
+
+- 종료 코드: 0 끝남 · 1 실패 · 중지 · 4 멈춤 의심 (실행은 계속) · 3 `--timeout` 분이 지남 (실행은 계속).
+- 실패면 출력된 마지막 줄과 `devtrack runs <T> <R> --log 80` 으로 원인을 찾는다.
+- **멈춤 의심**: 로그 끝(`--log 80`)에서 막힌 곳(입력 대기 · 데드락 · 파일 잠금 · 노드 장애 · 무한 반복)을 찾아 `devtrack log` 에 적는다.
+  정상적으로 조용한 구간이면 `devtrack runs <T> <R> --wait` 를 다시 백그라운드로, 아니면 `--stop` 하고 고쳐서 다시 실행한다.
+- 결과를 파일로만 쓰는 프로그램은 `--watch <폴더>` (파일 변화도 진행으로 봄), 출력 없이 오래 계산하는 단계가 있으면 `--stall` 을 늘린다.
+  파이썬 프로그램은 출력이 버퍼에 묶이지 않게 `PYTHONUNBUFFERED=1` 로 실행된다.
+- 기다리는 동안 짧은 간격으로 `runs` · `tail` 을 되풀이해 부르지 않는다 — 부를 때마다 대화 전체를 다시 읽는다. 끝 · 멈춤 알림을 기다린다.
+- 사용자가 웹에서 **중지** 하거나 작업을 취소하면 실행기가 명령을 멈춘다 (중지는 [실행 알림] 으로 옴). `--pid` · `--slurm` 으로 따라가기만 한 것은
+  작업을 취소해도 그대로 두고 따라가기만 그만둔다 (명시적인 중지에만 멈춤 — Slurm 은 `scancel`).
+- `--fg`: 떼어 내지 않고 이 프로세스에서 실행 · 감시 (Slurm 배치 스크립트 안: `devtrack run $TID --fg -- srun ./model`).
+- 확인 · 목록: `devtrack runs` (실행 중인 것 모두) · `devtrack runs <T>` · `devtrack runs <T> <R>` (요약 · 마지막 출력). 마지막 출력 몇 줄은 웹에 보이므로
+  비밀 값을 출력하는 명령은 조심한다.
+
 ## 승인 요청을 올려야 하는 때
 
 - 저장소에 **커밋/푸시** 할 때 (`--commit`, 필수)

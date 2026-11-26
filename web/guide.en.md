@@ -388,6 +388,33 @@ The **AI journal review** box on the task page shows each round's verdict, the o
   **To top** · **Go to the message box** (when the page has a **Message to Claude** box that is out of view) · **To bottom**. They hide while you type.
   At this width a task's **Progress log** tab shows the message box above the log.
 
+### 7-1. Watching long runs (`devtrack run`)
+
+The AI runs commands that take more than a few minutes (builds, simulations, training) with `devtrack run` — the agent rules say so, so you do not need to ask.
+DevTrack runs the command in the background and:
+
+- **checks progress at a fixed interval** and adds a line to the progress log (every 10 minutes by default, `--every`): new output lines, CPU use, progress and time left (`--progress`), Slurm state.
+- **opens a "may be stuck" issue when nothing moves** — no new output, CPU use or file changes for 15 minutes by default (`--stall`). It closes the issue itself when the run moves again.
+- **tells the AI** when the run ends or looks stuck. An AI that is waiting gets the result right away; waiting mode and `devtrack watch` wake up on a `[실행 알림]` (run alert).
+  The run and the checks keep going even if the AI ends the chat or the window is closed.
+- shows the state, elapsed time, progress, last check and last output in the **Runs** box of the task's **Overview**, with a **Running** badge next to the title.
+- **To stop a run**: the **Stop** button on the local server (live) page, or `devtrack runs T-0012 R-1 --stop` in a terminal. Cancelling the task stops it too.
+
+To use it yourself:
+
+```bash
+devtrack run T-0012 -n "main training" --progress 'epoch (\d+)/(\d+)' -- python train.py --epochs 200
+devtrack run T-0012 --slurm 2318842            # follow a Slurm job you already submitted (finds its output file with scontrol)
+devtrack run T-0012 --pid 4321 --log run.log   # follow a process that is already running
+devtrack runs                                  # every active run (runs T-0012 R-1 --log 80 prints the last 80 output lines)
+```
+
+- For a simulation that writes result files but prints nothing, add `--watch <folder>` so that file changes count as progress.
+- Inside a Slurm batch script, use `--fg` to watch in the same process: `devtrack run T-0012 --fg -- srun ./model`.
+- Runs that only follow a process or job (`--pid`, `--slurm`) are left alone when the task is cancelled; DevTrack just stops following them. Only **Stop** ends them (`scancel` for Slurm).
+- When you look from another computer or on the static site, a run whose **last check** is much older than its interval is marked "checks have stopped" (the computer that ran it went down or the runner ended).
+- The last few output lines appear on the web, so take care with commands that print secrets.
+
 ## 8. Approve · request changes · reject
 
 When Claude reaches a point that needs your check, it shows up in the **Approvals** menu and on the bell icon.
@@ -1177,6 +1204,7 @@ Commands you use yourself:
 | `devtrack pptx deck.json --pdf` | Make a PowerPoint from a slide or poster spec (JSON) with the standard library, check for text overflow and render a preview PDF (`--example slides` or `poster` shows the format; 9. Paper writing, item 6) |
 | `devtrack doc T-0005 --figures` | Paths of the figure files of a task and its linked tasks (for slides and posters) |
 | `devtrack svgcheck fig.svg --png` | Check an SVG diagram (executable code, text that overflows or overlaps, text off the canvas) and render a PNG preview (9. Document review, item 5) |
+| `devtrack runs` | See commands running under `devtrack run` — `runs T-0012 R-1` summary · `--log 80` last output · `--stop` stop it (7-1) |
 | `devtrack watch --claude` | Handle instructions sent to Claude on the web, with each task's model (6-1) |
 | `devtrack watch --codex` | Handle instructions sent to Codex on the web with Codex (step 11) |
 | `devtrack model T-0001 opus-5.5 --effort xhigh` | Set the AI model and effort for a task (`--clear` removes it, `--list` shows the models and levels, 6-1) |
@@ -1190,5 +1218,6 @@ Commands Claude uses (for reference): `new` create a task · `step` what it is d
 `link` link tasks · `latex` compile LaTeX (records the PDF as a build) ·
 `request` approval request · `withdraw` take back a request not yet decided · `apply` run an approved commit · `inbox` check user input (only for tasks assigned to it) ·
 `rules` agent rules (the short rules; `rules <topic>` prints just that section of the detailed rules) ·
+`run` run a long command in the background with progress checks and stall alerts (7-1) ·
 `start --take` take over another AI's task · `note` handoff note · `show --brief` short view of another task · `done` done · `hook` deliver cancellations and deletions to an AI at work (5-4).
 For full details, see `devtrack --help` and the [agent rules](https://github.com/hyungyukang/DevTrack/blob/main/docs/AGENT_PROTOCOL.md).

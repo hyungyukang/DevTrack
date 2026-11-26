@@ -72,6 +72,7 @@ LOG_KINDS = (
     "info", "step", "success", "warning", "error", "issue",
     "user", "approval", "decision", "commit", "artifact", "status",
     "agent",  # 다른 AI 가 보낸 메시지 (devtrack send · 리뷰 요청 · 리뷰 결과) — 그 작업의 AI 받은 편지함으로 간다
+    "run",    # 오래 걸리는 실행의 시작 · 진행 확인 (devtrack run — runs.py)
 )
 
 # AI 끼리 리뷰 반복 (개발 작업의 review_loop)
@@ -915,6 +916,8 @@ class Store:
                     self._write_json(os.path.join(self.tasks_dir, other["id"], "task.json"), other)
                     touched.append(other["id"])
             shutil.rmtree(self.task_dir(tid))
+            # 실행 출력(devtrack run) — 아직 돌던 실행기는 작업이 없어진 것을 보고 명령을 멈춘 뒤 끝난다
+            shutil.rmtree(os.path.join(self.root, ".agent", "runs", tid), ignore_errors=True)
             items = [d for d in self.deleted_tasks() if d.get("id") != tid]
             items.append({"id": tid, "title": t["title"], "type": t["type"], "agent": t.get("agent"),
                           "status": t["status"], "at": now(), "by": author, "ack": author != USER})
@@ -1649,24 +1652,100 @@ class Store:
         if severity not in SEVERITIES:
             raise DevTrackError("심각도는 {} 중 하나여야 합니다".format(", ".join(SEVERITIES)))
         with self.edit(tid) as t:
-            iid = self._next(t, "I")
-            issue = {"id": iid, "title": title, "detail": detail or "", "severity": severity,
-                     "status": "open", "created_at": now(), "author": author or t.get("agent")}
-            t.setdefault("issues", []).append(issue)
-            self._log(t, "문제 발견: " + title, kind="issue", author=author, ref=iid, detail=detail,
-                      meta={"severity": severity})
-            return issue
+            return self._open_issue(t, title, detail, severity, author)[0]
+
+    def _open_issue(self, t, title, detail=None, severity="medium", author=None, meta=None):
+        iid = self._next(t, "I")
+        issue = {"id": iid, "title": title, "detail": detail or "", "severity": severity,
+                 "status": "open", "created_at": now(), "author": author or t.get("agent")}
+        t.setdefault("issues", []).append(issue)
+        e = self._log(t, "문제 발견: " + title, kind="issue", author=author, ref=iid, detail=detail,
+                      meta=dict(meta or {}, severity=severity))
+        return issue, e
 
     def resolve_issue(self, tid, iid, note=None, author=None):
         iid = normalize_item_id(iid, "I")
         with self.edit(tid) as t:
-            issue = self._find(t.get("issues", []), iid, "문제")
-            issue["status"] = "resolved"
-            issue["resolved_at"] = now()
-            if note:
-                issue["resolution"] = note
-            self._log(t, "문제 해결: " + issue["title"], kind="success", author=author, ref=iid, detail=note)
-            return issue
+            return self._close_issue(t, self._find(t.get("issues", []), iid, "문제"), note, author)
+
+    def _close_issue(self, t, issue, note=None, author=None):
+        issue["status"] = "resolved"
+        issue["resolved_at"] = now()
+        if note:
+            issue["resolution"] = note
+        self._log(t, "문제 해결: " + issue["title"], kind="success", author=author, ref=issue["id"], detail=note)
+        return issue
+
+    # ------------------------------------------------------------------ 오래 걸리는 실행 (devtrack run — runs.py 가 감시)
+    def add_run(self, tid, info, author=None):
+        """실행 기록을 만든다 (상태 starting — 실행기가 running 으로 바꾼다). info 는 runs.prepare 의 값."""
+        with self.edit(tid) as t:
+            if t["status"] in ("cancelled", "done"):
+                raise DevTrackError("{} 은(는) {} 작업입니다 — 실행을 기록할 수 없습니다".format(
+                    t["id"], STATUSES[t["status"]]))
+            rid = self._next(t, "R")
+            run = dict(info, id=rid, status="starting", started_at=now(), author=author or t.get("agent"),
+                       stalls=0, checks=0)
+            t.setdefault("runs", []).append(run)
+            return dict(run), _lang.task_lang(t)
+
+    def run_update(self, tid, rid, fields=None, log=None, issue=None, resolve_issue=None, bump=None):
+        """실행 기록을 고치고 진행 기록을 남긴다 (실행기 · runs 가 부름). 고친 실행 기록을 돌려준다.
+        log: {"message", "kind" (기본 run), "detail", "event"} — event(done · failed · stopped · stalled · lost)가 있으면
+             담당 AI 의 받은 편지함에 [실행 알림] 으로 간다
+        issue: {"title", "detail", "severity", "event"} — 멈춤 의심 문제를 열고 이 실행에 단다
+        resolve_issue: 이 실행이 연 열린 문제를 이 메모로 닫는다 (다시 움직임 · 끝남)
+        bump: 하나 늘릴 셈 (stalls · checks)"""
+        from .runs import RUNNER, find_run
+        with self.edit(tid) as t:
+            run = find_run(t, rid)
+            run.update(fields or {})
+            if bump:
+                run[bump] = int(run.get(bump) or 0) + 1
+            if resolve_issue is not None and run.get("stall_issue"):
+                iss = next((i for i in t.get("issues", []) if i.get("id") == run["stall_issue"]), None)
+                if iss is not None and iss.get("status") == "open":
+                    self._close_issue(t, iss, resolve_issue, author=RUNNER)
+                run["stall_issue"] = None
+            if issue:
+                meta = {"run": run["id"]}
+                if issue.get("event"):
+                    meta["run_event"] = issue["event"]
+                iss, e = self._open_issue(t, issue["title"], issue.get("detail"), issue.get("severity", "medium"),
+                                          author=RUNNER, meta=meta)
+                if issue.get("event"):
+                    e["ack"] = False
+                run["stall_issue"] = iss["id"]
+            if log:
+                meta = {"run": run["id"]}
+                if log.get("event"):
+                    meta["run_event"] = log["event"]
+                e = self._log(t, log["message"], kind=log.get("kind") or "run", author=log.get("author") or RUNNER,
+                              detail=log.get("detail"), ref=run["id"], meta=meta)
+                if log.get("event"):
+                    e["ack"] = False
+            return dict(run)
+
+    def request_run_stop(self, tid, rid, author=None):
+        """실행을 멈춰 달라고 적어 둔다 — 실행기가 다음 확인 때(몇 초 안) 멈춘다."""
+        from .runs import ACTIVE, find_run, label
+        with self.edit(tid) as t:
+            run = find_run(t, rid)
+            if run.get("status") not in ACTIVE:
+                raise DevTrackError("{} 은(는) 이미 끝난 실행입니다".format(run["id"]))
+            run["stop_requested"] = {"by": author or t.get("agent"), "at": now()}
+            en = _lang.task_lang(t) == "en"
+            self._log(t, ("Stop requested: {}" if en else "실행 중지 요청: {}").format(label(run)), kind="warning",
+                      author=author, ref=run["id"], meta={"run": run["id"]})
+            return dict(run)
+
+    def ack_run_events(self, tid, rid=None):
+        """실행 알림(멈춤 의심 · 끝남 …)을 처리됨으로 — devtrack run · runs --wait 가 AI 에게 직접 알렸을 때."""
+        with self.edit(tid) as t:
+            for e in t.get("log", []):
+                m = e.get("meta") or {}
+                if m.get("run_event") and e.get("ack") is False and (rid is None or m.get("run") == rid):
+                    e["ack"] = True
 
     # ------------------------------------------------------------------ 결과물
     def _add_artifact(self, t, path=None, url=None, text=None, filename=None, title=None, kind=None,
@@ -2448,6 +2527,10 @@ class Store:
                 elif e.get("kind") == "agent" and e.get("ack") is False:
                     items.append(dict(base, type="agent_message", id=e["id"], message=e["message"],
                                       sender=e.get("author"), ts=e["ts"]))
+                elif (e.get("meta") or {}).get("run_event") and e.get("ack") is False:
+                    m = e["meta"]
+                    items.append(dict(base, type="run", id=e["id"], message=e["message"], run=m.get("run"),
+                                      event=m["run_event"], ts=e["ts"]))
             for ap in t.get("approvals", []):
                 if ap["status"] != "pending" and ap.get("agent_ack") is False:
                     items.append(dict(base, type="decision", id=ap["id"], approval_title=ap["title"],
@@ -2476,7 +2559,7 @@ class Store:
                 continue  # 그사이 삭제됨
             with self.edit(tid) as t:
                 for it in its:
-                    if it["type"] in ("comment", "agent_message"):
+                    if it["type"] in ("comment", "agent_message", "run"):
                         e = next((x for x in t.get("log", []) if x.get("id") == it["id"]), None)
                         if e is not None:
                             e["ack"] = True
@@ -2507,6 +2590,8 @@ class Store:
             return "comment:{}:{}".format(it["task_id"], it["id"])
         if it["type"] == "agent_message":
             return "agent:{}:{}".format(it["task_id"], it["id"])
+        if it["type"] == "run":
+            return "run:{}:{}".format(it["task_id"], it["id"])
         if it["type"] in ("cancelled", "deleted", "completed"):
             return "{}:{}:{}".format(it["type"], it["task_id"], it.get("ts") or "")
         return "decision:{}:{}:{}".format(it["task_id"], it["id"], it.get("ts") or "")
@@ -2729,6 +2814,8 @@ class Store:
                 "open_issues": len(open_issues),
                 "max_severity": max((SEVERITIES.index(i["severity"]) for i in open_issues), default=-1),
                 "pending_approvals": len(pending), "artifact_count": len(t.get("artifacts", [])),
+                "runs_active": sum(1 for r in t.get("runs") or [] if r.get("status") in ("starting", "running", "stalled")),
+                "runs_stalled": sum(1 for r in t.get("runs") or [] if r.get("status") == "stalled"),
                 "last_log": log[-1] if log else None,
             })
             if t.get("review"):

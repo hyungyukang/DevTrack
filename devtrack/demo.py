@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
-from . import DevTrackError
+from . import DevTrackError, runs as _runs
 from . import store as store_mod
 
 
@@ -28,6 +28,28 @@ class _Clock:
 
     def at(self, minutes_ago):
         self.t = self.base - _dt.timedelta(minutes=minutes_ago)
+
+
+# ------------------------------------------------------------------ 실행 기록 (devtrack run) — 실제 실행기 없이 기록만
+def _demo_run(s, clk, tid, at, info, runner_host="login03"):
+    """at 분 전에 시작한 실행 기록을 만든다 → 실행 ID (확인 · 끝은 _demo_run_check · _demo_run_end)."""
+    clk.at(at)
+    run, _ = s.add_run(tid, dict(info, host=runner_host), author="Claude")
+    s.run_update(tid, run["id"], fields={"status": "running", "runner": {"pid": 40000 + at, "host": runner_host},
+                                         "checked_at": store_mod.now()},
+                 log={"message": _runs.start_message(run, False), "kind": "run", "author": "Claude",
+                      "detail": "cwd: {}".format(info.get("cwd"))})
+    return run["id"]
+
+
+def _demo_run_check(s, clk, tid, rid, at, parts, fields):
+    clk.at(at)
+    run = s.run_update(tid, rid, fields=dict(fields, checked_at=store_mod.now()), bump="checks")
+    started = _dt.datetime.fromisoformat(run["started_at"])
+    elapsed = (clk().astimezone() - started).total_seconds()
+    s.run_update(tid, rid, log={"message": _runs.TEXT["ko"]["check"].format(
+        label=_runs.label(run), elapsed=_runs.fmt_dur(elapsed), parts=" · ".join(parts)), "kind": "run",
+        "detail": "\n".join((fields.get("tail") or [])[-3:]) or None})
 
 
 # ------------------------------------------------------------------ SVG / PDF 헬퍼
@@ -1239,6 +1261,29 @@ def _scenario(s, clk, tmp):
                    title="디버그 학습 손실 곡선")
     s.check_plan(tid3, [3])
     clk.at(200); s.update_task(tid3, step="본 학습 시작: batch 64/GCD, bf16, 200 epoch (sbatch job 2318842)")
+    r3 = _demo_run(s, clk, tid3, 199, {
+        "mode": "slurm", "job": "2318842", "command": "Slurm job 2318842", "name": "train_main", "every": 600,
+        "stall": 900, "progress": r"epoch (\d+)/(\d+)", "cwd": "/lustre/orion/proj/surrogate",
+        "log_file": "/lustre/orion/proj/surrogate/logs/train_2318842.out", "watch": [],
+        "slurm": {"state": "PENDING", "reason": "Priority", "nodes": "", "name": "train_main"}})
+    _demo_run_check(s, clk, tid3, r3, 189, ["새 출력 없음 (10분째)", "Slurm 대기열 (Priority, 10분째)"],
+                    {"slurm": {"state": "PENDING", "reason": "Priority", "nodes": "", "name": "train_main"}})
+    tail3 = ["[rank0] epoch 1/200 step {:4d} loss {:.4f}".format(st, 0.9 - st * 1e-4) for st in range(150, 400, 50)]
+    _demo_run_check(s, clk, tid3, r3, 179, ["새 출력 214줄", "Slurm RUNNING (frontier01234)", "진행 0.5%"],
+                    {"slurm": {"state": "RUNNING", "reason": "None", "nodes": "frontier01234", "name": "train_main"},
+                     "lines": 214, "progress": 0.5, "tail": tail3[:3]})
+    _demo_run_check(s, clk, tid3, r3, 169, ["새 출력 186줄", "Slurm RUNNING (frontier01234)", "진행 0.5%"],
+                    {"lines": 400, "tail": tail3})
+    clk.at(152)
+    tail3 = tail3 + ["Traceback (most recent call last):", '  File "train.py", line 212, in <module>',
+                     "torch.OutOfMemoryError: HIP out of memory. Tried to allocate 12.00 GiB.",
+                     "srun: error: frontier01234: task 3: Exited with exit code 1"]
+    s.run_update(tid3, r3, fields={"status": "failed", "ended_at": store_mod.now(), "checked_at": store_mod.now(),
+                                   "exit_code": 1, "duration": 47 * 60, "lines": 412, "tail": tail3,
+                                   "slurm": {"state": "FAILED", "reason": "", "nodes": "frontier01234", "name": "train_main"}},
+                 log={"message": "실행 실패 R-1 'train_main': Slurm FAILED (종료 코드 1) · 47분 · 출력 412줄", "kind": "error",
+                      "detail": "마지막 출력:\n" + "\n".join(tail3[-4:])})
+    s.ack_run_events(tid3, r3)
     clk.at(150)
     s.add_issue(tid3, "본 학습 OOM — batch 64/GCD 에서 HIP out of memory", severity="critical", detail=(
         "```\ntorch.OutOfMemoryError: HIP out of memory. Tried to allocate 12.00 GiB.\n"
@@ -1413,6 +1458,29 @@ def _scenario(s, clk, tmp):
               "오차 정량화 및 요약"], tags=["paper", "turbulence"])
     tid8 = t8["id"]
     clk.at(220); s.update_task(tid8, step="DNS 스냅샷 2,000개 시간 평균 계산 (sbatch job 2319011)", progress=10)
+    r8 = _demo_run(s, clk, tid8, 219, {
+        "mode": "slurm", "job": "2319011", "command": "Slurm job 2319011", "name": "dns_avg", "every": 600, "stall": 900,
+        "progress": r"snapshot (\d+)/(\d+)", "cwd": "/lustre/orion/proj/run_042",
+        "log_file": "/lustre/orion/proj/run_042/logs/dns_avg_2319011.out", "watch": []})
+    for i, at in enumerate((209, 199, 189, 179), 1):
+        done = 400 * i
+        _demo_run_check(s, clk, tid8, r8, at, ["새 출력 {}줄".format(400 if i > 1 else 402),
+                                                "Slurm RUNNING (frontier[00321-00324])", "진행 {}%".format(20 * i),
+                                                "남은 시간 약 {}분".format(10 * (5 - i))],
+                        {"slurm": {"state": "RUNNING", "reason": "None", "nodes": "frontier[00321-00324]", "name": "dns_avg"},
+                         "lines": done + 2, "progress": 20.0 * i, "eta": 600 * (5 - i),
+                         "tail": ["snapshot {}/2000  t={:.3f}  <u>={:.4f}".format(k, 40 + k * 0.025, 12.40 - 0.3 / k)
+                                  for k in range(done - 2, done + 1)]})
+    clk.at(172)
+    tail8 = ["snapshot {}/2000  t={:.3f}  <u>={:.4f}".format(k, 40 + k * 0.025, 12.40 - 0.3 / k) for k in range(1997, 2001)]
+    tail8 += ["writing mean_fields_run042.h5 (2.1 GB) ... done", "elapsed 00:46:38"]
+    s.run_update(tid8, r8, fields={"status": "done", "ended_at": store_mod.now(), "checked_at": store_mod.now(),
+                                   "exit_code": 0, "duration": 47 * 60, "lines": 2004, "tail": tail8, "progress": 100.0,
+                                   "eta": None, "slurm": {"state": "COMPLETED", "reason": "",
+                                                          "nodes": "frontier[00321-00324]", "name": "dns_avg"}},
+                 log={"message": "실행 끝남 R-1 'dns_avg': Slurm COMPLETED (종료 코드 0) · 47분 · 출력 2,004줄",
+                      "kind": "success", "detail": "마지막 출력:\n" + "\n".join(tail8[-3:])})
+    s.ack_run_events(tid8, r8)
     clk.at(170); s.check_plan(tid8, [1])
     clk.at(160)
     i8 = s.add_issue(tid8, "실험 데이터 x 좌표 원점이 DNS 와 0.05 m 어긋남", severity="medium",
@@ -1792,3 +1860,15 @@ def _scenario(s, clk, tmp):
         _pptx.write_pptx(sp, out, tmp, svg_fallback=False)
         s.add_artifact(tid5, path=out, title=title)
     s.add_log(tid5, "발표 자료 5장 · A0 포스터(2단) — 원고 4장의 그림 · 표 · 숫자만 사용, 발표자 · 저자 정보는 [[MISSING]] 으로 둠")
+
+    # ---------------------------------------------------------------- T-0006 커밋 승인을 기다리는 동안 확장성 측정 (실행 중)
+    r6 = _demo_run(s, clk, tid6, 7, {
+        "mode": "process", "command": "./scripts/scaling.sh 1 2 4 8", "argv": ["./scripts/scaling.sh", "1", "2", "4", "8"],
+        "name": "강한 확장성 측정 (GCD 1–8)", "every": 300, "stall": 900, "progress": r"case (\d+)/(\d+)",
+        "cwd": "/ccs/home/user/hip-solver", "log_file": "/ccs/home/user/hip-solver/scaling.log", "watch": [], "pid": 51234},
+        runner_host="frontier07")
+    _demo_run_check(s, clk, tid6, r6, 2, ["새 출력 41줄", "CPU 약 7.8코어", "진행 62.5%", "남은 시간 약 4분"],
+                    {"lines": 41, "progress": 62.5, "eta": 250, "cpu_cores": 7.8, "tail": [
+                        "[case 4/8] GCDs=4 grid=4096^2 iters=5000", "  time/iter 1.92 ms  speedup 3.61x  efficiency 90.3%",
+                        "[case 5/8] GCDs=8 grid=4096^2 iters=5000", "  warmup 200 iters ... done",
+                        "  iter 1000/5000  t=2.03 s", "  iter 2000/5000  t=4.05 s"]})

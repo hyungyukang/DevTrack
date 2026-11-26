@@ -3,6 +3,7 @@ import {
   html, raw, icon, STATUS, TYPES, APPROVAL_STATUS, APPROVAL_KIND, LOG_KIND, SEVERITY, ART_KIND,
   FINDING_SEV, FINDING_STATUS, VERDICT, CONFIDENCE, DOC_KIND, CHECK_RATING, pick, badge, ago, fmtAbs, fmtRel, fmtBytes, authorName, shellQuote, copyText, LS, tsNum,
   isUnassigned, aiName, agentLabel, MODELS, setModelCatalog, REVIEW_STATE, effortsFor, effortLabel, normalizeModel, specLabel, specMatches,
+  RUN_STATE, RUN_ACTIVE,
 } from './util.js';
 import { artifactUrl, renderArtifactInto, renderMarkdown, enhance } from './viewers.js';
 import { L, translated, translatedStrings, getLang, setLang, applyStatic, locale } from './i18n.js';
@@ -1412,7 +1413,7 @@ async function viewTask({ rest }) {
   return html`
     <div class="crumbs"><a href="${sectionHref(t)}">${SECTION_LABEL[sec]}</a><span>/</span><span class="mono">${t.id}</span></div>
     <div class="task-head"><div style="min-width:0;flex:1">
-      <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${t.priority === 'high' ? html`<span class="badge tone-red">${L('우선순위 높음')}</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
+      <div class="th-badges">${typeBadge(t.type)}${statusBadge(t.status)}${runsBadge(t)}${t.priority === 'high' ? html`<span class="badge tone-red">${L('우선순위 높음')}</span>` : ''}${(t.tags || []).map((g) => html`<span class="badge">#${g}</span>`)}</div>
       <h1><span class="th-id">${t.id}</span>${t.title}</h1>
       <div class="th-meta">
         <span title="${L('담당 AI')}">${icon('cpu')} ${agentLabel(t)}</span>
@@ -1544,8 +1545,11 @@ function taskOverview(t, openIssues) {
   const plan = t.plan || [];
   const recent = [...t.log].reverse().slice(0, 8);
   const arts = [...t.artifacts].reverse().slice(0, 6);
+  // 실행 중인 명령이 있으면 실행 칸을 본문 맨 위에 (좁은 화면에서 오른쪽 칸은 맨 아래로 내려간다)
+  const runningNow = (t.runs || []).some((r) => RUN_ACTIVE.includes(r.status));
   return html`<div class="detail-grid">
     <div>
+      ${runningNow ? runsCard(t) : ''}
       ${reviewLoopPanel(t)}${reviewOfPanel(t)}${visualPanel(t)}
       ${t.type === 'docreview' || t.review?.doc ? (t.review ? docReviewPanel(t) : '') : reviewPanel(t)}
       <section class="card">
@@ -1560,6 +1564,7 @@ function taskOverview(t, openIssues) {
       ${feedbackBox(t)}
     </div>
     <div>
+      ${runningNow ? '' : runsCard(t)}
       ${t.builds?.length ? html`<section class="card">
         <div class="card-head"><h2>${icon('file-text')} ${L('컴파일된 PDF')}</h2><a href="#/task/${t.id}/builds">${L('빌드 기록')} ${t.builds.length}</a></div>
         <div class="card-body">${buildBox(t)}</div>
@@ -1578,6 +1583,87 @@ function taskOverview(t, openIssues) {
       </section>
     </div>
   </div>`;
+}
+
+// ---------------------------------------------------------------------- 오래 걸리는 실행 (devtrack run — runs.py)
+/** 걸린 시간 (초 → 35초 · 42분 · 1시간 5분) */
+function fmtDur(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  if (s < 60) return L('{n}초', { n: s });
+  const m = Math.round(s / 60);
+  if (m < 60) return L('{n}분', { n: m });
+  const h = Math.floor(m / 60);
+  return m % 60 ? L('{h}시간 {m}분', { h, m: m % 60 }) : L('{h}시간', { h });
+}
+
+function runsBadge(t) {
+  const act = (t.runs || []).filter((r) => RUN_ACTIVE.includes(r.status));
+  if (!act.length) return '';
+  const stalled = act.some((r) => r.status === 'stalled');
+  return html`<a class="badge tone-${stalled ? 'amber' : 'blue'}" href="#/task/${t.id}" title="${L('devtrack run 으로 실행 중인 명령')}">${icon(stalled ? 'alert' : 'play')}${stalled ? L('멈춤 의심') : L('실행 중§실행')} ${act.length}</a>`;
+}
+
+/** 실행 칸: 실행 중인 것 전부와 끝난 것 최근 3개 — 상태 · 명령 · 경과 · 진행률 · 마지막 확인 · 마지막 출력 · 중지 */
+function runsCard(t) {
+  const runs = [...(t.runs || [])].reverse();
+  if (!runs.length) return '';
+  const act = runs.filter((r) => RUN_ACTIVE.includes(r.status));
+  const ended = runs.filter((r) => !RUN_ACTIVE.includes(r.status));
+  const shown = [...act, ...ended.slice(0, Math.max(0, 3 - Math.min(act.length, 3)) || (act.length ? 1 : 3))];
+  const more = runs.length - shown.length;
+  return html`<section class="card runs-card">
+    <div class="card-head"><h2>${icon('play')} ${L('실행')}</h2><span class="muted">${act.length ? L('실행 중 {n}개', { n: act.length }) : L('전체 {n}개', { n: runs.length })}</span></div>
+    ${shown.map((r) => runRow(t, r))}
+    ${more > 0 ? html`<div class="run-more muted">${L('이전 실행 {n}개는 진행 기록에 있습니다', { n: more })}</div>` : ''}
+  </section>`;
+}
+
+function runRow(t, r) {
+  const active = RUN_ACTIVE.includes(r.status);
+  const now = Date.now();
+  const started = tsNum(r.started_at);
+  const elapsed = active ? (now - started) / 1000 : r.duration;
+  const checkedAgo = r.checked_at ? (now - tsNum(r.checked_at)) / 1000 : null;
+  // 실행기가 정한 간격보다 한참 오래 확인이 없으면 실행기가 끝났을 수 있다 (다른 컴퓨터 · 정적 화면에서는 이것으로만 안다)
+  const stale = active && checkedAgo != null && checkedAgo > (r.every || 600) * 1.5 + 120;
+  const bits = [];
+  if (active) bits.push(L('{d}째', { d: fmtDur(elapsed) }));
+  else if (elapsed != null) bits.push(fmtDur(elapsed));
+  if (r.exit_code != null) bits.push(L('종료 코드 {n}', { n: r.exit_code }));
+  if (r.lines) bits.push(L('출력 {n}줄', { n: r.lines.toLocaleString() }));
+  if (active && r.cpu_cores != null) bits.push(r.cpu_cores >= 0.05 ? L('CPU 약 {n}코어', { n: r.cpu_cores }) : L('CPU 쉼'));
+  if (r.slurm?.state) bits.push(`Slurm ${r.slurm.state}${r.slurm.state === 'PENDING' && r.slurm.reason ? ` (${r.slurm.reason})` : ''}`);
+  const pct = r.progress != null ? Math.round(r.progress * 10) / 10 : null;
+  const tail = r.tail || [];
+  const cmd = `devtrack runs ${t.id} ${r.id} --stop`;
+  return html`<div class="run-row s-${r.status}">
+    <div class="run-head">${badge(RUN_STATE, r.status, { withIcon: true })}<b class="mono">${r.id}</b><span class="run-name">${r.name || ''}</span></div>
+    <code class="run-cmd" title="${r.command || ''}">${r.mode === 'slurm' ? `Slurm ${r.job}` : r.mode === 'pid' ? `PID ${r.pid} · ${r.command || ''}` : r.command || ''}</code>
+    <div class="run-meta">${L('시작')} ${fmtAbs(r.started_at)}${bits.length ? ` · ${bits.join(' · ')}` : ''}</div>
+    ${pct != null ? html`<div class="run-prog"><div class="progress s-${r.status === 'done' ? 'done' : ['failed', 'lost'].includes(r.status) ? 'blocked' : r.status === 'stalled' ? 'awaiting_approval' : 'in_progress'}"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div><span>${pct}%${active && r.eta ? ` · ${L('남은 시간 약 {d}', { d: fmtDur(r.eta) })}` : ''}</span></div>` : ''}
+    ${active ? html`<div class="run-check ${stale ? 'stale' : ''}">${icon(stale ? 'alert' : 'clock')} ${r.checked_at ? html`${L('마지막 확인')} ${ago(r.checked_at)}` : L('아직 확인 전')}${stale ? ` — ${L('확인이 끊겼습니다. 실행기가 끝났을 수 있습니다 (devtrack runs 로 확인)')}` : ` · ${L('{d}마다 확인', { d: fmtDur(r.every || 600) })}`}</div>` : ''}
+    ${tail.length ? html`<details class="run-tail" ${active ? 'open' : ''}><summary>${L('마지막 출력')} <span class="muted">${L('{n}줄', { n: tail.length })}</span></summary><pre>${tail.join('\n')}</pre></details>` : ''}
+    ${active && !r.stop_requested ? (state.mode === 'live'
+      ? html`<div class="run-actions"><button class="btn btn-sm btn-reject" data-action="run-stop" data-task="${t.id}" data-run="${r.id}">${icon('pause')} ${L('중지')}</button></div>`
+      : html`<div class="run-actions static"><span class="hint">${L('멈추려면 터미널에서')}</span> <code>${cmd}</code> <button class="btn btn-sm btn-ghost" data-action="copy" data-copy="${cmd}">${icon('copy')}</button></div>`) : ''}
+    ${active && r.stop_requested ? html`<div class="run-check">${icon('pause')} ${L('중지 요청함 — 실행기가 곧 멈춥니다')}</div>` : ''}
+  </div>`;
+}
+
+async function actRunStop(el) {
+  const { task, run } = el.dataset;
+  const t = state.tasks.get(task);
+  const r = (t?.runs || []).find((x) => x.id === run);
+  if (!confirm(L('{run} 실행을 멈출까요? 실행 중인 명령이 종료됩니다 (Slurm 작업은 scancel).', { run: `${run}${r?.name ? ` '${r.name}'` : ''}` }))) return;
+  el.disabled = true;
+  try {
+    await api(`api/tasks/${task}/runs/${run}/stop`, {});
+    toast({ title: L('중지를 요청했습니다'), meta: `${task} ${run}`, tone: 'green' });
+    await poll({ force: true });
+  } catch (e) {
+    toast({ title: L('중지하지 못했습니다'), meta: e.message, tone: 'red' });
+    el.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------------- 인계 메모 (devtrack note — tasks/<T>/notes.md)
@@ -3303,6 +3389,7 @@ async function onAction(el, ev) {
     case 'note-edit': return actNote(el, 'edit');
     case 'note-cancel': return actNote(el, 'cancel');
     case 'note-save': return actNote(el, 'save');
+    case 'run-stop': return actRunStop(el);
     case 'task-complete': return openCompleteTask(el.dataset.task);
     case 'task-complete-go': return actCompleteTask(el);
     case 'task-cancel': return openCancelTask(el.dataset.task);

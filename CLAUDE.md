@@ -36,6 +36,13 @@ README 맨 위 그림 `docs/images/dashboard.png`(영어 화면) · `dashboard.k
   `_inbox_notice` 가 이 대화가 아직 안 본 입력이 있을 때만 `📬 DevTrack 새 입력 …` 한 줄을 **표준 오류로** 붙인다 (`AID=$(…)` 를 깨지 않게,
   어떤 오류도 조용히, `DEVTRACK_NO_NOTICE`). '본 것' 은 AI 단위(`inbox-seen-<AI>.json`, `inbox --wait` 용)와 대화 단위(`<AI>@<대화>`, `_session_seen`,
   14일 지나면 `prune_seen`)를 함께 적는다 — inbox · `inbox --wait` 가 둘 다 적고, 알림은 대화 단위로 본다
+- 오래 걸리는 실행: `devtrack/runs.py` (`devtrack run` · `runs`) — 작업의 `runs` 목록(R-n, `Store.add_run` · `run_update` · `request_run_stop`).
+  기본은 실행기를 떼어 내어(`spawn`, 새 세션 · `run <T> --runner <R>`) `Monitor` 가 명령을 돌리며 `--every` 분마다 진행 기록(kind `run`),
+  `--stall` 분 동안 새 출력(`Growth`) · CPU(`tree_cpu` — ps 의 자손 합) · `--watch` 파일 변화가 없으면 멈춤 의심 문제(다시 움직이면 닫음).
+  끝 · 실패 · 멈춤 · 중지 · 감시 끊김(`check_lost`)은 기록의 `meta.run_event` + `ack: False` → inbox `run` 항목([실행 알림], `inbox --wait` · watch 를 깨움).
+  `devtrack run`(기다림) · `runs --wait` 는 알린 것을 `ack_run_events`. 기록 문구는 `runs.TEXT` 에 작업 언어로 직접 쓴다 (EN_LOG 가 아님).
+  `--pid` · `--slurm`(squeue · sacct · scontrol · scancel) 은 따라가기만 — 작업 취소엔 따라가기만 멈추고 명시적 중지에만 멈춤.
+  cli `_parse` 가 `run` 의 `--` 뒤를 명령으로 떼어 낸다. 웹 `runsCard` · `runsBadge`, 서버 `api/tasks/<T>/runs/<R>/stop`
 - `devtrack/store.py` 데이터 모델과 모든 쓰기 (잠금 + 원자적 쓰기, 저장 시 `index.json` 재생성, `DEVTRACK_PUBLISH_DIR` 동기화 —
   기록 폴더가 곧 공개 폴더의 `data/` 이면(`publish_is_root`, 심볼릭 링크 · 다른 경로 이름도 `same_dir` 로 판단) 복사 · 정리를 건너뜀)
 - `devtrack/cli.py` argparse CLI, `devtrack/server.py` 로컬 서버(정적 + POST API), `devtrack/gitops.py` diff/commit/push, `devtrack/demo.py` 예시 데이터
@@ -200,5 +207,10 @@ bin/devtrack --data demo-data demo --force && bin/devtrack --data demo-data serv
   `DEVTRACK_CHROME=/없음` 으로 SVG 대체 그림 경고, 데모 T-0005 의 pptx 두 개, 웹 `#/artifact/T-0005/<pptx>` 의 미리보기 PDF. 실제 PowerPoint 로도 한 번 열어 본다.
 - 과학 글쓰기 스킬 · inbox 안내 변경 후: 임시 데이터에 "발표 자료 만들어 주세요" · "A0 포스터" · "4장 초안 다시 써 주세요" · "슬라이드 잘 봤어요"(안내 없음)
   메시지와 그런 지시의 새 작업을 넣어 `inbox --all-agents` 의 `→ … 요청` 줄을 본다. 스킬 파일에 외부 주소 · 원작자 인용 지시가 다시 들어오지 않았는지 grep.
+- 실행 감시(`runs.py`) 변경 후: 임시 데이터에서 `DEVTRACK_RUN_POLL=0.2` 로 줄이고 `--every 0.05 --stall 0.1` 같은 짧은 값으로
+  성공(`--progress`) · 실패 · 출력 없이 쉬는 명령(멈춤 의심 → 다시 움직임 → 문제 닫힘, `runs --wait` exit 4 → 0) · `--no-wait` + `inbox --wait` 깨어남 ·
+  `runs --stop` · 사용자 취소(명령 종료, 알림 없음) · 실행기 `kill -9` 뒤 `runs`(감시 끊김) · `--pid` · `--fg --watch` · 영어 작업 문구,
+  가짜 `squeue` · `sacct` · `scontrol` · `scancel` 을 PATH 앞에 두고 `--slurm`(대기열 → RUNNING → 멈춤 의심 → COMPLETED, 중지 → scancel),
+  `serve` 의 `api/tasks/<T>/runs/<R>/stop` 을 본다. 웹은 데모 T-0006(실행 중) · T-0003(실패) · T-0008(끝남)의 **실행** 칸 (390px · 다크 · 정적)
 - 기다리는 AI 표시 변경 후: 데모 데이터에 담당별 대기 작업을 만들고 `inbox --wait` · `watch --agent Codex -- ./fake.sh` 를
   백그라운드로 켠 채 `api/agents` 와 대기 작업 화면(기다리는 중 / 없음 / 이미 확인함)을 보고, 끈 뒤 다음 폴링에 바뀌는지 본다.

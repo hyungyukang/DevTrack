@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-from . import DevTrackError, __version__, access, gitops, lang as _lang, mailbox, models
+from . import DevTrackError, __version__, access, gitops, lang as _lang, mailbox, models, runs
 from .store import (
     APPROVAL_KINDS, DOC_KINDS, DOC_VERDICT_LABEL, LOG_KINDS, PRIORITIES, SEVERITIES, STATUSES, TASK_TYPES, TYPE_SKILLS, USER,
     REVIEW_ROUNDS_DEFAULT, REVIEW_ROUNDS_MAX, Store, agent_key, is_unassigned, normalize_item_id, normalize_task_id,
@@ -400,6 +400,103 @@ def cmd_issue(store, args):
 def cmd_resolve(store, args):
     i = store.resolve_issue(args.task, args.issue, note=args.message, author=args.author)
     _out(args, i, "{} 해결됨".format(i["id"]))
+
+
+# ---------------------------------------------------------------------------- 오래 걸리는 실행 (runs.py)
+def cmd_run(store, args):
+    if args.runner:  # 떼어 낸 실행기 (devtrack run 이 띄움)
+        return runs.monitor(store, args.task, args.runner)
+    command = list(args.command or [])
+    if command and command[0] == "--":
+        command = command[1:]
+    info = runs.prepare(command=command, pid=args.pid, job=args.slurm, name=args.name, every=args.every,
+                        stall=args.stall, progress=args.progress, log=args.log, watch=args.watch, cwd=args.cwd)
+    run, lang = store.add_run(args.task, info, author=args.author)
+    tid = store.load(args.task)["id"]
+    store.run_update(tid, run["id"], log={"message": runs.start_message(run, lang == "en"), "kind": "run",
+                                         "author": args.author,
+                                         "detail": "cwd: {}{}".format(run["cwd"], "\nlog: {}".format(run["log_file"])
+                                                                      if run.get("log_file") else "")})
+    rid = run["id"]
+    if args.fg:
+        rc = runs.monitor(store, tid, rid)
+        store.ack_run_events(tid, rid)
+        for line in runs.summary_lines(tid, runs.find_run(store.load(tid), rid)):
+            print(line)
+        return rc
+    run = runs.spawn(store, tid, rid)
+    how = "{}분마다 확인 · {}분 동안 움직임이 없으면 멈춤 의심".format(_num(args.every or runs.EVERY_DEFAULT),
+                                                       _num(args.stall or runs.STALL_DEFAULT))
+    if args.no_wait or args.json:
+        _info("{} {} 시작 — 백그라운드에서 실행 · {}. 끝나거나 멈추면 [실행 알림] 이 inbox 로 옵니다 "
+              "(기다리기: devtrack runs {} {} --wait)".format(tid, runs.label(run), how, tid, rid))
+        _out(args, run, rid)
+        return 0
+    _info("{} {} 시작 — 백그라운드에서 실행 · {}. 끝나거나 멈춤 의심이면 이 명령이 끝납니다 "
+          "(이 명령을 멈춰도 실행은 계속 — 중지는 devtrack runs {} {} --stop)".format(tid, runs.label(run), how, tid, rid))
+    return runs.wait(store, tid, rid, timeout=(args.timeout or 0) * 60 or None)
+
+
+def _num(x):
+    return int(x) if float(x) == int(x) else x
+
+
+def cmd_runs(store, args):
+    if args.run and not args.task:
+        raise DevTrackError("실행 ID 는 작업 ID 와 함께: devtrack runs <작업> <실행>")
+    runs.check_lost(store, args.task)
+    if args.run:
+        tid = store.load(args.task)["id"]
+        rid = runs.normalize_run_id(args.run)
+        if args.stop:
+            return runs.stop(store, tid, rid, author=args.author)
+        if args.wait:
+            return runs.wait(store, tid, rid, timeout=(args.timeout or 0) * 60 or None)
+        run = runs.find_run(store.load(tid), rid)
+        if args.log is not None:
+            if not run.get("log_file") or not os.path.exists(run["log_file"]):
+                raise DevTrackError("{} 의 출력 파일이 없습니다{}".format(
+                    rid, " ({})".format(run["log_file"]) if run.get("log_file") else ""))
+            lines, _ = runs.read_tail(run["log_file"], n=max(1, args.log), max_bytes=max(65536, args.log * 400))
+            print("{} — 마지막 {}줄:".format(run["log_file"], len(lines)))
+            for line in lines:
+                print(line)
+            return 0
+        if args.json:
+            _out(args, run)
+            return 0
+        for line in runs.summary_lines(tid, run):
+            print(line)
+        return 0
+    if args.stop or args.wait or args.log is not None:
+        raise DevTrackError("--stop · --wait · --log 는 실행을 정해서: devtrack runs <작업> <실행> --stop")
+    tasks = [store.load(args.task)] if args.task else store.all_tasks()
+    rows = []
+    for t in tasks:
+        for r in t.get("runs") or []:
+            if args.task or args.all or r.get("status") in runs.ACTIVE:
+                rows.append((t["id"], r))
+    rows.sort(key=lambda x: x[1].get("started_at") or "", reverse=True)
+    if not args.task and args.all:
+        rows = rows[:30]
+    if args.json:
+        _out(args, [dict(r, task_id=tid) for tid, r in rows])
+        return 0
+    if not rows:
+        print("실행 중인 실행이 없습니다{}".format("" if args.task or args.all else " (끝난 것까지: devtrack runs --all)"))
+        return 0
+    for tid, r in rows:
+        bits = [runs.RUN_STATES.get(r.get("status"), r.get("status"))]
+        if r.get("status") in runs.ACTIVE:
+            bits.append("{}째".format(runs.fmt_dur(runs.run_age(r))))
+        elif r.get("duration") is not None:
+            bits.append(runs.fmt_dur(r["duration"]))
+        if r.get("exit_code") is not None:
+            bits.append("종료 코드 {}".format(r["exit_code"]))
+        if r.get("progress") is not None and r.get("status") in runs.ACTIVE:
+            bits.append("진행 {}%".format(int(r["progress"])))
+        print("{} {} — {}  ({})".format(tid, runs.label(r), " · ".join(bits), runs.short(r.get("command"), 60)))
+    return 0
 
 
 def cmd_artifact(store, args, category=None):
@@ -947,6 +1044,16 @@ def _format_inbox(items):
             out.append("[AI 메시지] {} {} ({} 이(가) 보냄): {}".format(it["task_id"], it["id"], it.get("sender") or "AI",
                                                                     lines[0]))
             out.extend(_indent(x) for x in lines[1:])
+        elif it["type"] == "run":
+            lines = it["message"].splitlines() or [""]
+            out.append("[실행 알림] {} {}".format(it["task_id"], lines[0]))
+            rid = it.get("run") or "<실행>"
+            if it.get("event") == "stalled":
+                out.append(_indent("→ 실행은 계속되고 있습니다. 로그에서 막힌 곳을 찾으세요: devtrack runs {t} {r} --log 80 · "
+                                   "멈추기: devtrack runs {t} {r} --stop · 계속 기다리기: devtrack runs {t} {r} --wait"
+                                   .format(t=it["task_id"], r=rid)))
+            else:
+                out.append(_indent("→ 결과 · 마지막 출력: devtrack runs {} {}".format(it["task_id"], rid)))
         elif it["type"] == "cancelled":
             out.append("[취소] {task_id} {title} — 사용자가 작업을 취소했습니다. 이 작업은 중단하세요.".format(**it))
             if it.get("reason"):
@@ -1249,8 +1356,9 @@ def cmd_inbox(store, args):
 # ---------------------------------------------------------------------------- 새 입력 알림 줄 (토큰 절약)
 # 단계마다 devtrack inbox 를 따로 부르면 그때마다 AI 가 대화 전체를 다시 읽는다 (T-0085 측정: 작업 대화 비용의 12–18%).
 # 대신 작업 중에 쓰는 명령의 끝에, 이 대화가 아직 보지 않은 입력이 있을 때만 한 줄을 붙인다 → 그 줄이 보이면 inbox.
-NOTICE_CMDS = ("new", "show", "note", "list", "send", "withdraw", "paper", "doc", "rules")
-INBOX_TYPE_WORDS = (("new_task", "새 작업"), ("comment", "메시지"), ("agent_message", "AI 메시지"), ("decision", "결정"),
+NOTICE_CMDS = ("new", "show", "note", "list", "send", "withdraw", "paper", "doc", "rules", "runs")
+INBOX_TYPE_WORDS = (("new_task", "새 작업"), ("comment", "메시지"), ("agent_message", "AI 메시지"), ("run", "실행 알림"),
+                    ("decision", "결정"),
                     ("cancelled", "취소"), ("completed", "완료 처리"), ("deleted", "삭제"))
 
 
@@ -1301,6 +1409,7 @@ RULE_TOPICS = [
     ("agents", "여러 AI 함께 쓰기", "담당 AI · 모델 지정 · devtrack watch"),
     ("review-loop", "AI 끼리 리뷰 반복", "코드 리뷰 반복 · 논문 심사 반복 · AI 메시지"),
     ("decisions", "사용자 결정이 도착하는 방법", "결정 받기 · 작업 도중 취소 · 삭제 (hook)"),
+    ("runs", "오래 걸리는 실행", "devtrack run — 백그라운드 실행 · 중간 확인 · 멈춤 의심 · Slurm"),
     ("claude-md", "에 넣을 내용", "CLAUDE.md · AGENTS.md 에 넣을 문구"),
 ]
 
@@ -1356,7 +1465,7 @@ def cmd_rules(store, args):
 # ---------------------------------------------------------------------------- 취소 · 삭제를 일하는 중인 AI 에 알리기
 # 작업에 기록하는 명령 — 실행한 AI 세션을 그 작업에 적어 두고, 사용자가 취소 · 삭제한 작업이면 거절한다
 TASK_WORK_CMDS = ("start", "step", "status", "link", "log", "plan", "check", "issue", "resolve", "artifact",
-                  "review", "latex", "request", "apply", "done", "review-request", "review-done")
+                  "review", "latex", "request", "apply", "done", "review-request", "review-done", "run")
 # 훅이 막지 않는 명령: devtrack 과 출력을 다듬는 정도만 (확인 기록 · 상태 보기는 할 수 있게)
 HOOK_SAFE_CMDS = ("devtrack", "echo", "printf", "true", "cd", "head", "tail", "grep", "cat")
 _SHELL_SEPARATORS = (";", "&&", "||", "|", "|&", "&", ";;")
@@ -2280,6 +2389,11 @@ def cmd_show(store, args):
     if t.get("current_step"):
         print("  현재 단계: " + t["current_step"])
     _print_note(store, t)
+    act = [r for r in t.get("runs") or [] if r.get("status") in runs.ACTIVE]
+    if act:  # 오래 걸리는 실행 (devtrack run)
+        print("  실행 중: " + " · ".join("{} {} {}째".format(runs.label(r), runs.RUN_STATES.get(r["status"]),
+                                                          runs.fmt_dur(runs.run_age(r))) for r in act)
+              + " (devtrack runs {})".format(t["id"]))
     if t.get("plan"):
         print("  계획:")
         for i, p in enumerate(t["plan"]):
@@ -2692,6 +2806,48 @@ def build_parser():
     sp.add_argument("issue", help="문제 ID (예: I-1)")
     sp.add_argument("-m", "--message", help="해결 방법")
 
+    sp = add("run", cmd_run, "오래 걸리는 명령을 백그라운드로 실행하며 진행을 확인해 기록 — 끝나거나 멈춘 듯하면 알림",
+             epilog="예: devtrack run T-0012 -n \"빌드\" -- make -j8   ·   devtrack run T-0012 --every 20 -- "
+                    "\"python train.py --epochs 50\"   ·   devtrack run T-0012 --slurm 123456   ·   "
+                    "devtrack run T-0012 --pid 4321 --log run.log")
+    sp.add_argument("task")
+    sp.add_argument("-n", "--name", help="실행 이름 (기본: 명령)")
+    sp.add_argument("--every", type=float, metavar="MIN",
+                    help="진행 확인 간격 (분, 기본 {:g}) — 그때마다 진행 기록에 한 줄".format(runs.EVERY_DEFAULT))
+    sp.add_argument("--stall", type=float, metavar="MIN",
+                    help="이 시간(분, 기본 {:g}) 동안 새 출력도 CPU 사용도 파일 변화도 없으면 '멈춤 의심' 문제를 열고 알림"
+                    .format(runs.STALL_DEFAULT))
+    sp.add_argument("--progress", metavar="REGEX",
+                    help="출력에서 진행률 찾기 — 묶음 하나면 %% (예: '(\\d+)%%'), 둘이면 앞/뒤 (예: 'step (\\d+)/(\\d+)') → 남은 시간 어림")
+    sp.add_argument("--watch", action="append", metavar="PATH",
+                    help="이 파일 · 폴더의 변화도 진행으로 봄 (결과를 파일로 쓰는 시뮬레이션 등, 여러 번 가능)")
+    sp.add_argument("--log", metavar="FILE",
+                    help="출력 파일 — 명령: 출력을 여기에 씀 (기본: 기록 폴더의 .agent/runs/<작업>/<실행>.log), "
+                         "--pid · --slurm: 따라갈 출력 파일")
+    sp.add_argument("--pid", type=int, help="이미 실행 중인 프로세스를 따라감 (이 컴퓨터)")
+    sp.add_argument("--slurm", metavar="JOBID", help="Slurm 작업을 따라감 (squeue · sacct, 출력 파일은 scontrol 의 StdOut)")
+    sp.add_argument("--cwd", metavar="DIR", help="명령을 실행할 폴더 (기본: 현재 폴더)")
+    sp.add_argument("--no-wait", action="store_true",
+                    help="시작만 하고 바로 끝냄 (실행 ID 출력) — 대기 모드 · 실행기(watch)는 [실행 알림] 으로 깨어남")
+    sp.add_argument("--fg", action="store_true",
+                    help="떼어 내지 않고 이 프로세스에서 실행 · 감시 (Slurm 배치 스크립트 안 등)")
+    sp.add_argument("--timeout", type=float, metavar="MIN", help="기다리는 시간 상한 (분) — 넘으면 기다리기만 그만 (실행은 계속, exit 3)")
+    sp.add_argument("--runner", metavar="RID", help=argparse.SUPPRESS)
+    sp.add_argument("command", nargs="*", metavar="-- 명령",
+                    help="실행할 명령 (옵션 뒤에 -- 를 두고) — 한 덩어리로 주면 셸로 실행 (파이프 · && · 리다이렉트)")
+
+    sp = add("runs", cmd_runs, "실행(devtrack run) 목록 · 상태 · 마지막 출력 · 기다리기 · 중지",
+             epilog="예: devtrack runs   ·   devtrack runs T-0012   ·   devtrack runs T-0012 R-1 --log 80   ·   "
+                    "devtrack runs T-0012 R-1 --wait   ·   devtrack runs T-0012 R-1 --stop")
+    sp.add_argument("task", nargs="?", help="작업 ID (없으면 모든 작업의 실행 중인 것)")
+    sp.add_argument("run", nargs="?", help="실행 ID (예: R-1)")
+    sp.add_argument("--wait", action="store_true",
+                    help="끝나거나 새로 멈춤 의심이 될 때까지 기다림 (exit 0 끝남 · 1 실패/중지 · 4 멈춤 의심 · 3 시간 초과)")
+    sp.add_argument("--stop", action="store_true", help="멈추기 (명령은 종료, --pid 는 SIGTERM, --slurm 은 scancel)")
+    sp.add_argument("--log", nargs="?", const=40, type=int, metavar="N", help="출력 파일의 마지막 N줄 (기본 40)")
+    sp.add_argument("--all", action="store_true", help="끝난 실행도 (최근 30개)")
+    sp.add_argument("--timeout", type=float, metavar="MIN", help="--wait 의 시간 상한 (분)")
+
     sp = add("artifact", cmd_artifact, "결과물 추가 (결과물 ID 출력)")
     sp.add_argument("task")
     sp.add_argument("path", nargs="?", help="결과물 파일")
@@ -2956,9 +3112,24 @@ def build_parser():
     return p
 
 
+def _parse(parser, argv):
+    """devtrack run 은 '--' 뒤를 그대로 실행할 명령으로 (argparse 는 앞의 -n 같은 옵션까지 명령으로 가져가거나 거절한다)."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--" in argv and "run" in argv[:argv.index("--")]:
+        i = argv.index("--")
+        try:
+            head = parser.parse_args(argv[:i])
+        except SystemExit:
+            head = None
+        if head is not None and getattr(head, "cmd", None) == "run":
+            head.command = list(head.command or []) + argv[i + 1:]
+            return head
+    return parser.parse_args(argv)
+
+
 def main(argv=None):
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parse(parser, argv)
     if not getattr(args, "func", None):
         parser.print_help()
         return 1
@@ -2968,10 +3139,11 @@ def main(argv=None):
     publish_dir = publish_location(args.data)[0] if args.cmd not in ("publish", "demo") else None
     store = Store(args.data, publish_dir=publish_dir)
     try:
-        if args.cmd in TASK_WORK_CMDS:
+        runner = getattr(args, "runner", None)  # 떼어 낸 실행기 (devtrack run) — AI 의 명령이 아니다
+        if args.cmd in TASK_WORK_CMDS and not runner:
             _guard_task(store, args)
         rc = args.func(store, args)
-        if args.cmd in TASK_WORK_CMDS or args.cmd in NOTICE_CMDS:
+        if (args.cmd in TASK_WORK_CMDS or args.cmd in NOTICE_CMDS) and not runner:
             _inbox_notice(store, args)
         return rc or 0
     except DevTrackError as e:
